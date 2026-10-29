@@ -147,7 +147,7 @@ Les tirages s'appellent des arrivages : chacun livre une espèce, son groupe com
 
 ### Les doublons ne sont jamais perdus
 
-1. Du premier au cinquième doublon : l'habitat gagne une étoile (de 1 à 5), avec un nouvel élément d'enrichissement et un nouveau comportement débloqué.
+1. L'arrivage donne la première étoile. Du premier au quatrième doublon, l'habitat gagne une étoile (de 2 à 5), avec un nouvel élément d'enrichissement et un nouveau comportement débloqué.
 2. En parallèle, le groupe grandit d'un individu jusqu'à sa taille maximale.
 3. Au-delà : chaque doublon donne 50 médailles de soin.
 
