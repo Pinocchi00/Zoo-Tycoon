@@ -20,6 +20,7 @@ import { logger } from '@/shared';
 import { deserialize } from '@/save';
 import { advance, createEventQueue, drain } from '@/sim';
 import type { FpsCounter } from './dev-fps';
+import { entranceFocus, terrainGrid } from './entrance-focus';
 import { createGameLoop, type FrameScheduler } from './game-loop';
 import { createAutosaver, loadOrCreatePark } from './park-save';
 
@@ -109,7 +110,12 @@ async function main(): Promise<void> {
   const known = forced ?? (await readStoredQuality(store));
   let sampler: FrameSampler | null = known === null ? createFrameSampler() : null;
 
-  const view = createParkView(canvas, known ?? BENCHMARK_LEVEL);
+  const view = createParkView(
+    canvas,
+    known ?? BENCHMARK_LEVEL,
+    terrainGrid(data.terrain),
+    entranceFocus(data.terrain),
+  );
   const resize = (): void => {
     view.resize(root.clientWidth, root.clientHeight);
   };

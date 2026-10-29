@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { GAME_CONTENT } from '@/data';
+import { en } from '@/i18n/en';
 import { fr } from '@/i18n/fr';
+import { BUILD_ERRORS } from '@/sim';
 
 /** Every string stored under a `…Key` property, wherever it sits in the content. */
 function collectTextKeys(value: unknown, found: string[] = []): string[] {
@@ -27,5 +29,12 @@ describe('game data texts', () => {
     expect(keys.length).toBeGreaterThan(0);
     const known = new Set(Object.keys(fr));
     expect(keys.filter((key) => !known.has(key))).toEqual([]);
+  });
+
+  it('has a text for every reason a construction can be refused', () => {
+    const missing = BUILD_ERRORS.map((code) => `build.error.${code}`).filter(
+      (key) => !(key in fr) || !(key in en),
+    );
+    expect(missing).toEqual([]);
   });
 });

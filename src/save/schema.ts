@@ -1,8 +1,17 @@
 import { z } from 'zod';
 import { RARITIES } from '../data/schemas/common';
 import { MAX_HABITAT_STARS } from '../data/schemas/species';
-import { animalId, bannerId, enclosureId, speciesId, type IdError, type Result } from '../shared';
-import { ARRIVAL_SOURCES, STATE_VERSION, STEP_MS } from '../sim';
+import {
+  animalId,
+  bannerId,
+  buildingId,
+  enclosureId,
+  itemId,
+  speciesId,
+  type IdError,
+  type Result,
+} from '../shared';
+import { ARRIVAL_SOURCES, QUARTER_TURNS, STATE_VERSION, STEP_MS } from '../sim';
 
 const MAX_UINT32 = 0xffff_ffff;
 
@@ -23,6 +32,55 @@ function brandedId<T>(brand: (raw: string) => Result<T, IdError>): z.ZodType<T, 
 
 const speciesIdSchema = brandedId(speciesId);
 const bannerIdSchema = brandedId(bannerId);
+const itemIdSchema = brandedId(itemId);
+
+function hasDistinct<T>(values: readonly T[], key: (value: T) => string | number): boolean {
+  return new Set(values.map(key)).size === values.length;
+}
+
+const cellCoordinate = z.int().min(0);
+
+const enclosuresSchema = z
+  .array(
+    z.strictObject({
+      id: brandedId(enclosureId),
+      outline: z.array(z.strictObject({ x: cellCoordinate, y: cellCoordinate })).min(3),
+      speciesId: speciesIdSchema.nullable(),
+      viewScore: amount,
+    }),
+  )
+  .refine((enclosures) => hasDistinct(enclosures, (enclosure) => enclosure.id), {
+    message: 'duplicateEnclosure',
+  })
+  .refine(
+    (enclosures) => {
+      const housed = enclosures.flatMap((enclosure) =>
+        enclosure.speciesId === null ? [] : [enclosure.speciesId],
+      );
+      return hasDistinct(housed, (id) => id);
+    },
+    { message: 'groupInTwoEnclosures' },
+  );
+
+const pathsSchema = z
+  .array(z.strictObject({ column: cellCoordinate, row: cellCoordinate, surface: itemIdSchema }))
+  .refine((paths) => hasDistinct(paths, (tile) => `${String(tile.column)},${String(tile.row)}`), {
+    message: 'duplicatePathCell',
+  });
+
+const buildingsSchema = z
+  .array(
+    z.strictObject({
+      id: brandedId(buildingId),
+      itemId: itemIdSchema,
+      column: cellCoordinate,
+      row: cellCoordinate,
+      quarterTurns: z.literal(QUARTER_TURNS),
+    }),
+  )
+  .refine((buildings) => hasDistinct(buildings, (building) => building.id), {
+    message: 'duplicateBuilding',
+  });
 
 const gachaSchema = z.strictObject({
   arrivalsSince: z.strictObject({ rare: amount, veryRare: amount, iconic: amount }),
@@ -70,7 +128,10 @@ const gachaSchema = z.strictObject({
     }),
 });
 
-/** Full shape of the current GameState. Strict: an unknown field means the file is not ours. */
+/**
+ * Full shape of the saved GameState (everything but the session). Strict: an unknown field means
+ * the file is not ours. Overlaps are not checked here: only the simulation can build the park.
+ */
 export const gameStateSchema = z.strictObject({
   version: z.literal(STATE_VERSION),
   clock: z.strictObject({
@@ -89,9 +150,12 @@ export const gameStateSchema = z.strictObject({
     decorTickets: amount,
     shavings: amount,
   }),
-  enclosures: z.array(z.strictObject({ id: brandedId(enclosureId) })),
+  enclosures: enclosuresSchema,
   animals: z.array(z.strictObject({ id: brandedId(animalId), speciesId: speciesIdSchema })),
   gacha: gachaSchema,
+  paths: pathsSchema,
+  buildings: buildingsSchema,
+  nextIds: z.strictObject({ enclosure: z.int().min(1), building: z.int().min(1) }),
 });
 
 /** Dotted path of the first issue, e.g. `currencies.coins`, so that a bad save says what is wrong. */

@@ -1,5 +1,5 @@
 import type { Rarity } from '../data/schemas/common';
-import type { BannerId, SpeciesId } from '../shared/brand';
+import type { BannerId, BuildingId, EnclosureId, ItemId, SpeciesId } from '../shared/brand';
 import type { ArrivalSource } from './gacha/gacha-state';
 
 export interface CoinsAddedEvent {
@@ -54,13 +54,97 @@ export interface WelcomeChoiceOfferedEvent {
   readonly options: readonly SpeciesId[];
 }
 
+/** Path cells were paved, resurfaced or taken up (`surface` null). */
+export interface PathTilesChangedEvent {
+  readonly type: 'pathTilesChanged';
+  readonly tiles: readonly {
+    readonly column: number;
+    readonly row: number;
+    readonly surface: ItemId | null;
+  }[];
+}
+
+/** An enclosure appeared: built, or brought back by undo or redo with its group. */
+export interface EnclosurePlacedEvent {
+  readonly type: 'enclosurePlaced';
+  readonly enclosureId: EnclosureId;
+  readonly speciesId: SpeciesId | null;
+}
+
+/** Its outline moved or turned; the group inside followed. */
+export interface EnclosureMovedEvent {
+  readonly type: 'enclosureMoved';
+  readonly enclosureId: EnclosureId;
+}
+
+/** The group living in an existing enclosure changed (`speciesId` null: it is empty now). */
+export interface EnclosureGroupChangedEvent {
+  readonly type: 'enclosureGroupChanged';
+  readonly enclosureId: EnclosureId;
+  readonly speciesId: SpeciesId | null;
+}
+
+export interface EnclosureRemovedEvent {
+  readonly type: 'enclosureRemoved';
+  readonly enclosureId: EnclosureId;
+  /** The group that went back to the refuge, if any. */
+  readonly returnedSpeciesId: SpeciesId | null;
+}
+
+export interface BuildingPlacedEvent {
+  readonly type: 'buildingPlaced';
+  readonly buildingId: BuildingId;
+  readonly itemId: ItemId;
+}
+
+export interface BuildingMovedEvent {
+  readonly type: 'buildingMoved';
+  readonly buildingId: BuildingId;
+}
+
+export interface BuildingRemovedEvent {
+  readonly type: 'buildingRemoved';
+  readonly buildingId: BuildingId;
+}
+
+/** Coins paid (negative delta) or given back (positive) by construction, undo or redo. */
+export interface BuildCoinsChangedEvent {
+  readonly type: 'buildCoinsChanged';
+  readonly delta: number;
+  readonly total: number;
+}
+
+export interface ViewScoreChangedEvent {
+  readonly type: 'viewScoreChanged';
+  readonly enclosureId: EnclosureId;
+  readonly viewScore: number;
+}
+
+/** Sizes of the undo and redo stacks, for the buttons of the build screen. */
+export interface BuildHistoryChangedEvent {
+  readonly type: 'buildHistoryChanged';
+  readonly undoCount: number;
+  readonly redoCount: number;
+}
+
 /** What happened in the simulation; render, audio and ui react to these instead of diffing the state. */
 export type GameEvent =
   | CoinsAddedEvent
   | SaveRecoveredEvent
   | ArrivalsStartedEvent
   | ArrivalOpenedEvent
-  | WelcomeChoiceOfferedEvent;
+  | WelcomeChoiceOfferedEvent
+  | PathTilesChangedEvent
+  | EnclosurePlacedEvent
+  | EnclosureMovedEvent
+  | EnclosureGroupChangedEvent
+  | EnclosureRemovedEvent
+  | BuildingPlacedEvent
+  | BuildingMovedEvent
+  | BuildingRemovedEvent
+  | BuildCoinsChangedEvent
+  | ViewScoreChangedEvent
+  | BuildHistoryChangedEvent;
 
 /** Events waiting for the reader. Kept outside GameState so that they never end up in a save. */
 export interface EventQueue {

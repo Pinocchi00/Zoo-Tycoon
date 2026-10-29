@@ -5,6 +5,7 @@ import {
   bannerId,
   behaviorId,
   biomeId,
+  buildingId,
   enclosureId,
   itemId,
   speciesId,
@@ -21,6 +22,7 @@ const CONSTRUCTORS = [
   ['bannerId', bannerId],
   ['behaviorId', behaviorId],
   ['archetypeId', archetypeId],
+  ['buildingId', buildingId],
 ] as const;
 
 describe('typed identifiers', () => {

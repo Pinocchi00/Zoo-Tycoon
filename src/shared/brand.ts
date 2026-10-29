@@ -11,6 +11,8 @@ export type Brand<T, B extends string> = T & { readonly [brandTag]: B };
 export type SpeciesId = Brand<string, 'SpeciesId'>;
 export type AnimalId = Brand<string, 'AnimalId'>;
 export type EnclosureId = Brand<string, 'EnclosureId'>;
+/** A building placed in the park, unlike `ItemId`, which names its kind in the data. */
+export type BuildingId = Brand<string, 'BuildingId'>;
 export type ItemId = Brand<string, 'ItemId'>;
 export type BiomeId = Brand<string, 'BiomeId'>;
 export type BannerId = Brand<string, 'BannerId'>;
@@ -48,6 +50,10 @@ export function animalId(raw: string): Result<AnimalId, IdError> {
 
 export function enclosureId(raw: string): Result<EnclosureId, IdError> {
   return brandId<'EnclosureId'>(raw);
+}
+
+export function buildingId(raw: string): Result<BuildingId, IdError> {
+  return brandId<'BuildingId'>(raw);
 }
 
 export function itemId(raw: string): Result<ItemId, IdError> {

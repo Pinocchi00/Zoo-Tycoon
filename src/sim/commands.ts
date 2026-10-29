@@ -10,6 +10,9 @@ import {
   type ChooseWelcomeSpeciesCommand,
   type PerformArrivalCommand,
 } from './gacha/arrivals';
+import { applyBuildCommand, type BuildCommand } from './park/build-commands';
+import type { BuildError } from './park/build-errors';
+import { refreshViewScores } from './park/view-score';
 import type { GameState } from './state';
 
 /** Development-only cheat that proves the command pipeline; app never exposes it in production. */
@@ -20,9 +23,26 @@ export interface AddCoinsCommand {
 
 /** Everything the player can ask for. The simulation validates, then applies. */
 export type Command =
-  AddCoinsCommand | PerformArrivalCommand | ChooseWelcomeSpeciesCommand | AdoptFromCatalogCommand;
+  | AddCoinsCommand
+  | PerformArrivalCommand
+  | ChooseWelcomeSpeciesCommand
+  | AdoptFromCatalogCommand
+  | BuildCommand;
 
-export type CommandError = 'invalidAmount' | 'currencyOverflow' | ArrivalError;
+export type CommandError = 'invalidAmount' | 'currencyOverflow' | ArrivalError | BuildError;
+
+/** New stars can unlock a viewpoint element, which raises the enclosure's view score. */
+function withViewScores(
+  result: Result<void, ArrivalError>,
+  state: GameState,
+  data: GameData,
+  events: EventQueue,
+): Result<void, ArrivalError> {
+  if (result.ok) {
+    refreshViewScores(state, data, events);
+  }
+  return result;
+}
 
 function addCoins(
   state: GameState,
@@ -52,10 +72,27 @@ export function applyCommand(
     case 'addCoins':
       return addCoins(state, command, events);
     case 'performArrival':
-      return performArrival(state, command, data, events);
+      return withViewScores(performArrival(state, command, data, events), state, data, events);
     case 'chooseWelcomeSpecies':
-      return chooseWelcomeSpecies(state, command, data, events);
+      return withViewScores(
+        chooseWelcomeSpecies(state, command, data, events),
+        state,
+        data,
+        events,
+      );
     case 'adoptFromCatalog':
-      return adoptFromCatalog(state, command, data, events);
+      return withViewScores(adoptFromCatalog(state, command, data, events), state, data, events);
+    case 'placePath':
+    case 'removePath':
+    case 'placeEnclosure':
+    case 'moveEnclosure':
+    case 'removeEnclosure':
+    case 'installGroup':
+    case 'placeBuilding':
+    case 'moveBuilding':
+    case 'removeBuilding':
+    case 'undoBuild':
+    case 'redoBuild':
+      return applyBuildCommand(state, command, data, events);
   }
 }

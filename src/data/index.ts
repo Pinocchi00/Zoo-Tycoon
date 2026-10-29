@@ -5,6 +5,7 @@ import type { Result } from '../shared/result';
 
 export { GAME_CONTENT } from './content';
 export * from './load';
+export * from './schemas/build';
 export * from './schemas/common';
 export * from './schemas/gacha';
 export * from './schemas/park';

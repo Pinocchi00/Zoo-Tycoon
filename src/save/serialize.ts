@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { err, ok, type Result } from '../shared';
-import { STATE_VERSION, type GameState } from '../sim';
+import { fromSavedState, STATE_VERSION, toSavedState, type GameState } from '../sim';
 import { checksum } from './checksum';
 import type { SaveError } from './errors';
 import { MIGRATIONS, runMigrations } from './migrations';
@@ -33,12 +33,15 @@ export interface LoadedSave {
   readonly writtenAtMs: number;
 }
 
-/** Turns the game into save text. `writtenAtMs` comes from outside: the simulation has no clock. */
+/**
+ * Turns the game into save text, without the session (undo history).
+ * `writtenAtMs` comes from outside: the simulation has no clock.
+ */
 export function serialize(state: GameState, writtenAtMs: number): string {
   if (!Number.isSafeInteger(writtenAtMs) || writtenAtMs < 0) {
     throw new RangeError(`writtenAtMs must be a non-negative integer, got ${String(writtenAtMs)}.`);
   }
-  const payload = JSON.stringify(state);
+  const payload = JSON.stringify(toSavedState(state));
   return JSON.stringify({
     format: SAVE_FORMAT,
     formatVersion: SAVE_FORMAT_VERSION,
@@ -91,7 +94,7 @@ export function readSave(text: string): Result<LoadedSave, SaveError> {
   if (!state.success) {
     return err({ kind: 'invalidState', path: firstIssuePath(state.error) });
   }
-  return ok({ state: state.data, writtenAtMs });
+  return ok({ state: fromSavedState(state.data), writtenAtMs });
 }
 
 /** Reads save text back into the game state. */

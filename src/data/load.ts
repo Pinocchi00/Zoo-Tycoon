@@ -1,6 +1,14 @@
 import type { z } from 'zod';
 import { err, ok, type Result } from '../shared/result';
 import type { ArchetypeId, BannerId, BiomeId, ItemId, SpeciesId } from '../shared/brand';
+import {
+  buildRulesSchema,
+  pathSurfaceSchema,
+  terrainSchema,
+  type BuildRules,
+  type PathSurface,
+  type Terrain,
+} from './schemas/build';
 import { gachaRulesSchema, bannerSchema, type Banner, type GachaRules } from './schemas/gacha';
 import {
   buildingSchema,
@@ -26,6 +34,9 @@ import {
 export interface RawGameData {
   readonly gachaRules: unknown;
   readonly enclosureSizes: unknown;
+  readonly terrain: unknown;
+  readonly buildRules: unknown;
+  readonly pathSurfaces: readonly unknown[];
   readonly banners: readonly unknown[];
   readonly biomes: readonly unknown[];
   readonly habitatElements: readonly unknown[];
@@ -39,6 +50,9 @@ export interface RawGameData {
 export interface GameData {
   readonly gachaRules: GachaRules;
   readonly enclosureSizes: EnclosureSizes;
+  readonly terrain: Terrain;
+  readonly buildRules: BuildRules;
+  readonly pathSurfaces: ReadonlyMap<ItemId, PathSurface>;
   readonly banners: ReadonlyMap<BannerId, Banner>;
   readonly biomes: ReadonlyMap<BiomeId, Biome>;
   readonly habitatElements: ReadonlyMap<ItemId, HabitatElement>;
@@ -77,6 +91,9 @@ export function loadGameData(raw: RawGameData): Result<GameData, readonly DataEr
     'enclosureSizes',
     errors,
   );
+  const terrain = parseOne(terrainSchema, raw.terrain, 'terrain', errors);
+  const buildRules = parseOne(buildRulesSchema, raw.buildRules, 'buildRules', errors);
+  const pathSurfaces = parseCollection(pathSurfaceSchema, raw.pathSurfaces, 'pathSurfaces', errors);
   const banners = parseCollection(bannerSchema, raw.banners, 'banners', errors);
   const biomes = parseCollection(biomeSchema, raw.biomes, 'biomes', errors);
   const habitatElements = parseCollection(
@@ -96,17 +113,29 @@ export function loadGameData(raw: RawGameData): Result<GameData, readonly DataEr
   );
 
   checkBanners(banners, errors);
-  checkSharedItemIds({ habitatElements, buildings, decor }, errors);
+  checkSharedItemIds({ habitatElements, buildings, decor, pathSurfaces }, errors);
+  if (pathSurfaces.size === 0) {
+    errors.push({ source: 'pathSurfaces', path: '', message: 'at least one path surface' });
+  }
   species.forEach((entry, id) => {
     checkSpeciesReferences(entry, `species (${id})`, biomes, habitatElements, errors);
   });
 
-  if (gachaRules === null || enclosureSizes === null || errors.length > 0) {
+  if (
+    gachaRules === null ||
+    enclosureSizes === null ||
+    terrain === null ||
+    buildRules === null ||
+    errors.length > 0
+  ) {
     return err(errors);
   }
   return ok({
     gachaRules,
     enclosureSizes,
+    terrain,
+    buildRules,
+    pathSurfaces,
     banners,
     biomes,
     habitatElements,
@@ -180,7 +209,7 @@ function checkBanners(banners: ReadonlyMap<BannerId, Banner>, errors: DataError[
   }
 }
 
-/** Habitat elements, buildings and decor share the `ItemId` space: one id, one thing. */
+/** Habitat elements, buildings, decor and path surfaces share the `ItemId` space: one id, one thing. */
 function checkSharedItemIds(
   collections: Readonly<Record<string, ReadonlyMap<ItemId, unknown>>>,
   errors: DataError[],

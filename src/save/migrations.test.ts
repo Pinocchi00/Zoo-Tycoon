@@ -96,3 +96,31 @@ describe('migration from version 1 to 2', () => {
     expect(step?.migrate({ version: 0 })).toEqual(err('notAVersion1State'));
   });
 });
+
+describe('migration from version 2 to 3', () => {
+  const step = MIGRATIONS.find((migration) => migration.from === 2);
+
+  it('adds an empty park and keeps every other field', () => {
+    expect(step?.migrate({ version: 2, coins: 'kept', enclosures: [] })).toEqual(
+      ok({
+        version: 3,
+        coins: 'kept',
+        enclosures: [],
+        paths: [],
+        buildings: [],
+        nextIds: { enclosure: 1, building: 1 },
+      }),
+    );
+  });
+
+  it('refuses data that is not a version 2 state', () => {
+    expect(step?.migrate({ version: 1, enclosures: [] })).toEqual(err('notAVersion2State'));
+    expect(step?.migrate({ version: 2, enclosures: 'none' })).toEqual(err('notAVersion2State'));
+  });
+
+  it('refuses enclosures that version 2 could not hold', () => {
+    expect(step?.migrate({ version: 2, enclosures: [{ id: 'meadow-1' }] })).toEqual(
+      err('unexpectedVersion2Enclosures'),
+    );
+  });
+});
