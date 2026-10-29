@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { GAME_CONTENT } from './content';
 import { banners as gameBanners } from './content/banners';
 import { gachaRules } from './content/gacha-rules';
+import { species as gameSpecies } from './content/species';
 import { capybara } from './content/species/capybara';
 import { SYNTHETIC_GACHA_CONTENT } from './fixtures/synthetic-gacha';
 import { formatDataErrors, loadGameContent, loadGameData, RARITIES, type DataError } from './index';
@@ -55,7 +56,13 @@ describe('game content', () => {
       return;
     }
     const data = result.value;
-    expect([...data.species.keys()]).toEqual(['capybara']);
+    expect([...data.species.keys()]).toEqual([
+      'capybara',
+      'collared-peccary',
+      'lowland-tapir',
+      'giant-otter',
+      'jaguar',
+    ]);
     expect(data.gachaRules.rarityRatesBp.common).toBe(5500);
     expect([...data.banners.values()].map((banner) => banner.kind)).toEqual([
       'permanent',
@@ -65,8 +72,22 @@ describe('game content', () => {
     expect(data.habitatElements.size).toBe(GAME_CONTENT.habitatElements.length);
   });
 
-  it('gives the capybara a max group of its arrival size + 3', () => {
-    expect(capybara.group.maxSize).toBe(capybara.group.arrivalSize + 3);
+  it.each(gameSpecies.map((entry) => [entry.id, entry]))(
+    'gives %s a max group of its arrival size + 3',
+    (_id, entry) => {
+      expect(entry.group.maxSize).toBe(entry.group.arrivalSize + 3);
+    },
+  );
+
+  it('matches the bestiary for rarity and arrival group', () => {
+    const bestiary = gameSpecies.map((entry) => [entry.id, entry.rarity, entry.group.arrivalSize]);
+    expect(bestiary).toEqual([
+      ['capybara', 'common', 4],
+      ['collared-peccary', 'common', 5],
+      ['lowland-tapir', 'uncommon', 2],
+      ['giant-otter', 'rare', 4],
+      ['jaguar', 'veryRare', 2],
+    ]);
   });
 
   it('accepts valid buildings, decor and visitor archetypes', () => {
@@ -135,6 +156,21 @@ describe('invalid species', () => {
       path: 'id',
       message: 'invalidIdCharacters',
     });
+  });
+
+  it('accepts a species whose model is still to come', () => {
+    expect(loadGameData(brokenCapybara({ modelId: null })).ok).toBe(true);
+  });
+
+  it('refuses a missing model id', () => {
+    const withoutModel = Object.fromEntries(
+      Object.entries(capybara).filter(([key]) => key !== 'modelId'),
+    );
+    expectRefused(withSpecies(withoutModel), { path: 'modelId' });
+  });
+
+  it('refuses a malformed model id', () => {
+    expectRefused(brokenCapybara({ modelId: '../capybara' }), { path: 'modelId' });
   });
 
   it('refuses an unknown field', () => {

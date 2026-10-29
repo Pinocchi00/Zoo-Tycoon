@@ -92,7 +92,8 @@ export const speciesSchema = z
       .array(z.strictObject({ id: brandedId(behaviorId), nameKey: textKeySchema }))
       .min(1),
     texts: z.strictObject({ nameKey: textKeySchema, signatureKey: textKeySchema }),
-    modelId: z.string().regex(MODEL_ID_PATTERN),
+    // null until the species' model is generated (task 1.7 fills the tropical ones).
+    modelId: z.string().regex(MODEL_ID_PATTERN).nullable(),
   })
   .superRefine((species, context) => {
     const behaviorIds = species.behaviors.map((behavior) => behavior.id);
