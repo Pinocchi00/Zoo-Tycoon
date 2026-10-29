@@ -29,7 +29,15 @@ const gachaSchema = z.strictObject({
   welcome: z.strictObject({
     arrivalsDone: amount,
     pendingChoice: z
-      .strictObject({ bannerId: bannerIdSchema, options: z.array(speciesIdSchema).min(1) })
+      .strictObject({
+        bannerId: bannerIdSchema,
+        options: z
+          .array(speciesIdSchema)
+          .min(1)
+          .refine((options) => new Set(options).size === options.length, {
+            message: 'duplicateOption',
+          }),
+      })
       .nullable(),
   }),
   collection: z

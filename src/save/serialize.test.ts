@@ -245,6 +245,13 @@ describe('state validation', () => {
     expect(
       pathOf({ ...state, gacha: { ...gacha, welcome: { ...gacha.welcome, pendingChoice } } }),
     ).toEqual({ kind: 'invalidState', path: 'gacha.welcome.pendingChoice.options' });
+    const twice = { bannerId: 'welcome', options: ['jaguar', 'jaguar'] };
+    expect(
+      pathOf({
+        ...state,
+        gacha: { ...gacha, welcome: { ...gacha.welcome, pendingChoice: twice } },
+      }),
+    ).toEqual({ kind: 'invalidState', path: 'gacha.welcome.pendingChoice.options' });
   });
 
   it('refuses a history with a gap or an unknown rarity', () => {
