@@ -14,7 +14,15 @@ describe('species models', () => {
     expect(loaded.ok).toBe(true);
   });
 
-  it.each(species.map((entry) => [entry.id, entry.modelId]))(
+  const withModel = species.flatMap((entry) =>
+    entry.modelId === null ? [] : [{ id: entry.id, modelId: entry.modelId }],
+  );
+
+  it('has at least one species that declares a model', () => {
+    expect(withModel.length).toBeGreaterThan(0);
+  });
+
+  it.each(withModel.map((entry) => [entry.id, entry.modelId]))(
     '%s has its model and its Blender description',
     (_id, modelId) => {
       expect(existsSync(resolve(ROOT, 'assets', 'models', `${modelId}.glb`))).toBe(true);
