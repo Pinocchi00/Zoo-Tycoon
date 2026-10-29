@@ -104,6 +104,40 @@ function borderCells(cells: readonly number[], columns: number): number[] {
 }
 
 /**
+ * Walkway cells from which visitors see the enclosure: within `range` cells (Chebyshev) of a
+ * border cell, with a clear line to it. Sorted, without duplicates.
+ */
+export function viewingCells(
+  occupancy: Occupancy,
+  cells: readonly number[],
+  ownCode: number,
+  range: number,
+): number[] {
+  const { columns, rows } = occupancy;
+  const found = new Set<number>();
+  for (const cell of borderCells(cells, columns)) {
+    const column = cell % columns;
+    const row = (cell - column) / columns;
+    for (let viewerRow = row - range; viewerRow <= row + range; viewerRow += 1) {
+      for (let viewerColumn = column - range; viewerColumn <= column + range; viewerColumn += 1) {
+        if (viewerColumn < 0 || viewerColumn >= columns || viewerRow < 0 || viewerRow >= rows) {
+          continue;
+        }
+        const viewer = viewerRow * columns + viewerColumn;
+        if (
+          !found.has(viewer) &&
+          isWalkable(occupancy.cells[viewer] ?? CELL_FREE) &&
+          isLineClear(occupancy, viewer, cell, ownCode)
+        ) {
+          found.add(viewer);
+        }
+      }
+    }
+  }
+  return [...found].sort((a, b) => a - b);
+}
+
+/**
  * View score of an enclosure (GDD "Qualité de vue"), from 0 to `view.maxScore`:
  * each border cell is worth (R + 1 − d) / R when the closest walkway cell with a clear line to it
  * is d cells away (d ≤ R), 0 when none sees it. The average over the border, in basis points,

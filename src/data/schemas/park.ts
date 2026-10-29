@@ -36,6 +36,11 @@ export const buildingSchema = z.strictObject({
   coinCost: nonNegativeInt,
   requiresPath: z.boolean(),
   serves: needListSchema,
+  /** What one visitor group does there: how long it stays and what it pays. */
+  visitorUse: z.strictObject({
+    seconds: positiveInt,
+    priceCoins: nonNegativeInt,
+  }),
 });
 export type Building = z.output<typeof buildingSchema>;
 export type BuildingInput = z.input<typeof buildingSchema>;
@@ -57,6 +62,9 @@ export const visitorArchetypeSchema = z.strictObject({
     .strictObject({ min: positiveInt, max: positiveInt })
     .refine((size) => size.max >= size.min, { message: 'max must be at least min', path: ['max'] }),
   wants: needListSchema,
+  walkSpeedMmPerSecond: positiveInt,
+  /** Time the group plans to spend in the park. */
+  visitMinutes: positiveInt,
 });
 export type VisitorArchetype = z.output<typeof visitorArchetypeSchema>;
 export type VisitorArchetypeInput = z.input<typeof visitorArchetypeSchema>;

@@ -86,11 +86,34 @@ function migrateV2ToV3(data: unknown): Result<unknown, string> {
   });
 }
 
+const stateV3Schema = z.looseObject({ version: z.literal(3) });
+
+/** Version 4 adds the visitors: nobody in the park yet, no suggestion. */
+function migrateV3ToV4(data: unknown): Result<unknown, string> {
+  const parsed = stateV3Schema.safeParse(data);
+  if (!parsed.success) {
+    return err('notAVersion3State');
+  }
+  return ok({
+    ...parsed.data,
+    version: 4,
+    visitors: {
+      list: [],
+      nextNumber: 1,
+      arrivalProgress: 0,
+      parkSatisfactionBp: null,
+      suggestions: { foodDrink: 0, rest: 0, comfort: 0 },
+      suggestionsHalvedAtMs: 0,
+    },
+  });
+}
+
 /** Every migration ever written, in order. Never edit a published one: add the next. */
 export const MIGRATIONS: readonly Migration[] = [
   { from: 0, migrate: migrateV0ToV1 },
   { from: 1, migrate: migrateV1ToV2 },
   { from: 2, migrate: migrateV2ToV3 },
+  { from: 3, migrate: migrateV3ToV4 },
 ];
 
 /** Checks that the registry holds exactly one step for every version below the target. */

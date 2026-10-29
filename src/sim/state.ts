@@ -9,9 +9,10 @@ import {
   type PathTile,
 } from './park/park-state';
 import { createRng, type RngState } from './rng';
+import { createVisitorsState, type VisitorsState } from './visitors/visitor-state';
 
 /** Bumped whenever the shape of GameState changes; the save layer migrates older versions. */
-export const STATE_VERSION = 3;
+export const STATE_VERSION = 4;
 
 export interface GameClock {
   /** Game time elapsed since the park opened, in whole milliseconds. */
@@ -56,6 +57,8 @@ export interface GameState {
   /** Sorted by id. */
   buildings: BuildingState[];
   nextIds: NextIds;
+  /** Groups in the park, arrivals and the suggestion feed. */
+  visitors: VisitorsState;
   /** Lives only while the game runs: never saved, empty again after loading. */
   session: SessionState;
 }
@@ -84,6 +87,7 @@ export function toSavedState(state: GameState): SavedGameState {
     paths: state.paths,
     buildings: state.buildings,
     nextIds: state.nextIds,
+    visitors: state.visitors,
   };
 }
 
@@ -104,6 +108,7 @@ export function createGameState(seed: number): GameState {
     paths: [],
     buildings: [],
     nextIds: createNextIds(),
+    visitors: createVisitorsState(),
     session: createSessionState(),
   };
 }

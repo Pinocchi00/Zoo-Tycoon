@@ -124,3 +124,28 @@ describe('migration from version 2 to 3', () => {
     );
   });
 });
+
+describe('migration from version 3 to 4', () => {
+  const step = MIGRATIONS.find((migration) => migration.from === 3);
+
+  it('adds an empty crowd and keeps every other field', () => {
+    expect(step?.migrate({ version: 3, coins: 'kept' })).toEqual(
+      ok({
+        version: 4,
+        coins: 'kept',
+        visitors: {
+          list: [],
+          nextNumber: 1,
+          arrivalProgress: 0,
+          parkSatisfactionBp: null,
+          suggestions: { foodDrink: 0, rest: 0, comfort: 0 },
+          suggestionsHalvedAtMs: 0,
+        },
+      }),
+    );
+  });
+
+  it('refuses data that is not a version 3 state', () => {
+    expect(step?.migrate({ version: 2 })).toEqual(err('notAVersion3State'));
+  });
+});

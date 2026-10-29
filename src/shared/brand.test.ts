@@ -9,6 +9,7 @@ import {
   enclosureId,
   itemId,
   speciesId,
+  visitorId,
   type EnclosureId,
   type SpeciesId,
 } from './brand';
@@ -23,6 +24,7 @@ const CONSTRUCTORS = [
   ['behaviorId', behaviorId],
   ['archetypeId', archetypeId],
   ['buildingId', buildingId],
+  ['visitorId', visitorId],
 ] as const;
 
 describe('typed identifiers', () => {

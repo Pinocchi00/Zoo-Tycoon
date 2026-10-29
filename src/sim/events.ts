@@ -1,5 +1,14 @@
 import type { Rarity } from '../data/schemas/common';
-import type { BannerId, BuildingId, EnclosureId, ItemId, SpeciesId } from '../shared/brand';
+import type { ServiceNeed } from '../data/schemas/visitors';
+import type {
+  ArchetypeId,
+  BannerId,
+  BuildingId,
+  EnclosureId,
+  ItemId,
+  SpeciesId,
+  VisitorId,
+} from '../shared/brand';
 import type { ArrivalSource } from './gacha/gacha-state';
 
 export interface CoinsAddedEvent {
@@ -138,6 +147,42 @@ export interface BuildHistoryChangedEvent {
   readonly redoCount: number;
 }
 
+/** A visitor group came in through the entrance. */
+export interface VisitorArrivedEvent {
+  readonly type: 'visitorArrived';
+  readonly visitorId: VisitorId;
+  readonly archetypeId: ArchetypeId;
+  readonly groupSize: number;
+}
+
+/**
+ * A visitor group left the park. `lost` means its walkway disappeared or no longer reaches the
+ * entrance: render lets it fade out instead of walking.
+ */
+export interface VisitorLeftEvent {
+  readonly type: 'visitorLeft';
+  readonly visitorId: VisitorId;
+  readonly satisfactionBp: number;
+  readonly lost: boolean;
+}
+
+/** A visitor group started using a service and paid for it (possibly nothing). */
+export interface VisitorUsedServiceEvent {
+  readonly type: 'visitorUsedService';
+  readonly visitorId: VisitorId;
+  readonly buildingId: BuildingId;
+  readonly coinsSpent: number;
+  /** Coin balance right after the purchase. */
+  readonly total: number;
+}
+
+/** A visitor group needed a service it could not reach: one more voice in the suggestion feed. */
+export interface ServiceMissedEvent {
+  readonly type: 'serviceMissed';
+  readonly visitorId: VisitorId;
+  readonly need: ServiceNeed;
+}
+
 /** What happened in the simulation; render, audio and ui react to these instead of diffing the state. */
 export type GameEvent =
   | CoinsAddedEvent
@@ -155,7 +200,11 @@ export type GameEvent =
   | BuildingRemovedEvent
   | BuildCoinsChangedEvent
   | ViewScoreChangedEvent
-  | BuildHistoryChangedEvent;
+  | BuildHistoryChangedEvent
+  | VisitorArrivedEvent
+  | VisitorLeftEvent
+  | VisitorUsedServiceEvent
+  | ServiceMissedEvent;
 
 /** Events waiting for the reader. Kept outside GameState so that they never end up in a save. */
 export interface EventQueue {

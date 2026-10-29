@@ -6,6 +6,7 @@ import { gachaRules } from '../content/gacha-rules';
 import { habitatElements } from '../content/habitat-elements';
 import { capybara } from '../content/species/capybara';
 import { terrain } from '../content/terrain';
+import { visitorRules } from '../content/visitor-rules';
 import type { RawGameData } from '../load';
 import { RARITIES, type Rarity } from '../schemas/common';
 import type { SpeciesInput } from '../schemas/species';
@@ -36,4 +37,5 @@ export const SYNTHETIC_GACHA_CONTENT: RawGameData = {
   buildings: [],
   decor: [],
   visitorArchetypes: [],
+  visitorRules,
 };
