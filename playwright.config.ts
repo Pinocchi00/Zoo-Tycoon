@@ -12,6 +12,9 @@ export default defineConfig({
   use: {
     baseURL: PREVIEW_URL,
     trace: 'retain-on-failure',
+    // Same software WebGL on every machine: the default backend logs driver warnings
+    // ("GPU stall due to ReadPixels") that the boot test rightly refuses.
+    launchOptions: { args: ['--use-angle=swiftshader'] },
   },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
   // Tests run against the production build: it is what players get.

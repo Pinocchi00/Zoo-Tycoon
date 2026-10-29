@@ -117,3 +117,18 @@ Chaque décision structurante est ajoutée ici, la plus récente en bas. Format 
   - toute erreur à l'ouverture d'IndexedDB (y compris sans objet d'erreur, ou une ouverture bloquée) fait passer à `localStorage` ; la raison est gardée dans `indexedDbFailure` pour le journal de développement ;
   - chargement : la copie valide la plus récente gagne ; une copie illisible (fichier abîmé ou erreur d'E/S) est sautée, et `skippedCopies > 0` indique un repli. `app` émettra alors l'événement `saveRecovered`, ajouté aux événements de `sim`, pour que l'interface informe le joueur.
 - **Conséquences :** l'implémentation Capacitor (tâche 0.6) n'a qu'à fournir un `TextStore`. Une sauvegarde venue d'une version plus récente du jeu est refusée puis remplacée par une copie plus ancienne ; elle n'est supprimée qu'après trois nouvelles écritures valides.
+
+## D-013 — Le parc vide en 3D (tâche 0.5)
+
+- **Contexte :** premier rendu Three.js du parc, qui doit tenir 60 images par seconde sur téléphone récent et 30 sur un Android modeste.
+- **Décision :**
+  - `three` (version exacte, prévu par la stack) et `@types/three` (développement seulement : Three.js ne fournit pas ses types) ;
+  - caméra orthographique isométrique (inclinaison `atan(1/√2)`, cap initial 45°). L'état de la caméra (`camera-rig`) est en nombres purs, sans Three.js : les gestes déplacent un **but**, la caméra le rejoint par amortissement exponentiel (constante de 110 ms), indépendant de la fréquence d'affichage ;
+  - gestes : un doigt ou clic gauche = déplacer ; pincer ou molette = zoom vers le point visé ; deux doigts qui tournent ou clic droit glissé = rotation. Zoom borné (6 à 72 m de hauteur visible), point visé borné au terrain ;
+  - niveaux de qualité : bas = **aucune** ombre et densité plafonnée à 1,5 ; moyen = ombres nettes (carte 1024, rayon 1) ; haut = ombres douces (carte 2048, rayon 4). Densité de pixels toujours plafonnée à 2. Three.js 0.186 a supprimé `PCFSoftShadowMap` (il avertit et le remplace) : la douceur passe par `PCFShadowMap` et `shadow.radius` ;
+  - test du premier lancement : rendu en qualité haute, 15 images ignorées puis médiane de 45 intervalles ; ≤ 18,5 ms → haut, ≤ 30 ms → moyen, sinon bas. Le choix est gardé sous la clé `settings.quality`. En attendant un écran d'options, `?quality=low|medium|high` impose un niveau et le garde ;
+  - grille de construction dans `src/shared/grid.ts` (cases de 1 m, centrée sur l'origine) car la simulation en aura besoin ; parcelle de départ provisoire de 64 × 64 cases, à déplacer dans `src/data` avec l'achat de parcelles ;
+  - boucle : `requestAnimationFrame`, image plafonnée à 250 ms, millisecondes entières transmises à `advance` (les fractions sont reportées). Arrêt complet en arrière-plan (`visibilitychange`) ; le temps passé caché n'est pas rejoué ici, le rattrapage hors ligne viendra avec le chargement des sauvegardes ;
+  - `playwright.config.ts` lance Chromium avec `--use-angle=swiftshader` (validé par le propriétaire du dépôt) : le moteur WebGL par défaut sans écran écrit des avertissements de pilote (« GPU stall due to ReadPixels ») que le test de démarrage refuse à juste titre ; SwiftShader donne le même rendu logiciel sur toutes les machines et la CI. Le test n'est pas affaibli ;
+  - compteur d'images par seconde chargé par `import()` sous `import.meta.env.DEV` : il est absent du build de production.
+- **Conséquences :** le bundle dépasse 500 ko (≈ 136 ko compressé) à cause de Three.js ; Vite l'indique sans échouer. Une découpe en morceaux sera à étudier si le temps de démarrage le demande.
