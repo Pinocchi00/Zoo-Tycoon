@@ -151,3 +151,25 @@ describe('wheelZoom', () => {
     expect(zoomedIn).toBeGreaterThan(0);
   });
 });
+
+describe('a pointer pressed again without a release', () => {
+  it('starts again from its new position and mode', () => {
+    const { tracker, rig } = setup();
+    pressPointer(tracker, 1, 100, 100, 'rotate');
+    // The release was lost; the same pointer comes down elsewhere with the left button.
+    expect(pressPointer(tracker, 1, 300, 150, 'pan')).toBe(true);
+    expect(activePointerCount(tracker)).toBe(1);
+    movePointer(tracker, rig, 1, 310, 150, VIEWPORT);
+    expect(rig.goal.yaw).toBe(0);
+    expect(rig.goal.x).toBeCloseTo(-1, 12);
+  });
+
+  it('refreshes the two-finger reference, so the next move does not pinch', () => {
+    const { tracker, rig } = setup();
+    pressPointer(tracker, 1, 100, 100, 'pan');
+    pressPointer(tracker, 2, 200, 100, 'pan');
+    pressPointer(tracker, 2, 300, 100, 'pan');
+    movePointer(tracker, rig, 2, 300, 100, VIEWPORT);
+    expect(rig.goal.viewHeight).toBe(START.viewHeight);
+  });
+});

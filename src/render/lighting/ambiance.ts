@@ -69,13 +69,20 @@ export function applyShadowQuality(lighting: ParkLighting, settings: QualitySett
   const { sun } = lighting;
   sun.castShadow = settings.shadows;
   if (!settings.shadows) {
+    // Unused from now on: give its GPU memory back to modest phones.
+    releaseShadowMap(sun);
     return;
   }
   sun.shadow.radius = settings.shadowRadius;
   if (sun.shadow.mapSize.x !== settings.shadowMapSize) {
     sun.shadow.mapSize.set(settings.shadowMapSize, settings.shadowMapSize);
     // The old map has the wrong size: dropping it makes Three.js allocate a new one.
-    sun.shadow.map?.dispose();
-    sun.shadow.map = null;
+    releaseShadowMap(sun);
   }
+}
+
+/** Disposing the render target also frees its depth texture (WebGLTextures.deallocateRenderTarget). */
+function releaseShadowMap(sun: DirectionalLight): void {
+  sun.shadow.map?.dispose();
+  sun.shadow.map = null;
 }

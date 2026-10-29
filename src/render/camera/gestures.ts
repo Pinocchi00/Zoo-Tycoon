@@ -100,16 +100,14 @@ export function pressPointer(
   y: number,
   mode: DragMode,
 ): boolean {
-  if (findPointer(tracker, id) !== undefined) {
-    return true;
-  }
-  const free = findPointer(tracker, NO_POINTER);
-  if (free === undefined) {
+  // A pointer whose release was lost comes back: start again from where it is now.
+  const slot = findPointer(tracker, id) ?? findPointer(tracker, NO_POINTER);
+  if (slot === undefined) {
     return false;
   }
-  free.id = id;
-  free.x = x;
-  free.y = y;
+  slot.id = id;
+  slot.x = x;
+  slot.y = y;
   if (activePointerCount(tracker) === MAX_POINTERS) {
     capturePair(tracker);
   } else {

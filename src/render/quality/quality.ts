@@ -76,6 +76,10 @@ export function createFrameSampler(): FrameSampler {
 
 /** Records one frame; returns the chosen level once enough frames are measured, null before. */
 export function recordFrame(sampler: FrameSampler, frameMs: number): QualityLevel | null {
+  // The first frame after a start or a return from the background measures nothing.
+  if (!(frameMs > 0)) {
+    return null;
+  }
   const index = sampler.seen - BENCHMARK_WARMUP_FRAMES;
   sampler.seen += 1;
   if (index < 0) {
