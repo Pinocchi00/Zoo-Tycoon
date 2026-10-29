@@ -19,7 +19,10 @@ export interface SaveRecoveredEvent {
   readonly skippedCopies: number;
 }
 
-/** Tickets were spent on a banner; one `arrivalOpened` per arrival follows, for the crate scene. */
+/**
+ * Tickets were spent on a banner. Each of the `count` arrivals then emits `arrivalOpened`, except
+ * the welcome banner's guaranteed one, which emits `welcomeChoiceOffered` and opens on the pick.
+ */
 export interface ArrivalsStartedEvent {
   readonly type: 'arrivalsStarted';
   readonly bannerId: BannerId;

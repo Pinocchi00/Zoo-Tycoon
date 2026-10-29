@@ -115,12 +115,29 @@ describe('performArrival', () => {
 
   it('keeps the guarantee counters from one banner to the next', () => {
     const state = stateWithTickets(100);
-    state.gacha.arrivalsSince = { rare: 9, veryRare: 0, iconic: 0 };
-    const [arrival] = opened(
-      run(state, { type: 'performArrival', bannerId: WELCOME, mode: 'single' }),
-    );
-    expect(['rare', 'veryRare']).toContain(arrival?.rarity);
-    expect(state.gacha.arrivalsSince.rare).toBe(0);
+    const welcomeSingle: Command = { type: 'performArrival', bannerId: WELCOME, mode: 'single' };
+    // 19 welcome arrivals: the 20th would be the guaranteed choice, tested on its own.
+    for (let arrival = 0; arrival < 38; arrival += 1) {
+      const before = { ...state.gacha.arrivalsSince };
+      const [opening] = opened(run(state, arrival % 2 === 0 ? single : welcomeSingle));
+      const isRareOrBetter = opening?.rarity === 'rare' || opening?.rarity === 'veryRare';
+      // The other banner picks up exactly where the previous arrival left the counter.
+      expect(state.gacha.arrivalsSince.rare).toBe(isRareOrBetter ? 0 : before.rare + 1);
+    }
+  });
+
+  it('lets a guarantee of an empty tier fall on the rarer tiers that have species', () => {
+    // D-020 as validated: with no very rare at all, the 40th arrival brings an iconic.
+    const withoutVeryRares: GameData = {
+      ...synthetic,
+      species: new Map(
+        [...synthetic.species].filter(([, species]) => species.rarity !== 'veryRare'),
+      ),
+    };
+    const state = stateWithTickets(1);
+    state.gacha.arrivalsSince = { rare: 0, veryRare: 39, iconic: 0 };
+    const [arrival] = opened(run(state, single, withoutVeryRares));
+    expect(arrival?.rarity).toBe('iconic');
   });
 
   it('turns a duplicate of a complete species into 50 more medals', () => {

@@ -63,7 +63,10 @@ function requireSpecies(data: GameData, id: SpeciesId): Species {
   return species;
 }
 
-/** Most medals `arrivals` arrivals can bring, to refuse a command before it overflows. */
+/**
+ * Most medals `arrivals` arrivals can bring, to refuse a command before it overflows. Counts every
+ * arrival, even a welcome choice that only opens later: a harmless overestimate.
+ */
 function fitsMedals(context: ArrivalContext, arrivals: number): boolean {
   const { medalsPerArrival, medalsPerExtraDuplicate } = context.data.gachaRules;
   const most =

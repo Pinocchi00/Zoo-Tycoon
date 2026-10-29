@@ -37,7 +37,10 @@ function rank(rarity: Rarity): number {
 /** Arrival number since the last result of `tier` or rarer, for each guarantee. */
 type Gaps = Record<PityRarity, number>;
 
-/** The announced rules: rising iconic chance from the 70th, then the rarest due guarantee. */
+/**
+ * The published rules (docs/decisions.md, D-020): iconic chance rising in a straight line from the
+ * 70th arrival, then the rarest due guarantee.
+ */
 function expectedProbabilities(gaps: Gaps): Tally {
   const iconicArrival = gaps.iconic + 1;
   if (iconicArrival >= GUARANTEED_AT.iconic) {
