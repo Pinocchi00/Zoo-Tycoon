@@ -3,6 +3,7 @@
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { runnerImport } from 'vite';
+import type * as Data from '../../src/data/index';
 import type * as Sim from '../../src/sim/index';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -11,6 +12,7 @@ const CHUNK_MS = 60 * 60 * 1000;
 const MAX_DAYS = 3650;
 const MAX_SEED = 0xffff_ffff;
 const SIM_ENTRY = fileURLToPath(new URL('../../src/sim/index.ts', import.meta.url));
+const DATA_ENTRY = fileURLToPath(new URL('../../src/data/index.ts', import.meta.url));
 
 interface Options {
   readonly days: number;
@@ -43,10 +45,15 @@ function readOptions(): Options {
 
 async function main(): Promise<void> {
   const options = readOptions();
-  const { module: sim } = await runnerImport<typeof Sim>(SIM_ENTRY, {
-    configFile: false,
-    logLevel: 'silent',
-  });
+  const runner = { configFile: false, logLevel: 'silent' } as const;
+  const { module: sim } = await runnerImport<typeof Sim>(SIM_ENTRY, runner);
+  const { module: gameData } = await runnerImport<typeof Data>(DATA_ENTRY, runner);
+  const loaded = gameData.loadGameContent();
+  if (!loaded.ok) {
+    throw new Error(gameData.formatDataErrors(loaded.error));
+  }
+  // No camera: every visitor runs at full rate (D-018, point 7).
+  const context = sim.createSimContext(loaded.value);
 
   const startedAt = performance.now();
   const state = sim.createGameState(options.seed);
@@ -54,7 +61,7 @@ async function main(): Promise<void> {
   const totalMs = options.days * DAY_MS;
   let eventCount = 0;
   while (state.clock.timeMs < totalMs) {
-    sim.advance(state, Math.min(CHUNK_MS, totalMs - state.clock.timeMs), events);
+    sim.advance(state, Math.min(CHUNK_MS, totalMs - state.clock.timeMs), context, events);
     eventCount += sim.drain(events).length;
   }
   const elapsedMs = performance.now() - startedAt;
@@ -67,6 +74,7 @@ async function main(): Promise<void> {
     `  fixed steps     ${String(state.clock.timeMs / sim.STEP_MS)}`,
     `  events          ${String(eventCount)}`,
     `  coins           ${String(state.currencies.coins)}`,
+    `  visitors        ${String(state.visitors.list.length)}`,
     `  compute time    ${elapsedMs.toFixed(0)} ms`,
   ];
   process.stdout.write(`${lines.join('\n')}\n`);

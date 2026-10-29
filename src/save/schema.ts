@@ -1,17 +1,28 @@
 import { z } from 'zod';
-import { RARITIES } from '../data/schemas/common';
+import { BASIS_POINTS_TOTAL, RARITIES } from '../data/schemas/common';
 import { MAX_HABITAT_STARS } from '../data/schemas/species';
+import { SERVICE_NEEDS, type ServiceNeed } from '../data/schemas/visitors';
 import {
   animalId,
+  archetypeId,
   bannerId,
   buildingId,
   enclosureId,
   itemId,
   speciesId,
+  visitorId,
   type IdError,
   type Result,
 } from '../shared';
-import { ARRIVAL_SOURCES, QUARTER_TURNS, STATE_VERSION, STEP_MS } from '../sim';
+import {
+  ARRIVAL_SOURCES,
+  FINE_TOTAL,
+  MM_PER_CELL,
+  QUARTER_TURNS,
+  STATE_VERSION,
+  STEP_MS,
+  VISITOR_ACTIVITIES,
+} from '../sim';
 
 const MAX_UINT32 = 0xffff_ffff;
 
@@ -147,6 +158,66 @@ const gachaSchema = z.strictObject({
     }),
 });
 
+const fineLevel = z.int().min(0).max(FINE_TOTAL);
+const basisPoints = z.int().min(0).max(BASIS_POINTS_TOTAL);
+const needSchema = z.enum(SERVICE_NEEDS);
+function needLevels(level: z.ZodInt): z.ZodObject<Record<ServiceNeed, z.ZodInt>, z.core.$strict> {
+  return z.strictObject({ foodDrink: level, rest: level, comfort: level });
+}
+
+const visitorGoalSchema = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('enclosure'), enclosureId: brandedId(enclosureId) }),
+  z.strictObject({ kind: z.literal('service'), need: needSchema }),
+  z.strictObject({ kind: z.literal('exit') }),
+]);
+
+const visitorSchema = z
+  .strictObject({
+    id: brandedId(visitorId),
+    archetypeId: brandedId(archetypeId),
+    groupSize: z.int().min(1),
+    column: cellCoordinate,
+    row: cellCoordinate,
+    nextColumn: cellCoordinate,
+    nextRow: cellCoordinate,
+    progressMm: z
+      .int()
+      .min(0)
+      .max(MM_PER_CELL - 1),
+    activity: z.enum(VISITOR_ACTIVITIES),
+    goal: visitorGoalSchema,
+    waitMs: amount,
+    serviceId: brandedId(buildingId).nullable(),
+    needs: needLevels(fineLevel),
+    wonderBp: basisPoints,
+    satisfaction: fineLevel,
+    seen: z
+      .array(brandedId(enclosureId))
+      .refine((seen) => hasDistinct(seen, (id) => id), { message: 'duplicateSeen' }),
+    visitLeftMs: amount,
+    missingNeeds: z
+      .array(needSchema)
+      .refine((needs) => hasDistinct(needs, (need) => need), { message: 'duplicateNeed' }),
+    updatedAtMs: amount,
+  })
+  // A visitor walks from a cell to a side neighbour: anything else would teleport it.
+  .refine(
+    (visitor) =>
+      Math.abs(visitor.nextColumn - visitor.column) + Math.abs(visitor.nextRow - visitor.row) <= 1,
+    { message: 'nextCellNotANeighbour', path: ['nextColumn'] },
+  );
+
+const visitorsSchema = z.strictObject({
+  list: z
+    .array(visitorSchema)
+    .refine((list) => hasDistinct(list, (visitor) => visitor.id), { message: 'duplicateVisitor' }),
+  nextNumber: z.int().min(1),
+  arrivalProgress: amount,
+  parkSatisfactionBp: basisPoints.nullable(),
+  suggestions: needLevels(amount),
+  suggestionsHalvedAtMs: amount,
+});
+
 /**
  * Full shape of the saved GameState (everything but the session). Strict: an unknown field means
  * the file is not ours. Overlaps are not checked here: only the simulation can build the park.
@@ -176,6 +247,7 @@ export const gameStateSchema = z
     paths: pathsSchema,
     buildings: buildingsSchema,
     nextIds: z.strictObject({ enclosure: z.int().min(1), building: z.int().min(1) }),
+    visitors: visitorsSchema,
   })
   // A counter behind an existing id would give the next object a twin, merged by every change.
   .superRefine((state, context) => {
@@ -187,6 +259,16 @@ export const gameStateSchema = z
     if (!state.buildings.every(({ id }) => isIssuedId(id, 'building', nextIds.building))) {
       const path = ['nextIds', 'building'];
       context.addIssue({ code: 'custom', message: 'idNotIssuedYet', path });
+    }
+    const { visitors } = state;
+    if (!visitors.list.every(({ id }) => isIssuedId(id, 'visitor', visitors.nextNumber))) {
+      const path = ['visitors', 'nextNumber'];
+      context.addIssue({ code: 'custom', message: 'idNotIssuedYet', path });
+    }
+    // A visitor ahead of the clock would be simulated backwards.
+    if (visitors.list.some((visitor) => visitor.updatedAtMs > state.clock.timeMs)) {
+      const path = ['visitors', 'list'];
+      context.addIssue({ code: 'custom', message: 'visitorAheadOfClock', path });
     }
   });
 

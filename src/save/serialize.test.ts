@@ -1,11 +1,23 @@
 import { describe, expect, it } from 'vitest';
-import { animalId, bannerId, enclosureId, err, itemId, speciesId, type Result } from '../shared';
+import {
+  animalId,
+  archetypeId,
+  bannerId,
+  enclosureId,
+  err,
+  itemId,
+  speciesId,
+  visitorId,
+  type Result,
+} from '../shared';
 import { loadGameContent } from '../data';
 import {
   advance,
   applyCommand,
   createEventQueue,
   createGameState,
+  createSimContext,
+  createVisitorsState,
   createSessionState,
   nextUint32,
   STATE_VERSION,
@@ -34,8 +46,8 @@ function unwrap<T, E>(result: Result<T, E>): T {
 function arrivalsState(): GameState {
   const state = createGameState(SEED);
   const events = createEventQueue();
-  advance(state, PLAYED_MS + STEP_MS / 2, events);
   const data = unwrap(loadGameContent());
+  advance(state, PLAYED_MS + STEP_MS / 2, createSimContext(data), events);
   applyCommand(state, { type: 'addCoins', amount: 1234 }, data, events);
   state.currencies.arrivalTickets = WELCOME_TICKETS;
   const welcome = unwrap(bannerId('welcome'));
@@ -92,17 +104,50 @@ function playedState(): GameState {
   for (const command of commands) {
     unwrap(applyCommand(state, command, data, events));
   }
+  // This little park does not reach the entrance, so its visitors are written by hand.
+  const enclosure = unwrap(enclosureId('enclosure-1'));
+  state.visitors = {
+    list: [
+      {
+        id: unwrap(visitorId('visitor-2')),
+        archetypeId: unwrap(archetypeId('couple')),
+        groupSize: 2,
+        column: 103,
+        row: 108,
+        nextColumn: 104,
+        nextRow: 108,
+        progressMm: 420,
+        activity: 'walking',
+        goal: { kind: 'enclosure', enclosureId: enclosure },
+        waitMs: 0,
+        serviceId: null,
+        needs: { foodDrink: 1_234_567, rest: 7_000_000, comfort: 0 },
+        wonderBp: 2100,
+        satisfaction: 6_543_210,
+        seen: [enclosure],
+        visitLeftMs: 300_000,
+        missingNeeds: ['rest'],
+        updatedAtMs: state.clock.timeMs,
+      },
+    ],
+    nextNumber: 3,
+    arrivalProgress: 12_345,
+    parkSatisfactionBp: 7777,
+    suggestions: { foodDrink: 1, rest: 5, comfort: 0 },
+    suggestionsHalvedAtMs: 60_000,
+  };
   return state;
 }
 
 /** The fields that versions before 3 did not have. */
 function withoutPark(
   state: GameState,
-): Omit<GameState, 'paths' | 'buildings' | 'nextIds' | 'session'> {
+): Omit<GameState, 'paths' | 'buildings' | 'nextIds' | 'visitors' | 'session'> {
   const {
     paths: _paths,
     buildings: _buildings,
     nextIds: _nextIds,
+    visitors: _visitors,
     session: _session,
     ...rest
   } = state;
@@ -392,6 +437,53 @@ describe('state validation', () => {
     });
   });
 
+  it('refuses impossible visitors', () => {
+    const [visitor] = state.visitors.list;
+    if (visitor === undefined) {
+      throw new Error('The played state has a visitor.');
+    }
+    const withVisitor = (patch: Record<string, unknown>): unknown => ({
+      ...state,
+      visitors: { ...state.visitors, list: [{ ...visitor, ...patch }] },
+    });
+    expect(pathOf(withVisitor({ nextColumn: visitor.column + 2 }))).toEqual({
+      kind: 'invalidState',
+      path: 'visitors.list.0.nextColumn',
+    });
+    expect(pathOf(withVisitor({ progressMm: 1000 }))).toEqual({
+      kind: 'invalidState',
+      path: 'visitors.list.0.progressMm',
+    });
+    expect(pathOf(withVisitor({ seen: [...visitor.seen, ...visitor.seen] }))).toEqual({
+      kind: 'invalidState',
+      path: 'visitors.list.0.seen',
+    });
+    expect(pathOf(withVisitor({ missingNeeds: ['rest', 'rest'] }))).toEqual({
+      kind: 'invalidState',
+      path: 'visitors.list.0.missingNeeds',
+    });
+    expect(pathOf(withVisitor({ goal: { kind: 'service', need: 'fun' } }))).toMatchObject({
+      kind: 'invalidState',
+    });
+    expect(pathOf(withVisitor({ satisfaction: 10_000_001 }))).toEqual({
+      kind: 'invalidState',
+      path: 'visitors.list.0.satisfaction',
+    });
+    expect(pathOf(withVisitor({ updatedAtMs: state.clock.timeMs + 1 }))).toEqual({
+      kind: 'invalidState',
+      path: 'visitors.list',
+    });
+    expect(pathOf({ ...state, visitors: { ...state.visitors, nextNumber: 2 } })).toEqual({
+      kind: 'invalidState',
+      path: 'visitors.nextNumber',
+    });
+    const twins = { ...state.visitors, list: [visitor, visitor] };
+    expect(pathOf({ ...state, visitors: twins })).toEqual({
+      kind: 'invalidState',
+      path: 'visitors.list',
+    });
+  });
+
   it('refuses an unknown field', () => {
     expect(pathOf({ ...state, hackedGems: 9999 })).toMatchObject({ kind: 'invalidState' });
   });
@@ -403,6 +495,18 @@ const EMPTY_GACHA = {
   collection: [],
   history: [],
 };
+
+describe('migration from version 3', () => {
+  const state = playedState();
+  const { visitors: _visitors, session: _session, ...stateV3 } = { ...state, version: 3 };
+
+  it('loads a version 3 save, with nobody in the park yet', () => {
+    expect(deserialize(forgeSave(stateV3))).toEqual({
+      ok: true,
+      value: { ...state, visitors: createVisitorsState(), session: createSessionState() },
+    });
+  });
+});
 
 describe('migration from version 2', () => {
   const state = arrivalsState();

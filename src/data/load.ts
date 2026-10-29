@@ -18,6 +18,7 @@ import {
   type Decor,
   type VisitorArchetype,
 } from './schemas/park';
+import { visitorRulesSchema, type VisitorRules } from './schemas/visitors';
 import {
   biomeSchema,
   enclosureSizesSchema,
@@ -44,6 +45,7 @@ export interface RawGameData {
   readonly buildings: readonly unknown[];
   readonly decor: readonly unknown[];
   readonly visitorArchetypes: readonly unknown[];
+  readonly visitorRules: unknown;
 }
 
 /** Validated game content. Maps keep the order of the data files, so draws stay deterministic. */
@@ -60,6 +62,7 @@ export interface GameData {
   readonly buildings: ReadonlyMap<ItemId, Building>;
   readonly decor: ReadonlyMap<ItemId, Decor>;
   readonly visitorArchetypes: ReadonlyMap<ArchetypeId, VisitorArchetype>;
+  readonly visitorRules: VisitorRules;
 }
 
 /** One problem in one data entry, e.g. `species[0] (capybara)`, `group.maxSize`. */
@@ -111,6 +114,7 @@ export function loadGameData(raw: RawGameData): Result<GameData, readonly DataEr
     'visitorArchetypes',
     errors,
   );
+  const visitorRules = parseOne(visitorRulesSchema, raw.visitorRules, 'visitorRules', errors);
 
   checkBanners(banners, errors);
   checkSharedItemIds({ habitatElements, buildings, decor, pathSurfaces }, errors);
@@ -135,6 +139,7 @@ export function loadGameData(raw: RawGameData): Result<GameData, readonly DataEr
     enclosureSizes === null ||
     terrain === null ||
     buildRules === null ||
+    visitorRules === null ||
     errors.length > 0
   ) {
     return err(errors);
@@ -152,6 +157,7 @@ export function loadGameData(raw: RawGameData): Result<GameData, readonly DataEr
     buildings,
     decor,
     visitorArchetypes,
+    visitorRules,
   });
 }
 

@@ -10,6 +10,7 @@ export const buildings: readonly BuildingInput[] = [
     coinCost: 30,
     requiresPath: true,
     serves: ['rest'],
+    visitorUse: { seconds: 20, priceCoins: 0 },
   },
   {
     id: 'litter-bin',
@@ -19,6 +20,7 @@ export const buildings: readonly BuildingInput[] = [
     coinCost: 15,
     requiresPath: true,
     serves: ['comfort'],
+    visitorUse: { seconds: 3, priceCoins: 0 },
   },
   {
     id: 'water-fountain',
@@ -28,6 +30,7 @@ export const buildings: readonly BuildingInput[] = [
     coinCost: 40,
     requiresPath: true,
     serves: ['foodDrink'],
+    visitorUse: { seconds: 5, priceCoins: 0 },
   },
   {
     id: 'ice-cream-kiosk',
@@ -37,6 +40,7 @@ export const buildings: readonly BuildingInput[] = [
     coinCost: 200,
     requiresPath: true,
     serves: ['foodDrink'],
+    visitorUse: { seconds: 15, priceCoins: 6 },
   },
   {
     id: 'toilets',
@@ -46,9 +50,58 @@ export const buildings: readonly BuildingInput[] = [
     coinCost: 250,
     requiresPath: true,
     serves: ['comfort'],
+    visitorUse: { seconds: 30, priceCoins: 0 },
   },
 ];
 
-// Visitor archetypes are filled by task 1.5. The slice has no decor.
+// The slice has no decor.
 export const decor: readonly DecorInput[] = [];
-export const visitorArchetypes: readonly VisitorArchetypeInput[] = [];
+
+/** The slice's five archetypes (task 1.5): starting values, to be balanced by task 1.6. */
+export const visitorArchetypes: readonly VisitorArchetypeInput[] = [
+  {
+    id: 'stroller-family',
+    nameKey: 'visitor.archetype.strollerFamily',
+    spawnWeight: 3,
+    groupSize: { min: 3, max: 4 },
+    wants: ['comfort', 'rest'],
+    walkSpeedMmPerSecond: 1000,
+    visitMinutes: 10,
+  },
+  {
+    id: 'shoulder-ride',
+    nameKey: 'visitor.archetype.shoulderRide',
+    spawnWeight: 3,
+    groupSize: { min: 2, max: 2 },
+    wants: ['wonder', 'foodDrink'],
+    walkSpeedMmPerSecond: 1200,
+    visitMinutes: 8,
+  },
+  {
+    id: 'couple',
+    nameKey: 'visitor.archetype.couple',
+    spawnWeight: 3,
+    groupSize: { min: 2, max: 2 },
+    wants: ['rest', 'foodDrink'],
+    walkSpeedMmPerSecond: 1100,
+    visitMinutes: 10,
+  },
+  {
+    id: 'teen-photographer',
+    nameKey: 'visitor.archetype.teenPhotographer',
+    spawnWeight: 2,
+    groupSize: { min: 1, max: 1 },
+    wants: ['wonder'],
+    walkSpeedMmPerSecond: 1300,
+    visitMinutes: 6,
+  },
+  {
+    id: 'retirees',
+    nameKey: 'visitor.archetype.retirees',
+    spawnWeight: 2,
+    groupSize: { min: 2, max: 2 },
+    wants: ['rest', 'comfort'],
+    walkSpeedMmPerSecond: 800,
+    visitMinutes: 12,
+  },
+];

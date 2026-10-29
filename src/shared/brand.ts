@@ -18,6 +18,8 @@ export type BiomeId = Brand<string, 'BiomeId'>;
 export type BannerId = Brand<string, 'BannerId'>;
 export type BehaviorId = Brand<string, 'BehaviorId'>;
 export type ArchetypeId = Brand<string, 'ArchetypeId'>;
+/** A visitor group walking in the park, unlike `ArchetypeId`, which names its kind in the data. */
+export type VisitorId = Brand<string, 'VisitorId'>;
 
 export type IdError = 'emptyId' | 'invalidIdCharacters';
 
@@ -74,4 +76,8 @@ export function behaviorId(raw: string): Result<BehaviorId, IdError> {
 
 export function archetypeId(raw: string): Result<ArchetypeId, IdError> {
   return brandId<'ArchetypeId'>(raw);
+}
+
+export function visitorId(raw: string): Result<VisitorId, IdError> {
+  return brandId<'VisitorId'>(raw);
 }

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { applyCommand, type Command } from './commands';
+import { createSimContext } from './context';
 import { createEventQueue, drain, type GameEvent } from './events';
 import { randomInt } from './rng';
 import { sliceGameData, testBannerId } from './gacha/test-support';
@@ -7,6 +8,7 @@ import { createGameState } from './state';
 import { advance, catchUp } from './time';
 
 const GAME_DATA = sliceGameData();
+const CONTEXT = createSimContext(GAME_DATA);
 const ARRIVAL: Command = {
   type: 'performArrival',
   bannerId: testBannerId('refuge'),
@@ -33,7 +35,7 @@ function playMonth(seed: number): PlayedGame {
   let session = 0;
   while (state.clock.timeMs < SIMULATED_DAYS * DAY_MS) {
     for (let frame = 0; frame < FRAMES_PER_SESSION; frame += 1) {
-      advance(state, FRAME_PATTERN_MS[frame % FRAME_PATTERN_MS.length] ?? 0, queue);
+      advance(state, FRAME_PATTERN_MS[frame % FRAME_PATTERN_MS.length] ?? 0, CONTEXT, queue);
       if (frame % 100 === 0) {
         // The amount comes from the game's own generator, so its state is exercised too.
         applyCommand(
@@ -47,7 +49,7 @@ function playMonth(seed: number): PlayedGame {
       }
       events.push(...drain(queue));
     }
-    catchUp(state, OFFLINE_PATTERN_MS[session % OFFLINE_PATTERN_MS.length] ?? 0, queue);
+    catchUp(state, OFFLINE_PATTERN_MS[session % OFFLINE_PATTERN_MS.length] ?? 0, CONTEXT, queue);
     events.push(...drain(queue));
     session += 1;
   }

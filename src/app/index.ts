@@ -18,7 +18,7 @@ import {
 } from '@/render';
 import { logger } from '@/shared';
 import { deserialize } from '@/save';
-import { advance, createEventQueue, drain } from '@/sim';
+import { advance, createEventQueue, createSimContext, drain, type FocusArea } from '@/sim';
 import type { FpsCounter } from './dev-fps';
 import { entranceFocus, terrainGrid } from './entrance-focus';
 import { createGameLoop, type FrameScheduler } from './game-loop';
@@ -129,12 +129,16 @@ async function main(): Promise<void> {
   }
 
   const events = createEventQueue();
+  const context = createSimContext(data);
+  const focus: FocusArea = { minColumn: 0, minRow: 0, maxColumn: 0, maxRow: 0 };
+  context.focus = focus;
   const saves = createSaveStorage(store, deserialize);
   const state = await loadOrCreatePark(saves, events, newParkSeed);
   const autosaver = createAutosaver(saves, state, () => Date.now());
 
   const loop = createGameLoop(browserScheduler, (frameMs, simulationMs) => {
-    advance(state, simulationMs, events);
+    view.writeFocusArea(focus);
+    advance(state, simulationMs, context, events);
     autosaver.record(simulationMs);
     // Nothing listens to the simulation yet; draining keeps the queue from growing.
     drain(events);

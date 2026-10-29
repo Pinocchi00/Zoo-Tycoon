@@ -4,6 +4,7 @@ import { banners as gameBanners } from './content/banners';
 import { gachaRules } from './content/gacha-rules';
 import { species as gameSpecies } from './content/species';
 import { capybara } from './content/species/capybara';
+import { visitorRules } from './content/visitor-rules';
 import { SYNTHETIC_GACHA_CONTENT } from './fixtures/synthetic-gacha';
 import { formatDataErrors, loadGameContent, loadGameData, RARITIES, type DataError } from './index';
 import type { RawGameData } from './load';
@@ -38,6 +39,7 @@ const VALID_BUILDING = {
   coinCost: 50,
   requiresPath: true,
   serves: ['rest'],
+  visitorUse: { seconds: 20, priceCoins: 0 },
 };
 
 const VALID_ARCHETYPE = {
@@ -46,6 +48,8 @@ const VALID_ARCHETYPE = {
   spawnWeight: 3,
   groupSize: { min: 2, max: 2 },
   wants: ['rest', 'wonder'],
+  walkSpeedMmPerSecond: 1100,
+  visitMinutes: 10,
 };
 
 describe('game content', () => {
@@ -393,6 +397,43 @@ describe('invalid park content', () => {
       { ...GAME_CONTENT, visitorArchetypes: [{ ...VALID_ARCHETYPE, wants: ['rest', 'rest'] }] },
       { path: 'wants.1', message: 'duplicate "rest"' },
     );
+  });
+
+  it('refuses a visitor archetype that stands still', () => {
+    expectRefused(
+      { ...GAME_CONTENT, visitorArchetypes: [{ ...VALID_ARCHETYPE, walkSpeedMmPerSecond: 0 }] },
+      { path: 'walkSpeedMmPerSecond' },
+    );
+  });
+
+  it('refuses a building without its visitor use', () => {
+    const withoutUse = { ...VALID_BUILDING, visitorUse: undefined };
+    expectRefused({ ...GAME_CONTENT, buildings: [withoutUse] }, { path: 'visitorUse' });
+  });
+});
+
+describe('visitor content', () => {
+  it('ships the five archetypes of the slice', () => {
+    const result = loadGameContent();
+    expect(result.ok && [...result.value.visitorArchetypes.keys()]).toEqual([
+      'stroller-family',
+      'shoulder-ride',
+      'couple',
+      'teen-photographer',
+      'retirees',
+    ]);
+  });
+
+  it('refuses a seek threshold above 100 %', () => {
+    const needs = { ...visitorRules.needs, seekThresholdBp: 10_001 };
+    expectRefused(
+      { ...GAME_CONTENT, visitorRules: { ...visitorRules, needs } },
+      { source: 'visitorRules', path: 'needs.seekThresholdBp' },
+    );
+  });
+
+  it('refuses missing visitor rules', () => {
+    expectRefused({ ...GAME_CONTENT, visitorRules: undefined }, { source: 'visitorRules' });
   });
 });
 

@@ -20,6 +20,14 @@ describe('createGameState', () => {
       paths: [],
       buildings: [],
       nextIds: { enclosure: 1, building: 1 },
+      visitors: {
+        list: [],
+        nextNumber: 1,
+        arrivalProgress: 0,
+        parkSatisfactionBp: null,
+        suggestions: { foodDrink: 0, rest: 0, comfort: 0 },
+        suggestionsHalvedAtMs: 0,
+      },
       session: { buildHistory: { undo: [], redo: [] } },
     });
   });

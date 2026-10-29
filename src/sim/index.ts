@@ -1,5 +1,6 @@
 // Layer entry point: see AGENTS.md section 3.
 export * from './commands';
+export * from './context';
 export * from './events';
 export * from './gacha/arrivals';
 export * from './gacha/collection';
@@ -16,3 +17,9 @@ export * from './park/view-score';
 export * from './rng';
 export * from './state';
 export * from './time';
+export * from './visitors/attractiveness';
+export * from './visitors/feedback';
+export * from './visitors/path-cache';
+export * from './visitors/visitor-state';
+export { FAR_UPDATE_INTERVAL_STEPS } from './visitors/visitor-system';
+export { spendingRateBp, targetSatisfaction } from './visitors/walk';

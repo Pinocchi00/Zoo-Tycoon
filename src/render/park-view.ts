@@ -8,6 +8,7 @@ import {
   WebGLRenderer,
 } from 'three';
 import { gridDepth, gridWidth, logger, type GridSize } from '@/shared';
+import type { FocusArea } from '@/sim';
 import capybaraUrl from '../../assets/models/capybara.glb?url';
 import { loadAnimalModel } from './animals/animal-model';
 import { createAnimalSlot } from './animals/animal-slot';
@@ -19,6 +20,7 @@ import {
   type CameraPose,
 } from './camera/camera-rig';
 import { attachCameraControls } from './camera/controls';
+import { writeFocusArea } from './camera/focus-area';
 import { applyCameraPose, createIsoCamera } from './camera/iso-camera';
 import { AFTERNOON, applyShadowQuality, createLighting } from './lighting/ambiance';
 import { qualitySettings, type QualityLevel } from './quality/quality';
@@ -37,6 +39,8 @@ export interface ParkView {
   quality: () => QualityLevel;
   /** Moves the camera by `elapsedMs` and draws one image. */
   frame: (elapsedMs: number) => void;
+  /** Fills `out` with the cells the camera may show, without allocating. */
+  writeFocusArea: (out: FocusArea) => void;
   dispose: () => void;
 }
 
@@ -144,6 +148,9 @@ export function createParkView(
       demoAnimal.update(elapsedMs);
       applyCameraPose(camera, rig.current, viewport.width / viewport.height);
       renderer.render(scene, camera);
+    },
+    writeFocusArea: (out) => {
+      writeFocusArea(rig.current, viewport.width / viewport.height, grid, out);
     },
     dispose: () => {
       detachControls();

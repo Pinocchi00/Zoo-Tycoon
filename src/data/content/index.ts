@@ -8,6 +8,7 @@ import { habitatElements } from './habitat-elements';
 import { buildings, decor, visitorArchetypes } from './park';
 import { species } from './species';
 import { terrain } from './terrain';
+import { visitorRules } from './visitor-rules';
 
 /** All the content of the game, as written. Validate it with `loadGameData`. */
 export const GAME_CONTENT: RawGameData = {
@@ -23,4 +24,5 @@ export const GAME_CONTENT: RawGameData = {
   buildings,
   decor,
   visitorArchetypes,
+  visitorRules,
 };

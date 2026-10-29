@@ -10,6 +10,7 @@ export * from './schemas/common';
 export * from './schemas/gacha';
 export * from './schemas/park';
 export * from './schemas/species';
+export * from './schemas/visitors';
 
 /** Validates the content shipped with the game. Called once at startup by `app`. */
 export function loadGameContent(): Result<GameData, readonly DataError[]> {
