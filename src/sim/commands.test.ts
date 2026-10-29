@@ -1,18 +1,21 @@
 import { describe, expect, it } from 'vitest';
 import { applyCommand } from './commands';
 import { createEventQueue, drain } from './events';
+import { sliceGameData } from './gacha/test-support';
 import { createGameState } from './state';
+
+const data = sliceGameData();
 
 describe('applyCommand addCoins', () => {
   it('adds the coins and emits coinsAdded', () => {
     const state = createGameState(1);
     const events = createEventQueue();
 
-    expect(applyCommand(state, { type: 'addCoins', amount: 250 }, events)).toEqual({
+    expect(applyCommand(state, { type: 'addCoins', amount: 250 }, data, events)).toEqual({
       ok: true,
       value: undefined,
     });
-    expect(applyCommand(state, { type: 'addCoins', amount: 50 }, events).ok).toBe(true);
+    expect(applyCommand(state, { type: 'addCoins', amount: 50 }, data, events).ok).toBe(true);
 
     expect(state.currencies.coins).toBe(300);
     expect(drain(events)).toEqual([
@@ -28,7 +31,7 @@ describe('applyCommand addCoins', () => {
       const before = JSON.stringify(state);
       const events = createEventQueue();
 
-      expect(applyCommand(state, { type: 'addCoins', amount }, events)).toEqual({
+      expect(applyCommand(state, { type: 'addCoins', amount }, data, events)).toEqual({
         ok: false,
         error: 'invalidAmount',
       });
@@ -42,14 +45,14 @@ describe('applyCommand addCoins', () => {
     state.currencies.coins = Number.MAX_SAFE_INTEGER - 1;
     const events = createEventQueue();
 
-    expect(applyCommand(state, { type: 'addCoins', amount: 2 }, events)).toEqual({
+    expect(applyCommand(state, { type: 'addCoins', amount: 2 }, data, events)).toEqual({
       ok: false,
       error: 'currencyOverflow',
     });
     expect(state.currencies.coins).toBe(Number.MAX_SAFE_INTEGER - 1);
     expect(drain(events)).toEqual([]);
 
-    expect(applyCommand(state, { type: 'addCoins', amount: 1 }, events).ok).toBe(true);
+    expect(applyCommand(state, { type: 'addCoins', amount: 1 }, data, events).ok).toBe(true);
     expect(state.currencies.coins).toBe(Number.MAX_SAFE_INTEGER);
   });
 });

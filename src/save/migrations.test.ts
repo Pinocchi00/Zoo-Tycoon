@@ -73,3 +73,26 @@ describe('runMigrations', () => {
     );
   });
 });
+
+describe('migration from version 1 to 2', () => {
+  const step = MIGRATIONS.find((migration) => migration.from === 1);
+
+  it('adds arrivals with no progress and keeps every other field', () => {
+    expect(step?.migrate({ version: 1, coins: 'kept' })).toEqual(
+      ok({
+        version: 2,
+        coins: 'kept',
+        gacha: {
+          arrivalsSince: { rare: 0, veryRare: 0, iconic: 0 },
+          welcome: { arrivalsDone: 0, pendingChoice: null },
+          collection: [],
+          history: [],
+        },
+      }),
+    );
+  });
+
+  it('refuses data that is not a version 1 state', () => {
+    expect(step?.migrate({ version: 0 })).toEqual(err('notAVersion1State'));
+  });
+});

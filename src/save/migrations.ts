@@ -39,8 +39,31 @@ function migrateV0ToV1(data: unknown): Result<unknown, string> {
   });
 }
 
+const stateV1Schema = z.looseObject({ version: z.literal(1) });
+
+/** Version 2 adds arrivals: no guarantee progress, no welcome arrival, nothing met yet. */
+function migrateV1ToV2(data: unknown): Result<unknown, string> {
+  const parsed = stateV1Schema.safeParse(data);
+  if (!parsed.success) {
+    return err('notAVersion1State');
+  }
+  return ok({
+    ...parsed.data,
+    version: 2,
+    gacha: {
+      arrivalsSince: { rare: 0, veryRare: 0, iconic: 0 },
+      welcome: { arrivalsDone: 0, pendingChoice: null },
+      collection: [],
+      history: [],
+    },
+  });
+}
+
 /** Every migration ever written, in order. Never edit a published one: add the next. */
-export const MIGRATIONS: readonly Migration[] = [{ from: 0, migrate: migrateV0ToV1 }];
+export const MIGRATIONS: readonly Migration[] = [
+  { from: 0, migrate: migrateV0ToV1 },
+  { from: 1, migrate: migrateV1ToV2 },
+];
 
 /** Checks that the registry holds exactly one step for every version below the target. */
 export function checkMigrationRegistry(
