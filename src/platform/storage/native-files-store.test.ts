@@ -4,7 +4,7 @@ import { createGameState } from '../../sim';
 import { openNativeFilesTextStore, type NativeFiles } from './native-files-store';
 import { openPlatformTextStore } from './platform-store';
 import { createSaveStorage } from './save-storage';
-import { checkTextStore } from './text-store-contract';
+import { checkTextStore } from './text-store.test-helper';
 
 type Operation = keyof NativeFiles;
 

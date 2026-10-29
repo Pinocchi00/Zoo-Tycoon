@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { openBrowserTextStore } from './browser-store';
 import { openIndexedDbTextStore } from './indexed-db-store';
 import { createLocalStorageTextStore } from './local-storage-store';
-import { checkTextStore } from './text-store-contract';
+import { checkTextStore } from './text-store.test-helper';
 
 /** In-memory Storage, with an optional quota to simulate a full or private-mode browser. */
 class FakeStorage implements Storage {

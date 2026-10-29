@@ -38,6 +38,15 @@ export interface Autosaver {
   saveNow: () => Promise<void>;
 }
 
+async function writeAndReport(saves: ParkSaveStorage, text: string): Promise<void> {
+  const written = await saves.write(text);
+  if (!written.ok) {
+    logger.warn('The park could not be saved.', written.error);
+  } else if (written.value.cleanupFailure !== null) {
+    logger.warn('Old save copies could not be removed.', written.value.cleanupFailure);
+  }
+}
+
 /**
  * Saves `state` through `saves`, one write at a time. The text is taken when the save is asked
  * for, so a write that waits its turn still holds the park as it was at that moment.
@@ -52,15 +61,20 @@ export function createAutosaver(
 
   const saveNow = (): Promise<void> => {
     sincePreviousSaveMs = 0;
-    const text = serialize(state, clockMs());
-    queue = queue.then(async () => {
-      const written = await saves.write(text);
-      if (!written.ok) {
-        logger.warn('The park could not be saved.', written.error);
-      } else if (written.value.cleanupFailure !== null) {
-        logger.warn('Old save copies could not be removed.', written.value.cleanupFailure);
-      }
-    });
+    let text: string;
+    try {
+      text = serialize(state, clockMs());
+    } catch (error) {
+      // A bug, but saving must never stop the game: it is logged and the next save tries again.
+      logger.error('The park could not be serialized.', error);
+      return queue;
+    }
+    queue = queue
+      .then(() => writeAndReport(saves, text))
+      // Without this, one unexpected failure would leave the queue rejected and block every later save.
+      .catch((error: unknown) => {
+        logger.error('Unexpected failure while saving the park.', error);
+      });
     return queue;
   };
 
