@@ -71,3 +71,16 @@ Chaque décision structurante est ajoutée ici, la plus récente en bas. Format 
   - l'ordre `shared ← data ← sim ← save` est appliqué : une couche n'importe que celles qui la précèdent ;
   - les identifiants typés ne sont créés que par une garde de type qui vérifie réellement le format, jamais par une assertion.
 - **Conséquences :** le chargement paresseux de code se fait dans `src/app`. Les dates et nombres affichés sont formatés dans `ui`.
+
+## D-010 — Intégration continue et test de démarrage
+
+- **Contexte :** tâche 0.2, GitHub doit refuser tout code cassé.
+- **Décision :**
+  - `@playwright/test` (version exacte) : seul outil de bout en bout prévu par la stack ; Chromium uniquement pour l'instant ;
+  - le test de démarrage tourne sur la version construite (`vite preview`), pas sur le serveur de développement : c'est ce que reçoit le joueur ;
+  - il échoue sur toute erreur, tout avertissement ou toute exception non rattrapée dans la console ;
+  - la CI GitHub Actions (`.github/workflows/ci.yml`) tourne sur chaque push et chaque pull request : `npm ci`, `npm run check`, puis Playwright ; versions des actions figées, cache npm et cache du navigateur Playwright, limite de 15 minutes, une exécution plus ancienne sur la même branche est annulée ;
+  - en CI, Playwright est lancé directement car `npm run check` a déjà construit `dist/` ; en local, `npm run e2e` construit puis teste ;
+  - `playwright.config.ts` est ajouté à `tsconfig.node.json` (règle de D-008) ;
+  - le contrôle exigé par la protection de `main` s'appelle `check`.
+- **Conséquences :** renommer le job `check` oblige à mettre à jour la protection de branche sur GitHub.
