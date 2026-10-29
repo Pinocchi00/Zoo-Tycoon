@@ -62,6 +62,18 @@ describe('arrivals', () => {
     );
   });
 
+  it('gives nothing for an empty enclosure or a species unknown to the data', () => {
+    const state = visitorPark();
+    const [enclosure] = state.enclosures;
+    if (enclosure === undefined) {
+      throw new Error('the park has an enclosure');
+    }
+    expect(enclosureAttractivenessMilli({ ...enclosure, speciesId: null }, state, slice)).toBe(0);
+    expect(enclosureAttractivenessMilli(enclosure, state, { ...slice, species: new Map() })).toBe(
+      0,
+    );
+  });
+
   it('caps the rate per minute and the crowd by the walkways', () => {
     const context = visitorContext(withArrivals({ maxPerMinute: 1 }));
     const state = visitorPark();
@@ -155,7 +167,38 @@ describe('needs and services', () => {
   });
 });
 
+describe('suggestions over a long absence', () => {
+  it('applies every half-life at once instead of looping', () => {
+    const state = visitorPark();
+    state.visitors.suggestions.rest = Number.MAX_SAFE_INTEGER;
+    state.visitors.suggestions.foodDrink = 8;
+    const halfLifeMs = slice.visitorRules.suggestionHalfLifeMinutes * MINUTE_MS;
+    // The clock jumps far ahead of the last halving, as after a very old save.
+    state.clock.timeMs = 1_000_000 * halfLifeMs;
+    const context = visitorContext({ ...slice, visitorArchetypes: new Map() });
+    advance(state, STEP_MS, context, createEventQueue());
+    expect(state.visitors.suggestions).toEqual({ foodDrink: 0, rest: 0, comfort: 0 });
+    expect(state.visitors.suggestionsHalvedAtMs).toBe(1_000_000 * halfLifeMs);
+  });
+});
+
 describe('finding the way', () => {
+  it('lets a visitor saved beyond the edge of the land slip away', () => {
+    const state = visitorPark();
+    const context = visitorContext();
+    play(state, context, MINUTE_MS);
+    const [visitor] = state.visitors.list;
+    if (visitor === undefined) {
+      throw new Error('a visitor came in');
+    }
+    visitor.column = slice.terrain.columns;
+    visitor.nextColumn = slice.terrain.columns;
+    const events = play(state, context, 1000);
+    expect(events).toContainEqual(
+      expect.objectContaining({ type: 'visitorLeft', visitorId: visitor.id, lost: true }),
+    );
+  });
+
   it('always gets every visitor out once the visits end', () => {
     const state = visitorPark({ bench: true });
     const context = visitorContext();

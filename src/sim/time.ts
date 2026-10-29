@@ -72,10 +72,13 @@ export function catchUp(
   const coarseSteps = Math.floor(simulatedMs / OFFLINE_STEP_MS);
   const focus = context.focus;
   context.focus = null;
-  for (let index = 0; index < coarseSteps; index += 1) {
-    step(state, OFFLINE_STEP_MS, context, events);
+  try {
+    for (let index = 0; index < coarseSteps; index += 1) {
+      step(state, OFFLINE_STEP_MS, context, events);
+    }
+    advance(state, simulatedMs - coarseSteps * OFFLINE_STEP_MS, context, events);
+  } finally {
+    context.focus = focus;
   }
-  advance(state, simulatedMs - coarseSteps * OFFLINE_STEP_MS, context, events);
-  context.focus = focus;
   return simulatedMs;
 }

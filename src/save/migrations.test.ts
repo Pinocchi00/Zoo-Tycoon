@@ -128,21 +128,31 @@ describe('migration from version 2 to 3', () => {
 describe('migration from version 3 to 4', () => {
   const step = MIGRATIONS.find((migration) => migration.from === 3);
 
-  it('adds an empty crowd and keeps every other field', () => {
-    expect(step?.migrate({ version: 3, coins: 'kept' })).toEqual(
+  it('adds an empty crowd whose feed fades from the save time, and keeps every other field', () => {
+    const clock = { timeMs: 90_000, accumulatorMs: 0 };
+    expect(step?.migrate({ version: 3, coins: 'kept', clock })).toEqual(
       ok({
         version: 4,
         coins: 'kept',
+        clock,
         visitors: {
           list: [],
           nextNumber: 1,
           arrivalProgress: 0,
           parkSatisfactionBp: null,
           suggestions: { foodDrink: 0, rest: 0, comfort: 0 },
-          suggestionsHalvedAtMs: 0,
+          suggestionsHalvedAtMs: 90_000,
         },
       }),
     );
+  });
+
+  it('leaves a missing or broken clock to the final state check', () => {
+    for (const clock of [undefined, { timeMs: -1 }]) {
+      expect(step?.migrate({ version: 3, clock })).toMatchObject(
+        ok({ visitors: { suggestionsHalvedAtMs: 0 } }),
+      );
+    }
   });
 
   it('refuses data that is not a version 3 state', () => {

@@ -93,7 +93,10 @@ export function targetSatisfaction(visitor: VisitorState, rules: VisitorRules): 
   return Math.min(FINE_TOTAL, Math.max(0, target));
 }
 
-/** Exponential smoothing whose result barely depends on how the time is split. */
+/**
+ * Smoothing towards the target. A long step moves less than many short ones over the same time
+ * (half the gap in one minute instead of about 63 %), which keeps offline visits of the same order.
+ */
 function smoothSatisfaction(visitor: VisitorState, rules: VisitorRules, elapsedMs: number): void {
   const smoothingMs = rules.satisfaction.smoothingSeconds * MS_PER_SECOND;
   const gap = targetSatisfaction(visitor, rules) - visitor.satisfaction;
@@ -389,8 +392,13 @@ export function updateVisitor(
   elapsedMs: number,
 ): boolean {
   const archetype = archetypeOf(world, visitor);
+  const { columns, rows } = world.occupancy;
+  // A save may hold coordinates beyond this land: they would wrap onto another row.
+  const isOnLand =
+    Math.max(visitor.column, visitor.nextColumn) < columns &&
+    Math.max(visitor.row, visitor.nextRow) < rows;
   const cell = cellOf(world, visitor.column, visitor.row);
-  if (archetype === undefined || !isWalkableCell(world, cell)) {
+  if (archetype === undefined || !isOnLand || !isWalkableCell(world, cell)) {
     // Its walkway is gone (or its kind left the data): it slips away rather than stand on grass.
     return leave(world, visitor, true);
   }
