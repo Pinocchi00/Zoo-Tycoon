@@ -8,22 +8,26 @@ import {
   type SpeciesId,
 } from './brand';
 
+const CONSTRUCTORS = [
+  ['speciesId', speciesId],
+  ['animalId', animalId],
+  ['enclosureId', enclosureId],
+  ['itemId', itemId],
+] as const;
+
 describe('typed identifiers', () => {
-  it.each([
-    ['speciesId', speciesId],
-    ['animalId', animalId],
-    ['enclosureId', enclosureId],
-    ['itemId', itemId],
-  ])('%s accepts a valid id and keeps its text', (_name, make) => {
+  it.each(CONSTRUCTORS)('%s accepts a valid id and keeps its text', (_name, make) => {
     expect(make('capybara_01')).toEqual({ ok: true, value: 'capybara_01' });
   });
 
-  it('rejects an empty id', () => {
-    expect(speciesId('')).toEqual({ ok: false, error: 'emptyId' });
+  it.each(CONSTRUCTORS)('%s rejects an empty id', (_name, make) => {
+    expect(make('')).toEqual({ ok: false, error: 'emptyId' });
   });
 
-  it.each(['Capybara', 'red panda', 'émeu', 'a/b'])('rejects invalid characters in %j', (raw) => {
-    expect(speciesId(raw)).toEqual({ ok: false, error: 'invalidIdCharacters' });
+  it.each(CONSTRUCTORS)('%s rejects invalid characters', (_name, make) => {
+    for (const raw of ['Capybara', 'red panda', 'émeu', 'a/b', ' capybara']) {
+      expect(make(raw)).toEqual({ ok: false, error: 'invalidIdCharacters' });
+    }
   });
 
   it('produces distinct, non-interchangeable types', () => {

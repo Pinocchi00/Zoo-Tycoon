@@ -4,9 +4,6 @@ import { defineConfig } from 'eslint/config';
 import globals from 'globals';
 import tseslint from 'typescript-eslint';
 
-/** Folders that must stay pure: no engine, no UI, no platform, no ambient state. */
-const PURE_FOLDERS = ['src/shared', 'src/data', 'src/sim', 'src/save'];
-
 /** Folders that read the simulation but must not know each other. */
 const PRESENTATION_FOLDERS = ['render', 'audio', 'ui'];
 
@@ -19,8 +16,30 @@ function folderImportRegex(folders) {
   return `^(@/|(\\.\\./)+)(${folders.join('|')})(/|$)`;
 }
 
-const pureRestrictedImports = {
-  patterns: [
+/**
+ * Pure layers in dependency order (AGENTS.md 4.1): each one may only import the layers before it.
+ * @type {readonly string[]}
+ */
+const PURE_LAYERS = ['shared', 'data', 'sim', 'save'];
+
+const SOURCE_FILES = ['ts', 'tsx'];
+
+/**
+ * Lint globs for every source file of a `src` folder.
+ * @param {string} folder
+ * @returns {string[]}
+ */
+function sourceFiles(folder) {
+  return SOURCE_FILES.map((extension) => `src/${folder}/**/*.${extension}`);
+}
+
+/**
+ * Import restrictions for one pure layer: no engine, no platform, no outer folder, no later layer.
+ * @param {string} layer
+ */
+function pureRestrictedImports(layer) {
+  const laterLayers = PURE_LAYERS.slice(PURE_LAYERS.indexOf(layer) + 1);
+  const patterns = [
     {
       regex: '^(three|preact)(/|$)',
       message: 'Pure layers (shared, data, sim, save) must not depend on three or preact.',
@@ -34,14 +53,35 @@ const pureRestrictedImports = {
       message:
         'Pure layers (shared, data, sim, save) must not import render, audio, ui, platform or app.',
     },
-  ],
-};
+  ];
+  if (laterLayers.length > 0) {
+    patterns.push({
+      regex: folderImportRegex(laterLayers),
+      message: `Dependency order is shared <- data <- sim <- save: ${layer} must not import ${laterLayers.join(', ')}.`,
+    });
+  }
+  return { patterns };
+}
+
+const TIME_MESSAGE = 'Time comes from outside: pass it to advance(state, deltaMs).';
+const BROWSER_MESSAGE = 'Pure layers must not touch the browser or the host environment.';
 
 const pureRestrictedGlobals = [
-  { name: 'Date', message: 'Time comes from outside: pass it to advance(state, deltaMs).' },
-  { name: 'performance', message: 'Time comes from outside: pass it to advance(state, deltaMs).' },
-  { name: 'window', message: 'Pure layers must not touch the browser.' },
+  { name: 'Date', message: TIME_MESSAGE },
+  { name: 'performance', message: TIME_MESSAGE },
+  { name: 'Intl', message: 'Formatting dates and numbers belongs to ui.' },
+  { name: 'setTimeout', message: TIME_MESSAGE },
+  { name: 'setInterval', message: TIME_MESSAGE },
+  { name: 'requestAnimationFrame', message: TIME_MESSAGE },
+  { name: 'queueMicrotask', message: TIME_MESSAGE },
+  { name: 'crypto', message: 'Use the seeded generator in src/sim/rng.' },
+  // globalThis and self would give back every other banned global.
+  { name: 'globalThis', message: BROWSER_MESSAGE },
+  { name: 'self', message: BROWSER_MESSAGE },
+  { name: 'window', message: BROWSER_MESSAGE },
   { name: 'document', message: 'Pure layers must not touch the DOM.' },
+  { name: 'navigator', message: BROWSER_MESSAGE },
+  { name: 'process', message: BROWSER_MESSAGE },
   { name: 'localStorage', message: 'Storage belongs to src/platform.' },
   { name: 'sessionStorage', message: 'Storage belongs to src/platform.' },
   { name: 'indexedDB', message: 'Storage belongs to src/platform.' },
@@ -53,6 +93,7 @@ const ARCHITECTURE_RULES = [
   '@typescript-eslint/no-restricted-imports',
   'no-restricted-globals',
   'no-restricted-properties',
+  'no-restricted-syntax',
   'no-console',
 ];
 
@@ -112,9 +153,23 @@ export default defineConfig(
     },
   },
   {
-    files: PURE_FOLDERS.map((folder) => `${folder}/**/*.ts`),
+    // Dynamic import() is invisible to no-restricted-imports, so only app (the wiring layer) may use it.
+    files: SOURCE_FILES.map((extension) => `src/**/*.${extension}`),
+    ignores: sourceFiles('app'),
     rules: {
-      '@typescript-eslint/no-restricted-imports': ['error', pureRestrictedImports],
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector: 'ImportExpression',
+          message: 'Dynamic import() bypasses the architecture checks: only src/app may use it.',
+        },
+      ],
+    },
+  },
+  ...PURE_LAYERS.map((layer) => ({
+    files: sourceFiles(layer),
+    rules: {
+      '@typescript-eslint/no-restricted-imports': ['error', pureRestrictedImports(layer)],
       'no-restricted-globals': ['error', ...pureRestrictedGlobals],
       'no-restricted-properties': [
         'error',
@@ -125,9 +180,9 @@ export default defineConfig(
         },
       ],
     },
-  },
+  })),
   ...PRESENTATION_FOLDERS.map((folder) => ({
-    files: [`src/${folder}/**/*.ts`, `src/${folder}/**/*.tsx`],
+    files: sourceFiles(folder),
     rules: {
       '@typescript-eslint/no-restricted-imports': [
         'error',

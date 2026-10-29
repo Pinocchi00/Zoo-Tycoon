@@ -18,23 +18,20 @@ export type IdError = 'emptyId' | 'invalidIdCharacters';
 /** Lowercase letters, digits, `-` and `_`: safe in save files, URLs and asset names. */
 const ID_PATTERN = /^[a-z0-9_-]+$/;
 
-// The brand only exists at compile time, so this guard is the single, audited place
-// where a plain value becomes branded (type assertions are banned everywhere).
-function isBranded<T, B extends string>(_value: T): _value is Brand<T, B> {
-  return true;
+// A type guard backed by a runtime check is the only way a plain string becomes branded:
+// type assertions are banned, so no id can skip validation.
+function isValidId<B extends string>(raw: string): raw is Brand<string, B> {
+  return ID_PATTERN.test(raw);
 }
 
 function brandId<B extends string>(raw: string): Result<Brand<string, B>, IdError> {
   if (raw.length === 0) {
     return err('emptyId');
   }
-  if (!ID_PATTERN.test(raw)) {
+  if (!isValidId<B>(raw)) {
     return err('invalidIdCharacters');
   }
-  if (isBranded<string, B>(raw)) {
-    return ok(raw);
-  }
-  throw new Error('unreachable: isBranded always narrows');
+  return ok(raw);
 }
 
 export function speciesId(raw: string): Result<SpeciesId, IdError> {

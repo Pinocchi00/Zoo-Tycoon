@@ -61,3 +61,13 @@ Chaque décision structurante est ajoutée ici, la plus récente en bas. Format 
   - Prettier ignore `AGENTS.md`, `CLAUDE.md` et `docs/`, dont la mise en page est écrite à la main ;
   - ESLint interdit de désactiver par commentaire les règles d'architecture (`no-restricted-imports`, `no-restricted-globals`, `no-restricted-properties`, `no-console`).
 - **Conséquences :** pour ajouter un dossier d'outils, l'inclure dans `tsconfig.node.json`.
+
+## D-009 — Frontières renforcées après relecture
+
+- **Contexte :** la relecture de la tâche 0.1 a trouvé des contournements des frontières : `import()` dynamique, `globalThis.Date`, `self`, `navigator`.
+- **Décision :**
+  - `import()` dynamique interdit partout dans `src/` sauf `src/app`, car il échappe à la vérification des imports ;
+  - couches pures : `globalThis`, `self`, `navigator`, `process`, `Intl`, `crypto` et les minuteries (`setTimeout`…) sont interdits en plus ;
+  - l'ordre `shared ← data ← sim ← save` est appliqué : une couche n'importe que celles qui la précèdent ;
+  - les identifiants typés ne sont créés que par une garde de type qui vérifie réellement le format, jamais par une assertion.
+- **Conséquences :** le chargement paresseux de code se fait dans `src/app`. Les dates et nombres affichés sont formatés dans `ui`.
