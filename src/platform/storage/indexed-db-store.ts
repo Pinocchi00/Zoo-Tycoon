@@ -4,8 +4,9 @@ const DATABASE_NAME = 'zoo-refuge';
 const DATABASE_VERSION = 1;
 const OBJECT_STORE = 'texts';
 
-function failure(error: DOMException | null, fallback: string): Error {
-  return error ?? new Error(fallback);
+/** Browsers sometimes fail without an error object: always reject with a DOMException. */
+function failure(error: DOMException | null, fallback: string): DOMException {
+  return error ?? new DOMException(fallback, 'UnknownError');
 }
 
 function openDatabase(factory: IDBFactory): Promise<IDBDatabase> {
@@ -19,6 +20,10 @@ function openDatabase(factory: IDBFactory): Promise<IDBDatabase> {
     };
     request.onerror = () => {
       reject(failure(request.error, 'Could not open IndexedDB.'));
+    };
+    // Another tab holds an older version open: waiting could last forever, so give up.
+    request.onblocked = () => {
+      reject(new DOMException('IndexedDB is blocked by another connection.', 'InvalidStateError'));
     };
   });
 }

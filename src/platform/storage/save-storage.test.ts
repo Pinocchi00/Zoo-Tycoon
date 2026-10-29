@@ -50,7 +50,10 @@ describe('safe write', () => {
   it('writes a numbered copy, reads it back and leaves no temporary file', async () => {
     const store = createMemoryTextStore();
     const storage = storageOn(store);
-    expect(await storage.write(saveWithCoins(42))).toEqual({ ok: true, value: 1 });
+    expect(await storage.write(saveWithCoins(42))).toEqual({
+      ok: true,
+      value: { sequence: 1, cleanupFailure: null },
+    });
     expect(await store.keys()).toEqual(['save.copy.1']);
     expect(await storage.read()).toMatchObject({
       ok: true,
@@ -158,7 +161,10 @@ describe('safe write', () => {
     const storage = storageOn(store);
     await writeAll(storage, 2);
     await store.set('save.copy.2', 'damaged');
-    expect(await storage.write(saveWithCoins(3))).toEqual({ ok: true, value: 3 });
+    expect(await storage.write(saveWithCoins(3))).toMatchObject({
+      ok: true,
+      value: { sequence: 3 },
+    });
   });
 
   it('prunes only copies older than the third newest valid one', async () => {
@@ -182,29 +188,51 @@ describe('safe write', () => {
     ]);
   });
 
-  it('reports a failing removal while pruning', async () => {
+  it('still reports success when pruning fails, and prunes on the next write', async () => {
     const memory = createMemoryTextStore();
+    let locked = true;
     const store: TextStore = {
       ...memory,
       remove: (key) =>
-        key === TEMPORARY_KEY ? memory.remove(key) : Promise.reject(new Error('locked')),
+        locked && key !== TEMPORARY_KEY ? Promise.reject(new Error('locked')) : memory.remove(key),
     };
     const storage = storageOn(store);
     await writeAll(storage, KEPT_VALID_COPIES);
     expect(await storage.write(saveWithCoins(9))).toEqual({
-      ok: false,
-      error: { kind: 'storageFailed', reason: 'locked' },
+      ok: true,
+      value: { sequence: 4, cleanupFailure: { kind: 'storageFailed', reason: 'locked' } },
     });
+    expect(await coinsLoaded(storage)).toBe(9);
+    locked = false;
+    await storage.write(saveWithCoins(10));
+    expect((await memory.keys()).sort()).toEqual(['save.copy.3', 'save.copy.4', 'save.copy.5']);
   });
 
-  it('reports a failing temporary-file cleanup', async () => {
+  it('still reports success when the temporary file cannot be removed', async () => {
+    const memory = createMemoryTextStore();
+    const store: TextStore = { ...memory, remove: () => Promise.reject(new Error('locked')) };
+    const storage = storageOn(store);
+    expect(await storage.write(saveWithCoins(1))).toEqual({
+      ok: true,
+      value: { sequence: 1, cleanupFailure: { kind: 'storageFailed', reason: 'locked' } },
+    });
+    expect(await coinsLoaded(storage)).toBe(1);
+  });
+
+  it('reports a failing pruning listing as a cleanup failure', async () => {
+    const memory = createMemoryTextStore();
+    let reads = 0;
     const store: TextStore = {
-      ...createMemoryTextStore(),
-      remove: () => Promise.reject(new Error('locked')),
+      ...memory,
+      // The two verification reads succeed, then the storage breaks while pruning.
+      get: (key) => {
+        reads += 1;
+        return reads > 2 ? Promise.reject(new Error('io')) : memory.get(key);
+      },
     };
     expect(await storageOn(store).write(saveWithCoins(1))).toEqual({
-      ok: false,
-      error: { kind: 'storageFailed', reason: 'locked' },
+      ok: true,
+      value: { sequence: 1, cleanupFailure: { kind: 'storageFailed', reason: 'io' } },
     });
   });
 });
@@ -261,7 +289,20 @@ describe('resilient load', () => {
     });
   });
 
-  it('reports a storage that fails while reading a copy', async () => {
+  it('skips a copy the storage fails to read and loads the previous one', async () => {
+    const memory = createMemoryTextStore();
+    await writeAll(storageOn(memory), 2);
+    const storage = storageOn({
+      ...memory,
+      get: (key) => (key === 'save.copy.2' ? Promise.reject(new Error('io')) : memory.get(key)),
+    });
+    expect(await storage.read()).toMatchObject({
+      ok: true,
+      value: { sequence: 1, skippedCopies: 1 },
+    });
+  });
+
+  it('reports a storage that fails to read every copy', async () => {
     const memory = createMemoryTextStore();
     await writeAll(storageOn(memory), 1);
     const storage = storageOn({ ...memory, get: () => Promise.reject(new Error('io')) });
@@ -271,10 +312,26 @@ describe('resilient load', () => {
     expect(await storage.write(saveWithCoins(2))).toEqual(failure);
   });
 
+  it('reports damaged copies even when another copy failed to read', async () => {
+    const memory = createMemoryTextStore();
+    await writeAll(storageOn(memory), 2);
+    await memory.set('save.copy.1', '{{{');
+    const storage = storageOn({
+      ...memory,
+      get: (key) => (key === 'save.copy.2' ? Promise.reject(new Error('io')) : memory.get(key)),
+    });
+    expect(await storage.read()).toEqual({
+      ok: false,
+      error: { kind: 'noValidCopy', errors: [{ kind: 'invalidJson' }] },
+    });
+  });
+
   it('ignores keys that are not save copies', async () => {
     const store = createMemoryTextStore();
     await store.set('settings', '{}');
     await store.set('save.copy.x', '{}');
+    await store.set('save.copy.007', '{}');
+    await store.set('save.copy.0', '{}');
     expect(await storageOn(store).read()).toEqual({ ok: false, error: { kind: 'noSave' } });
   });
 });

@@ -193,6 +193,11 @@ describe('state validation', () => {
     expect(pathOf({ ...state, rng: [0, 1, 2] })).toMatchObject({ kind: 'invalidState' });
   });
 
+  it('refuses the all-zero generator, which would draw zero forever', () => {
+    expect(pathOf({ ...state, rng: [0, 0, 0, 0] })).toEqual({ kind: 'invalidState', path: 'rng' });
+    expect(pathOf({ ...state, rng: [0, 0, 0, 1] })).toBe('accepted');
+  });
+
   it('refuses a malformed identifier', () => {
     const animals = [{ id: 'Capy 1', speciesId: 'capybara' }];
     expect(pathOf({ ...state, animals })).toEqual({ kind: 'invalidState', path: 'animals.0.id' });

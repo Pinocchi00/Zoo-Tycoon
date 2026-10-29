@@ -27,7 +27,10 @@ export const gameStateSchema = z.strictObject({
     // The accumulator never holds a whole step: advance() would have simulated it.
     accumulatorMs: amount.max(STEP_MS - 1),
   }),
-  rng: z.tuple([uint32, uint32, uint32, uint32]),
+  // xoshiro128** never leaves the all-zero state: the game would draw the same value forever.
+  rng: z
+    .tuple([uint32, uint32, uint32, uint32])
+    .refine((words) => words.some((word) => word !== 0), { message: 'allZeroRng' }),
   currencies: z.strictObject({
     coins: amount,
     arrivalTickets: amount,

@@ -6,7 +6,8 @@ export const KEPT_VALID_COPIES = 3;
 
 const TEMPORARY_KEY = 'save.tmp';
 const COPY_KEY_PREFIX = 'save.copy.';
-const COPY_KEY_PATTERN = /^save\.copy\.(\d+)$/;
+// No leading zero: `save.copy.007` would never match the key copyKey(7) builds.
+const COPY_KEY_PATTERN = /^save\.copy\.([1-9]\d*)$/;
 
 export interface StorageFailure {
   readonly kind: 'storageFailed';
@@ -17,6 +18,13 @@ export type WriteError =
   | StorageFailure
   /** The text read back was not the text written, or did not validate. Older copies are untouched. */
   | { readonly kind: 'verificationFailed'; readonly stage: 'temporary' | 'copy' };
+
+/** A successful write. The new copy is safe even when the cleanup after it failed. */
+export interface WrittenCopy {
+  readonly sequence: number;
+  /** Set when the temporary file or old copies could not be removed; they are retried next write. */
+  readonly cleanupFailure: StorageFailure | null;
+}
 
 export type LoadError<E> =
   | StorageFailure
@@ -42,8 +50,8 @@ export type SaveValidator<T, E> = (text: string) => Result<T, E>;
 export interface SaveStorage<T, E> {
   /** Loads the newest valid copy, skipping damaged ones. */
   read: () => Promise<Result<LoadedCopy<T>, LoadError<E>>>;
-  /** Writes a new copy safely and returns its sequence number. */
-  write: (text: string) => Promise<Result<number, WriteError>>;
+  /** Writes a new copy safely; an error means the new copy was not saved. */
+  write: (text: string) => Promise<Result<WrittenCopy, WriteError>>;
   /** Every copy, newest first, with its validity. */
   listCopies: () => Promise<Result<SaveCopyInfo<E>[], StorageFailure>>;
 }
@@ -149,7 +157,16 @@ export function createSaveStorage<T, E>(
     return ok(undefined);
   }
 
-  async function write(text: string): Promise<Result<number, WriteError>> {
+  async function cleanUp(): Promise<StorageFailure | null> {
+    const cleaned = await attempt(() => store.remove(TEMPORARY_KEY));
+    const pruned = await prune();
+    if (!cleaned.ok) {
+      return cleaned.error;
+    }
+    return pruned.ok ? null : pruned.error;
+  }
+
+  async function write(text: string): Promise<Result<WrittenCopy, WriteError>> {
     const sequences = await listSequences();
     if (!sequences.ok) {
       return sequences;
@@ -164,12 +181,8 @@ export function createSaveStorage<T, E>(
     if (!committed.ok) {
       return committed;
     }
-    const cleaned = await attempt(() => store.remove(TEMPORARY_KEY));
-    if (!cleaned.ok) {
-      return cleaned;
-    }
-    const pruned = await prune();
-    return pruned.ok ? ok(sequence) : pruned;
+    // From here the new copy is proven readable: a cleanup failure must not look like a lost save.
+    return ok({ sequence, cleanupFailure: await cleanUp() });
   }
 
   async function read(): Promise<Result<LoadedCopy<T>, LoadError<E>>> {
@@ -181,13 +194,14 @@ export function createSaveStorage<T, E>(
       return err({ kind: 'noSave' });
     }
     const errors: E[] = [];
+    let storageFailure: StorageFailure | null = null;
     let skippedCopies = 0;
     for (const sequence of sequences.value) {
+      // One unreadable copy must not hide the older ones: skip it like a damaged copy.
       const text = await attempt(() => store.get(copyKey(sequence)));
       if (!text.ok) {
-        return text;
-      }
-      if (text.value !== null) {
+        storageFailure = text.error;
+      } else if (text.value !== null) {
         const validated = validate(text.value);
         if (validated.ok) {
           return ok({ value: validated.value, sequence, skippedCopies });
@@ -195,6 +209,9 @@ export function createSaveStorage<T, E>(
         errors.push(validated.error);
       }
       skippedCopies += 1;
+    }
+    if (errors.length === 0 && storageFailure !== null) {
+      return err(storageFailure);
     }
     return err({ kind: 'noValidCopy', errors });
   }
