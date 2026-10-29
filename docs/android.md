@@ -122,7 +122,7 @@ Le parc est encore vide : rien ne change à l'écran. Pour voir la sauvegarde, o
 8. Dans le Device Explorer, refais **Synchronize**, puis ouvre la nouvelle copie au plus grand numéro.
 9. ✅ Réussi si son `timeMs` est **plus grand** que le nombre noté : le parc a repris là où il était. ❌ S'il est plus petit, le parc est reparti de zéro : signale-le.
 
-Le jeu sauvegarde toutes les 30 secondes de jeu et chaque fois que l'app quitte l'écran.
+Le jeu sauvegarde toutes les 30 secondes de jeu et chaque fois que l'app quitte l'écran. Si Android ferme l'app très brutalement, la toute dernière sauvegarde peut ne pas avoir eu le temps de s'écrire : tu retrouves alors le parc tel qu'il était au plus 30 secondes avant.
 
 ---
 

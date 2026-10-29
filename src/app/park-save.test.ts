@@ -143,4 +143,41 @@ describe('autosave', () => {
     await autosaver.saveNow();
     expect(await coinsSaved(saves)).toBe(30);
   });
+
+  it('never stops the game when the park cannot be serialized', async () => {
+    const saves = savesOn(createMemoryTextStore());
+    const state = createGameState(1);
+    let clockBroken = true;
+    const autosaver = createAutosaver(saves, state, () => {
+      if (clockBroken) {
+        throw new Error('clock is broken');
+      }
+      return WRITTEN_AT_MS;
+    });
+    expect(() => {
+      autosaver.record(AUTOSAVE_INTERVAL_MS);
+    }).not.toThrow();
+    await autosaver.saveNow();
+    expect(await coinsSaved(saves)).toBeNull();
+    clockBroken = false;
+    state.currencies.coins = 40;
+    await autosaver.saveNow();
+    expect(await coinsSaved(saves)).toBe(40);
+  });
+
+  it('keeps saving after a write fails unexpectedly', async () => {
+    const saves = savesOn(createMemoryTextStore());
+    let throwing = true;
+    const unreliable: ParkSaveStorage = {
+      ...saves,
+      write: (text) => (throwing ? Promise.reject(new Error('bug')) : saves.write(text)),
+    };
+    const state = createGameState(1);
+    const autosaver = createAutosaver(unreliable, state, () => WRITTEN_AT_MS);
+    await expect(autosaver.saveNow()).resolves.toBeUndefined();
+    throwing = false;
+    state.currencies.coins = 50;
+    await autosaver.saveNow();
+    expect(await coinsSaved(saves)).toBe(50);
+  });
 });
