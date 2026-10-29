@@ -107,7 +107,93 @@ Une seule tâche à la fois. Toujours une nouvelle session par tâche.
 
 ---
 
+## Repères dans le code (état à la fin de la phase 0)
+
+Ce que la phase 0 a réellement produit. Chaque tâche part de là : réutiliser ces fonctions et ces conventions plutôt que d'en créer de nouvelles. Les détails et leurs raisons sont dans `docs/decisions.md` (D-008 à D-015).
+
+### Commandes du projet
+
+| Commande | Rôle |
+| --- | --- |
+| `npm run check` | Typage, lint, format, `assets:check`, tests avec couverture (≥ 90 % sur `src/sim` et `src/save`), construction |
+| `npm run e2e` | Construction puis Playwright (`tests/e2e/boot.spec.ts`) |
+| `npm run sim -- --days 7 --seed 42` | Simulateur d'économie (`tools/sim/run.ts`), sans rendu |
+| `npm run models` | Régénère les `.glb` avec Blender 4.3.2 (`tools/blender/run.ts`, voir `docs/blender.md`) |
+| `npm run assets:check` | Valide chaque `.glb` de `assets/models` (`tools/assets/validate.ts`) |
+| `npm run android` | Construction puis synchronisation Capacitor (voir `docs/android.md`) |
+
+Les tests sont à côté du fichier testé (`foo.ts` → `foo.test.ts`). Vitest prend aussi `tools/**/*.test.ts`.
+
+### `src/shared`
+
+- `result.ts` : `Result<T, E>`, `ok(value)`, `err(error)`.
+- `brand.ts` : identifiants typés `SpeciesId`, `AnimalId`, `EnclosureId`, `ItemId`, créés par `speciesId(raw)`, `animalId(raw)`, `enclosureId(raw)`, `itemId(raw)`, qui renvoient un `Result<…, IdError>`. Un nouvel identifiant suit le même modèle.
+- `grid.ts` : grille du terrain, `CELL_SIZE_M = 1` (une case = 1 m), `GridSize`, `CellCoord`, `createGridSize`, `gridWidth`, `gridDepth`, `cellCenterX`, `cellCenterZ`, `worldToCell` (écrit dans un `out` pour ne pas allouer).
+- `logger.ts` : `logger` (actif seulement en développement), `createLogger`. Seul endroit autorisé à écrire dans la console.
+
+### `src/sim`
+
+- `state.ts` : `GameState` (`version`, `clock`, `rng`, `currencies`, `enclosures`, `animals`), `createGameState(seed)`, `STATE_VERSION = 1`. Les monnaies existent déjà : `coins`, `arrivalTickets`, `careMedals`, `decorTickets`, `shavings`. `EnclosureState` et `AnimalState` sont des emplacements vides, à remplir par les tâches 1.3 et 1.4.
+- `commands.ts` : `Command`, `CommandError`, `applyCommand(state, command, events)` qui renvoie un `Result`. Une seule commande pour l'instant, `addCoins` (triche de développement). La première nouvelle commande transforme `applyCommand` en `switch` exhaustif.
+- `events.ts` : `GameEvent` (`coinsAdded`, `saveRecovered`), `EventQueue` hors de l'état, `createEventQueue()`, `emit(queue, event)`, `drain(queue)` appelé une fois par image par `app`.
+- `rng.ts` : `RngState`, `createRng(seed)`, `nextUint32`, `randomInt(rng, min, max)`, `randomFloat`, `weightedPick(rng, entries)`, `totalWeight`, `selectByWeight`, `shuffle`. Tout le hasard de `sim` passe par `state.rng`.
+- `time.ts` : `STEP_MS = 100`, `advance(state, deltaMs, events)`, `catchUp(state, offlineMs, events)` (pas d'une minute, plafonné à `MAX_OFFLINE_MS` = 12 h). Un système est une fonction `System = (state, stepMs, events) => void`, à ajouter dans la liste `SYSTEMS` de `time.ts` (vide pour l'instant).
+
+### `src/save`
+
+- `serialize.ts` : `serialize(state, writtenAtMs)`, `readSave(text)`, `deserialize(text)`, avec une enveloppe versionnée et une somme de contrôle (`checksum.ts`).
+- `schema.ts` : `gameStateSchema`, un schéma zod **strict** de tout `GameState`.
+- `migrations.ts` : `MIGRATIONS`, `runMigrations`, `checkMigrationRegistry`.
+- **Règle pour toutes les tâches :** tout champ ajouté à `GameState` demande, dans la même branche, d'augmenter `STATE_VERSION`, d'ajouter la migration depuis la version précédente, de mettre à jour `gameStateSchema` et d'ajouter le test de migration.
+
+### `src/data` et `src/i18n`
+
+- `src/data/index.ts` est vide : la tâche 1.1 crée tout.
+- `src/i18n` : `t(key, locale)`, `Locale` (`'fr' | 'en'`), `LOCALES`, `DEFAULT_LOCALE = 'fr'`. Les clés sont celles de `fr.ts` (`TranslationKey`) ; `en.ts` doit avoir exactement les mêmes, un test le vérifie.
+
+### `src/render`
+
+- `park-view.ts` : `createParkView(canvas, level)`, `ParkView`, `STARTING_PARK_GRID` (64 × 64 cases), et un capybara de démonstration au centre (`DEMO_ANIMAL`), à remplacer quand la simulation place les animaux.
+- `quality/quality.ts` : `QualityLevel` (`'low' | 'medium' | 'high'`), `qualitySettings(level)`, choix automatique par mesure des images (`createFrameSampler`, `recordFrame`, `pickQuality`).
+- `lighting/ambiance.ts` : l'ambiance « après-midi doré » existe déjà (`AFTERNOON`).
+- `camera/` : caméra isométrique, gestes et contrôles. `terrain/diorama-base.ts` : le socle du parc.
+- `animals/animal-model.ts` : `loadAnimalModel(url, animation)`, `AnimalAnimation` (`'idle' | 'walk'` pour l'instant), `pickClip`. `animals/animal-slot.ts` : `createAnimalSlot`, qui gère le chargement et les échecs sans bloquer le jeu.
+
+### `src/app` et `src/platform`
+
+- `app/index.ts` assemble tout. `app/game-loop.ts` : `createGameLoop` (accumulateur, `MAX_FRAME_MS = 250`). `app/park-save.ts` : `loadOrCreatePark`, `createAutosaver` (toutes les 30 s).
+- `platform/storage` : `createSaveStorage` (3 copies valides gardées), stockages navigateur (IndexedDB, puis `localStorage`, puis mémoire) et natif (`@capacitor/filesystem`). `platform/lifecycle.ts` : `onForegroundChange`.
+- `src/ui` et `src/audio` sont vides.
+
+### Modèles 3D
+
+- Description d'espèce : `tools/blender/species/<id>.json` (le capybara : `tools/blender/species/capybara.json`), validée par le schéma de `tools/assets/species.ts`.
+- Bibliothèque de pièces et squelette : `tools/blender/parts.py`, `rig.py`, `palette.py`, `palette.json` ; animations : `tools/blender/animations.py` (`idle` et `walk` seulement).
+- Règles de validation : `tools/assets/model-rules.ts` (1 500 à 4 000 triangles, animations obligatoires `idle` et `walk`, matériau `palette` seul, longueur à ±10 %). Chaque `.glb` doit avoir sa description, et inversement.
+- Le modèle de l'espèce `<id>` est `assets/models/<id>.glb`.
+
+### Dépendances
+
+Installées : `three`, `zod`, `@capacitor/core`, `@capacitor/android`, `@capacitor/filesystem`. **Preact n'est pas encore installé** : la tâche 1.11 l'ajoute (il figure déjà dans la stack d'`AGENTS.md`), avec sa ligne dans `docs/decisions.md`.
+
+---
+
+## Points ouverts (à trancher par le propriétaire)
+
+Écarts relevés entre ce brief et le code de la phase 0 pendant la tâche 1.0. Ils ne sont pas tranchés ici : la tâche concernée s'arrête et pose la question si le point n'a pas été décidé avant.
+
+1. **Animations obligatoires (tâche 1.7).** Le brief demande `sleep`, `eat` et une signature pour chaque espèce, mais `tools/assets/model-rules.ts` n'exige que `idle` et `walk`, et le prompt de la tâche interdit de modifier le validateur. Sans changement du validateur, l'absence d'une nouvelle animation passerait inaperçue. Faut-il autoriser la tâche 1.7 à ajouter ces animations aux règles ?
+2. **Modèles des visiteurs (tâche 1.9).** Le validateur s'applique à tout `.glb` de `assets/models` avec le budget d'un animal (1 500 à 4 000 triangles, `idle` et `walk`, une description d'espèce par modèle). Un visiteur (800 à 1 500 triangles selon le GDD) serait refusé. La tâche 1.9 devra modifier le validateur ou ranger les visiteurs ailleurs : à décider avant de la lancer.
+3. **Taille du terrain (tâche 1.4).** La taille du parc de départ (`STARTING_PARK_GRID`, 64 × 64) est aujourd'hui définie dans `src/render/park-view.ts`. Pour que la simulation valide les sorties de terrain, elle doit appartenir à `src/data` ou `src/sim`, et le rendu la lire. Le brief ne donne ni la taille du « grand terrain » ni l'emplacement de l'entrée et des parkings.
+4. **Retour haptique (tâche 1.10).** Le brief place le retour haptique dans le rendu, mais `render` n'a pas le droit d'appeler Capacitor (seul `platform` le fait), et aucune extension de vibration n'est installée. Il faudra passer par `platform` et `app`, et justifier la dépendance (par exemple `@capacitor/haptics`) dans `docs/decisions.md`.
+5. **Clés de texte dans les données (tâche 1.1).** Le graphe de dépendances d'`AGENTS.md` ne place pas `i18n`. Le lint autorise aujourd'hui `src/data` à importer `src/i18n`. Faut-il typer les clés de texte des données avec `TranslationKey` (import de `i18n` par `data`), ou garder de simples chaînes vérifiées par un test ?
+6. **Courrier quotidien (tâche 1.6).** La règle parle de « jour réel », alors que la simulation ne connaît que le temps de jeu fourni par `advance` et `catchUp`. L'heure réelle devra être fournie par `app`, comme le temps. Par ailleurs, `catchUp` ignore toute absence au-delà de 12 h, alors que le GDD dit que les recettes sont « plafonnées » au-delà : à préciser (arrêt net ou taux réduit) à la tâche 1.6.
+
+---
+
 ## Tâche 1.0 — Mise à jour du brief
+
+**Statut :** faite (branche `chore/phase-1-brief`).
 
 **But :** adapter ce brief à ce que la phase 0 a réellement produit (noms de fichiers, API, décisions), pour que les IA suivantes ne se trompent pas.
 
@@ -135,6 +221,8 @@ Branche : chore/phase-1-brief. Termine par le rapport final.
 - Chargement unique de toutes les données au démarrage, avec erreur claire si un fichier est invalide.
 - Données de test synthétiques couvrant les 5 paliers de rareté, utilisées par les tests du gacha.
 - Les règles précisées plus haut ajoutées dans `docs/decisions.md`.
+
+**Repères :** `src/data/index.ts` est vide. Identifiants typés et `Result` dans `src/shared` ; la référence du modèle 3D d'une espèce `<id>` est `assets/models/<id>.glb`, dont la description Blender est `tools/blender/species/<id>.json`. Voir le point ouvert 5 sur les clés de texte.
 
 **Critères d'acceptation :**
 
@@ -196,6 +284,8 @@ Termine par npm run check vert et le rapport final au format d'AGENTS.md.
 - Historique complet des arrivages dans l'état.
 - Commandes et événements correspondants (`performArrival`, `arrivalOpened`, etc.).
 
+**Repères :** commandes dans `src/sim/commands.ts` (`applyCommand` devient un `switch` exhaustif), événements dans `src/sim/events.ts` (`emit`), hasard par `weightedPick` et `randomInt` de `src/sim/rng.ts` sur `state.rng`. Les monnaies `arrivalTickets` et `careMedals` existent déjà dans `GameState`. Les compteurs de garantie et l'historique sont de nouveaux champs de l'état : appliquer la règle de version et de migration de `src/save`.
+
 **Critères d'acceptation :**
 
 - Test statistique d'un million de tirages sur les données synthétiques à 5 paliers : taux à 0,1 point près, garanties sans exception.
@@ -225,6 +315,8 @@ Termine par npm run check vert, la sortie du test statistique, et le rapport fin
 - Validation : chevauchement, sortie du terrain, enclos trop petit, bâtiment non relié à une allée, pièces insuffisantes. Chaque refus est une erreur typée avec une clé de texte explicative.
 - Annuler et rétablir illimités pendant la session.
 - Calcul de la note de vue d'un enclos (points de vue, distance, obstacles) selon le GDD.
+
+**Repères :** réutiliser la grille de `src/shared/grid.ts` (une case = 1 m) et `enclosureId` de `src/shared/brand.ts`. `EnclosureState` est un emplacement vide dans `src/sim/state.ts`. Voir le point ouvert 3 sur la taille du terrain.
 
 **Critères d'acceptation :**
 
@@ -259,6 +351,8 @@ Termine par npm run check vert et le rapport final.
 - Dépenses aux services et départ du parc.
 - Simulation légère : les visiteurs loin de la caméra sont mis à jour moins souvent (fréquence fournie par `app`, jamais lue dans `sim`).
 
+**Repères :** le déplacement et les besoins sont des systèmes (`System`) ajoutés à la liste `SYSTEMS` de `src/sim/time.ts`. Le pas vaut `STEP_MS` (100 ms) en jeu et `OFFLINE_STEP_MS` (une minute) pendant le rattrapage hors ligne : chaque système doit rester juste avec les deux.
+
 **Critères d'acceptation :**
 
 - 250 visiteurs simulés en moins de 2 ms par pas sur un PC de développement (test de performance).
@@ -291,6 +385,8 @@ Termine par npm run check vert, le résultat du test de performance, et le rappo
 - Niveaux du parc par étoiles, avec les déblocages de la tranche.
 - Simulateur `npm run sim` étendu aux trois profils du GDD, avec la cible de la tranche.
 
+**Repères :** le rattrapage hors ligne existe déjà (`catchUp` et `MAX_OFFLINE_MS` dans `src/sim/time.ts`). Le simulateur est `tools/sim/run.ts` (options `--days` et `--seed`). Voir le point ouvert 6.
+
 **Critères d'acceptation :**
 
 - Le simulateur montre les 5 espèces obtenues en environ 15 minutes pour le profil régulier, et aucun profil bloqué.
@@ -320,6 +416,8 @@ Termine par npm run check vert et le rapport final.
 - Animations obligatoires pour chaque espèce : `idle`, `walk`, `sleep`, `eat`, plus une animation signature (la loutre nage, le jaguar s'étire, le tapir bouge sa trompe, le pécari fouille le sol).
 - Ajout des mêmes animations au capybara (`sleep`, `eat`, `swim` en signature).
 
+**Repères :** descriptions dans `tools/blender/species/` (schéma `tools/assets/species.ts`), animations dans `tools/blender/animations.py`, génération par `npm run models` (Blender 4.3.2, voir `docs/blender.md`). Voir le point ouvert 1 sur le validateur.
+
 **Critères d'acceptation :**
 
 - `npm run assets:check` vert pour les cinq modèles.
@@ -328,7 +426,7 @@ Termine par npm run check vert et le rapport final.
 **Prompt à coller :**
 
 ```
-Lis AGENTS.md, puis docs/briefs/phase-1.md section "Tâche 1.7", puis le fichier de description du capybara dans tools/blender/.
+Lis AGENTS.md, puis docs/briefs/phase-1.md section "Tâche 1.7", puis tools/blender/species/capybara.json (la description du capybara).
 Crée les descriptions du Pécari à collier, du Tapir du Brésil, de la Loutre géante et du Jaguar en copiant exactement sa structure.
 Traits signatures : reprends la colonne Signature du tableau "Amérique tropicale" de docs/gdd.md et exagère ces trois traits.
 Ajoute les animations demandées par le brief, y compris pour le capybara.
@@ -352,6 +450,8 @@ Termine par npm run check vert, la planche de silhouettes, et le rapport final.
 - Un groupe qui arrive dans son enclos : il hésite, renifle, puis explore.
 - Hasard visuel par un générateur à graine propre au rendu, jamais `Math.random`.
 - Animaux loin de la caméra animés à fréquence réduite.
+
+**Repères :** partir de `src/render/animals/` (`loadAnimalModel`, `pickClip`, `createAnimalSlot`) et étendre `AnimalAnimation`, aujourd'hui limitée à `'idle' | 'walk'`. Remplacer le capybara de démonstration (`DEMO_ANIMAL` dans `src/render/park-view.ts`) par les animaux de la simulation.
 
 **Critères d'acceptation :**
 
@@ -414,6 +514,8 @@ Termine par npm run check vert et le rapport final au format d'AGENTS.md.
 - Objets répétés en instanciation, imperfections voulues (légers décalages, variations de teinte).
 - Retour haptique léger à la pose.
 
+**Repères :** voir le point ouvert 4 : le retour haptique passe par `src/platform`, jamais par `render`.
+
 **Prompt à coller :**
 
 ```
@@ -441,6 +543,8 @@ Propose d'abord ton plan et attends mon OK. Termine par npm run check vert et le
 - Style carnet : papier crème, encre, textes de 14 points minimum, contraste vérifié, tout accessible au pouce.
 - Tous les textes passent par `src/i18n`.
 
+**Repères :** Preact n'est pas encore installé : l'ajouter en version exacte avec sa ligne dans `docs/decisions.md`. La qualité graphique réutilise `QualityLevel` et `qualitySettings` de `src/render/quality/quality.ts` (via `app`, car `ui` n'importe pas `render`), la langue réutilise `Locale` et `LOCALES` de `src/i18n`.
+
 **Prompt à coller :**
 
 ```
@@ -467,6 +571,8 @@ Termine par npm run check et npm run e2e verts et le rapport final au format d'A
 - Un morceau lofi composé pour le jeu, joué par touches (une phrase, puis du silence), avec des instruments échantillonnés libres de droits.
 - Thème court à l'ouverture d'un arrivage.
 - Registre des licences dans `assets/audio/LICENSES.md` : source, licence et lien pour chaque fichier.
+
+**Repères :** `src/audio/index.ts` est vide. `assets/audio/LICENSES.md` existe déjà.
 
 **Critères d'acceptation :**
 
