@@ -39,11 +39,27 @@ class FakeStorage implements Storage {
   }
 }
 
-function refusingFactory(): IDBFactory {
+function refusingFactory(error: Error): IDBFactory {
   const refuse = (): never => {
-    throw new DOMException('IndexedDB is disabled.', 'InvalidStateError');
+    throw error;
   };
   return { open: refuse, deleteDatabase: refuse, cmp: refuse, databases: refuse };
+}
+
+/** A database already upgraded by a newer game: opening it at our version fails asynchronously. */
+async function newerDatabaseFactory(): Promise<IDBFactory> {
+  const factory = new IDBFactory();
+  await new Promise<void>((resolve, reject) => {
+    const request = factory.open('zoo-refuge', 2);
+    request.onsuccess = () => {
+      request.result.close();
+      resolve();
+    };
+    request.onerror = () => {
+      reject(new Error('Could not prepare the newer database.'));
+    };
+  });
+  return factory;
 }
 
 /** The contract every backend must honour. */
@@ -100,10 +116,27 @@ describe('browser store selection', () => {
     expect(opened.kind).toBe('indexedDb');
   });
 
-  it('falls back to localStorage when IndexedDB is missing or refused', async () => {
-    for (const indexedDB of [undefined, refusingFactory()]) {
+  it('falls back to localStorage when IndexedDB is missing', async () => {
+    const opened = await openBrowserTextStore({
+      indexedDB: undefined,
+      localStorage: new FakeStorage(),
+    });
+    expect(opened).toMatchObject({ kind: 'localStorage', indexedDbFailure: null });
+  });
+
+  it('falls back to localStorage on any IndexedDB failure, and says why', async () => {
+    const failures: [IDBFactory, string][] = [
+      [
+        refusingFactory(new DOMException('IndexedDB is disabled.', 'InvalidStateError')),
+        'InvalidStateError: IndexedDB is disabled.',
+      ],
+      [refusingFactory(new TypeError('open is broken')), 'TypeError: open is broken'],
+      [await newerDatabaseFactory(), 'VersionError'],
+    ];
+    for (const [indexedDB, reason] of failures) {
       const opened = await openBrowserTextStore({ indexedDB, localStorage: new FakeStorage() });
       expect(opened.kind).toBe('localStorage');
+      expect(opened.indexedDbFailure).toContain(reason);
     }
   });
 

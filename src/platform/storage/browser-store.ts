@@ -8,6 +8,8 @@ export interface OpenedTextStore {
   readonly store: TextStore;
   /** `memory` means nothing survives a reload: app should warn the player. */
   readonly kind: TextStoreKind;
+  /** Why IndexedDB was not used although present, for the development log. */
+  readonly indexedDbFailure: string | null;
 }
 
 /** Browser storages, injectable so that tests can pass fakes or simulate their absence. */
@@ -51,15 +53,13 @@ function isWritable(storage: Storage): boolean {
   }
 }
 
-async function tryIndexedDb(factory: IDBFactory): Promise<TextStore | undefined> {
+async function tryIndexedDb(factory: IDBFactory): Promise<TextStore | string> {
   try {
     return await openIndexedDbTextStore(factory);
   } catch (error) {
-    // Firefox private mode and some WebViews refuse to open a database: fall back.
-    if (error instanceof DOMException) {
-      return undefined;
-    }
-    throw error;
+    // Firefox private mode and some WebViews refuse IndexedDB in odd ways. Any failure to open
+    // it must fall back to another storage, never leave the game without saves; the reason is kept.
+    return error instanceof Error ? `${error.name}: ${error.message}` : String(error);
   }
 }
 
@@ -67,14 +67,17 @@ async function tryIndexedDb(factory: IDBFactory): Promise<TextStore | undefined>
 export async function openBrowserTextStore(
   storages: BrowserStorages = readBrowserStorages(),
 ): Promise<OpenedTextStore> {
+  let indexedDbFailure: string | null = null;
   if (storages.indexedDB !== undefined) {
-    const store = await tryIndexedDb(storages.indexedDB);
-    if (store !== undefined) {
-      return { store, kind: 'indexedDb' };
+    const opened = await tryIndexedDb(storages.indexedDB);
+    if (typeof opened !== 'string') {
+      return { store: opened, kind: 'indexedDb', indexedDbFailure };
     }
+    indexedDbFailure = opened;
   }
   if (storages.localStorage !== undefined && isWritable(storages.localStorage)) {
-    return { store: createLocalStorageTextStore(storages.localStorage), kind: 'localStorage' };
+    const store = createLocalStorageTextStore(storages.localStorage);
+    return { store, kind: 'localStorage', indexedDbFailure };
   }
-  return { store: createMemoryTextStore(), kind: 'memory' };
+  return { store: createMemoryTextStore(), kind: 'memory', indexedDbFailure };
 }
