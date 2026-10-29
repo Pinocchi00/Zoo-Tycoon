@@ -98,3 +98,19 @@ Chaque décision structurante est ajoutée ici, la plus récente en bas. Format 
   - `src/sim` importe `shared` par chemin relatif, car l'alias `@/` n'existe pas pour les outils de `tools/` ;
   - `tools/sim/run.ts` est lancé directement par Node 24 (qui lit le TypeScript) et charge `src/sim` avec `runnerImport` de Vite : aucune dépendance ajoutée.
 - **Conséquences :** le rendu lit l'état sans le modifier et ne garde aucune copie entre deux images. Avec 1 000 000 de tirages, une tolérance de 0,1 point vaut environ 2 écarts-types pour un taux proche de 50 % : le test du gacha (phase suivante) devra choisir ses graines et ses tailles d'échantillon en connaissance de cause.
+
+## D-012 — Sauvegarde blindée (tâche 0.4)
+
+- **Contexte :** une sauvegarde ne doit jamais se perdre, survivre aux mises à jour du jeu et résister aux fichiers abîmés.
+- **Décision :**
+  - `zod` (version exacte) : prévu par la stack, il valide l'enveloppe et l'état complet, avec le chemin du champ fautif ; le réécrire à la main coûterait plus que la dépendance ;
+  - `fake-indexeddb` (version exacte, **tests seulement**) : les tests tournent sous Node, qui n'a pas IndexedDB ; sans lui, l'implémentation IndexedDB ne serait vérifiée qu'à la main. Il n'est jamais livré au joueur ;
+  - enveloppe JSON `{ format, formatVersion, writtenAtMs, checksum, payload }`. L'état est gardé **en texte** dans `payload`, pour que la somme de contrôle porte exactement sur ce qui est écrit ;
+  - somme de contrôle CRC-32 écrite à la main (sur les unités UTF-16) : elle détecte un fichier tronqué ou abîmé, elle ne protège pas contre la triche. `crypto` reste interdit dans les couches pures ;
+  - deux versions distinctes : `formatVersion` pour l'enveloppe, `state.version` pour l'état ; seul l'état a des migrations, chacune de `n` vers `n + 1`. La migration v0 → v1 est factice et sert de preuve ;
+  - le schéma de l'état est strict : un champ inconnu rend la sauvegarde invalide ;
+  - `deserialize(text)` suit le brief ; `readSave(text)` renvoie en plus la date d'écriture, utile plus tard pour le rattrapage hors ligne ;
+  - `src/platform/storage` : une petite interface clé → texte (`TextStore`), avec IndexedDB, repli `localStorage`, puis mémoire (signalée par `kind: 'memory'`) ; `SaveStorage` reçoit la fonction de validation, pour ne pas lier le stockage au format ;
+  - écriture sûre : emplacement temporaire → relecture et validation → copie numérotée → relecture et validation → nettoyage. On ne supprime que les copies plus anciennes que la 3ᵉ copie valide la plus récente ; un numéro de copie n'est jamais réutilisé ;
+  - chargement : la copie valide la plus récente gagne ; `skippedCopies > 0` indique un repli. `app` émettra alors l'événement `saveRecovered`, ajouté aux événements de `sim`, pour que l'interface informe le joueur.
+- **Conséquences :** l'implémentation Capacitor (tâche 0.6) n'a qu'à fournir un `TextStore`. Une sauvegarde venue d'une version plus récente du jeu est refusée puis remplacée par une copie plus ancienne ; elle n'est supprimée qu'après trois nouvelles écritures valides.
