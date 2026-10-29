@@ -54,9 +54,16 @@ export interface WelcomeChoiceOfferedEvent {
   readonly options: readonly SpeciesId[];
 }
 
+/**
+ * Why a construction event happened: a new command, or the undo history. app vibrates only on
+ * `command`, so undoing never buzzes.
+ */
+export type BuildCause = 'command' | 'undo' | 'redo';
+
 /** Path cells were paved, resurfaced or taken up (`surface` null). */
 export interface PathTilesChangedEvent {
   readonly type: 'pathTilesChanged';
+  readonly cause: BuildCause;
   readonly tiles: readonly {
     readonly column: number;
     readonly row: number;
@@ -67,6 +74,7 @@ export interface PathTilesChangedEvent {
 /** An enclosure appeared: built, or brought back by undo or redo with its group. */
 export interface EnclosurePlacedEvent {
   readonly type: 'enclosurePlaced';
+  readonly cause: BuildCause;
   readonly enclosureId: EnclosureId;
   readonly speciesId: SpeciesId | null;
 }
@@ -74,6 +82,7 @@ export interface EnclosurePlacedEvent {
 /** Its outline moved or turned; the group inside followed. */
 export interface EnclosureMovedEvent {
   readonly type: 'enclosureMoved';
+  readonly cause: BuildCause;
   readonly enclosureId: EnclosureId;
 }
 
@@ -93,12 +102,14 @@ export interface EnclosureRemovedEvent {
 
 export interface BuildingPlacedEvent {
   readonly type: 'buildingPlaced';
+  readonly cause: BuildCause;
   readonly buildingId: BuildingId;
   readonly itemId: ItemId;
 }
 
 export interface BuildingMovedEvent {
   readonly type: 'buildingMoved';
+  readonly cause: BuildCause;
   readonly buildingId: BuildingId;
 }
 

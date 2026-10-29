@@ -114,6 +114,15 @@ export function loadGameData(raw: RawGameData): Result<GameData, readonly DataEr
 
   checkBanners(banners, errors);
   checkSharedItemIds({ habitatElements, buildings, decor, pathSurfaces }, errors);
+  // Otherwise a species of the largest size could never be installed.
+  if (
+    enclosureSizes !== null &&
+    buildRules !== null &&
+    enclosureSizes.XL.minAreaCells > buildRules.enclosure.maxAreaCells
+  ) {
+    const message = 'must allow the largest enclosure size (XL)';
+    errors.push({ source: 'buildRules', path: 'enclosure.maxAreaCells', message });
+  }
   if (pathSurfaces.size === 0) {
     errors.push({ source: 'pathSurfaces', path: '', message: 'at least one path surface' });
   }

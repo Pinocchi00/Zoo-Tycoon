@@ -1,7 +1,7 @@
 import type { GameData } from '../../data/load';
 import type { BuildingId, EnclosureId, ItemId, SpeciesId } from '../../shared/brand';
 import { err, ok, type Result } from '../../shared/result';
-import { emit, type EventQueue } from '../events';
+import { emit, type BuildCause, type EventQueue } from '../events';
 import type { GameState } from '../state';
 import type { BuildError } from './build-errors';
 import {
@@ -295,11 +295,12 @@ function sameOutline(a: EnclosureState, b: EnclosureState): boolean {
   );
 }
 
-function emitEnclosureEvents(change: ParkChange, events: EventQueue): void {
+function emitEnclosureEvents(change: ParkChange, cause: BuildCause, events: EventQueue): void {
   const housedAfter = new Set(change.enclosures.map(({ after }) => after?.speciesId ?? null));
   for (const { before, after } of change.enclosures) {
     if (before === null && after !== null) {
-      emit(events, { type: 'enclosurePlaced', enclosureId: after.id, speciesId: after.speciesId });
+      const placed = { enclosureId: after.id, speciesId: after.speciesId, cause };
+      emit(events, { type: 'enclosurePlaced', ...placed });
     } else if (before !== null && after === null) {
       const returned = before.speciesId;
       emit(events, {
@@ -309,7 +310,7 @@ function emitEnclosureEvents(change: ParkChange, events: EventQueue): void {
       });
     } else if (before !== null && after !== null) {
       if (!sameOutline(before, after)) {
-        emit(events, { type: 'enclosureMoved', enclosureId: after.id });
+        emit(events, { type: 'enclosureMoved', enclosureId: after.id, cause });
       }
       if (before.speciesId !== after.speciesId) {
         const event = { enclosureId: after.id, speciesId: after.speciesId };
@@ -319,19 +320,25 @@ function emitEnclosureEvents(change: ParkChange, events: EventQueue): void {
   }
 }
 
-function emitChangeEvents(change: ParkChange, state: GameState, events: EventQueue): void {
+function emitChangeEvents(
+  change: ParkChange,
+  cause: BuildCause,
+  state: GameState,
+  events: EventQueue,
+): void {
   if (change.paths.length > 0) {
     const tiles = change.paths.map(({ column, row, after }) => ({ column, row, surface: after }));
-    emit(events, { type: 'pathTilesChanged', tiles });
+    emit(events, { type: 'pathTilesChanged', tiles, cause });
   }
-  emitEnclosureEvents(change, events);
+  emitEnclosureEvents(change, cause, events);
   for (const { before, after } of change.buildings) {
     if (before === null && after !== null) {
-      emit(events, { type: 'buildingPlaced', buildingId: after.id, itemId: after.itemId });
+      const placed = { buildingId: after.id, itemId: after.itemId, cause };
+      emit(events, { type: 'buildingPlaced', ...placed });
     } else if (before !== null && after === null) {
       emit(events, { type: 'buildingRemoved', buildingId: before.id });
     } else if (after !== null) {
-      emit(events, { type: 'buildingMoved', buildingId: after.id });
+      emit(events, { type: 'buildingMoved', buildingId: after.id, cause });
     }
   }
   if (change.coinsDelta !== 0) {
@@ -347,6 +354,7 @@ function emitChangeEvents(change: ParkChange, state: GameState, events: EventQue
 export function applyParkChange(
   state: GameState,
   change: ParkChange,
+  cause: BuildCause,
   data: GameData,
   events: EventQueue,
 ): Result<void, BuildError> {
@@ -355,7 +363,7 @@ export function applyParkChange(
     return valid;
   }
   commit(state, change, data.terrain.columns);
-  emitChangeEvents(change, state, events);
+  emitChangeEvents(change, cause, state, events);
   refreshViewScores(state, data, events);
   return ok(undefined);
 }

@@ -49,8 +49,8 @@ export const terrainSchema = z
       context.addIssue({ code: 'custom', message, path: ['entrance'] });
     }
     const [west, east] = parking;
-    if (west.row < terrain.rows || east.row < terrain.rows) {
-      const message = 'parking must lie outside the land, south of it';
+    if (west.row !== terrain.rows || east.row !== terrain.rows) {
+      const message = 'parking must lie just outside the south edge';
       context.addIssue({ code: 'custom', message, path: ['parking'] });
     }
     if (west.column + west.width > entrance.column || east.column < entranceEnd) {

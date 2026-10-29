@@ -152,7 +152,7 @@ describe('placeBuilding', () => {
     expect(state.nextIds.building).toBe(2);
     expect(state.currencies.coins).toBe(START_COINS - 4 * GRAVEL_PER_CELL - TOILETS_PRICE);
     expect(ofType(events, 'buildingPlaced')).toEqual([
-      { type: 'buildingPlaced', buildingId: FIRST_BUILDING, itemId: TOILETS },
+      { type: 'buildingPlaced', buildingId: FIRST_BUILDING, itemId: TOILETS, cause: 'command' },
     ]);
   });
 
@@ -249,7 +249,7 @@ describe('moveBuilding and removeBuilding', () => {
     });
     expect(state.currencies.coins).toBe(coins);
     expect(ofType(events, 'buildingMoved')).toEqual([
-      { type: 'buildingMoved', buildingId: FIRST_BUILDING },
+      { type: 'buildingMoved', buildingId: FIRST_BUILDING, cause: 'command' },
     ]);
   });
 
