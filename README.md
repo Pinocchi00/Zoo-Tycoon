@@ -24,7 +24,7 @@ Puis ouvrir l'adresse affichée (par défaut http://localhost:5173).
 npm run check
 ```
 
-Enchaîne la vérification des types, le linter, le formatage, les tests avec couverture et la construction. Tout doit être vert avant de fusionner.
+Enchaîne la vérification des types, le linter, le formatage, la vérification des modèles 3D, les tests avec couverture et la construction. Tout doit être vert avant de fusionner.
 
 | Script                              | Rôle                                                       |
 | ----------------------------------- | ---------------------------------------------------------- |
@@ -37,9 +37,11 @@ Enchaîne la vérification des types, le linter, le formatage, les tests avec co
 | `npm run format:check`              | Vérifie la mise en forme sans rien modifier                |
 | `npm run test`                      | Tests unitaires (Vitest)                                   |
 | `npm run test:coverage`             | Tests avec couverture (90 % sur `sim` et `save`)           |
+| `npm run assets:check`              | Vérifie les modèles 3D de `assets/models`                  |
 | `npm run check`                     | Tout ce qui précède, dans l'ordre                          |
 | `npm run e2e`                       | Construit le jeu puis lance les tests Playwright           |
 | `npm run sim -- --days 7 --seed 42` | Simule N jours de jeu sans affichage et résume le résultat |
+| `npm run models`                    | Régénère les modèles 3D avec Blender (`docs/blender.md`)   |
 
 ## Tests de bout en bout
 
