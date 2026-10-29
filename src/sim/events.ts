@@ -5,8 +5,18 @@ export interface CoinsAddedEvent {
   readonly total: number;
 }
 
+/**
+ * The main save was damaged and an older copy was loaded instead.
+ * Emitted by app after loading, so that ui can tell the player gently.
+ */
+export interface SaveRecoveredEvent {
+  readonly type: 'saveRecovered';
+  /** Newer copies that could not be read and were skipped. */
+  readonly skippedCopies: number;
+}
+
 /** What happened in the simulation; render, audio and ui react to these instead of diffing the state. */
-export type GameEvent = CoinsAddedEvent;
+export type GameEvent = CoinsAddedEvent | SaveRecoveredEvent;
 
 /** Events waiting for the reader. Kept outside GameState so that they never end up in a save. */
 export interface EventQueue {
