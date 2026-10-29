@@ -1,0 +1,46 @@
+{
+  "gridSize": 8,
+  "swatchPixels": 8,
+  "colors": [
+    {
+      "name": "fur_capybara",
+      "hex": "#9a7352"
+    },
+    {
+      "name": "fur_capybara_dark",
+      "hex": "#6b4c36"
+    },
+    {
+      "name": "fur_capybara_light",
+      "hex": "#b08b66"
+    },
+    {
+      "name": "eye_black",
+      "hex": "#1e1915"
+    },
+    {
+      "name": "nose_dark",
+      "hex": "#3b2c24"
+    },
+    {
+      "name": "inner_ear",
+      "hex": "#7a5444"
+    },
+    {
+      "name": "fur_capybara_speckle",
+      "hex": "#916a4a"
+    },
+    {
+      "name": "fur_belly",
+      "hex": "#b2916d"
+    },
+    {
+      "name": "morrillo",
+      "hex": "#45332a"
+    },
+    {
+      "name": "eye_shine",
+      "hex": "#f3eee4"
+    }
+  ]
+}

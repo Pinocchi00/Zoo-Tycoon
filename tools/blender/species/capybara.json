@@ -1,0 +1,271 @@
+{
+  "id": "capybara",
+  "family": "rodent",
+  "lengthM": 1.1,
+  "signatures": ["square muzzle", "barrel body", "calm in the water"],
+  "bones": [
+    {
+      "name": "root",
+      "head": [0, 0, -0.1],
+      "tail": [0, 0, 0.1]
+    },
+    {
+      "name": "spine",
+      "parent": "root",
+      "head": [0, 0.4, -0.32],
+      "tail": [0, 0.4, 0.26]
+    },
+    {
+      "name": "chest",
+      "parent": "spine",
+      "head": [0, 0.38, -0.05],
+      "tail": [0, 0.38, 0.15]
+    },
+    {
+      "name": "head",
+      "parent": "spine",
+      "head": [0, 0.47, 0.26],
+      "tail": [0, 0.47, 0.62]
+    },
+    {
+      "name": "eyes",
+      "parent": "head",
+      "head": [0, 0.565, 0.42],
+      "tail": [0, 0.645, 0.42]
+    },
+    {
+      "name": "ear_l",
+      "parent": "head",
+      "head": [0.085, 0.6, 0.29],
+      "tail": [0.085, 0.68, 0.29]
+    },
+    {
+      "name": "ear_r",
+      "parent": "head",
+      "head": [-0.085, 0.6, 0.29],
+      "tail": [-0.085, 0.68, 0.29]
+    },
+    {
+      "name": "leg_fl",
+      "parent": "spine",
+      "head": [0.11, 0.36, 0.19],
+      "tail": [0.11, 0, 0.19]
+    },
+    {
+      "name": "leg_fr",
+      "parent": "spine",
+      "head": [-0.11, 0.36, 0.19],
+      "tail": [-0.11, 0, 0.19]
+    },
+    {
+      "name": "leg_bl",
+      "parent": "spine",
+      "head": [0.11, 0.38, -0.28],
+      "tail": [0.11, 0, -0.28]
+    },
+    {
+      "name": "leg_br",
+      "parent": "spine",
+      "head": [-0.11, 0.38, -0.28],
+      "tail": [-0.11, 0, -0.28]
+    }
+  ],
+  "parts": [
+    {
+      "name": "body",
+      "kind": "body",
+      "bone": "chest",
+      "color": "fur_capybara",
+      "center": [0, 0.38, -0.06],
+      "radii": [0.25, 0.23, 0.44],
+      "exponent": 0.78,
+      "pitchDeg": -8,
+      "segments": 20,
+      "rings": 12,
+      "speckle": {
+        "color": "fur_capybara_speckle",
+        "share": 0.22,
+        "seed": 7
+      }
+    },
+    {
+      "name": "belly",
+      "kind": "body",
+      "bone": "chest",
+      "color": "fur_belly",
+      "center": [0, 0.25, -0.04],
+      "radii": [0.19, 0.08, 0.34],
+      "exponent": 0.8,
+      "pitchDeg": -8,
+      "segments": 12,
+      "rings": 7
+    },
+    {
+      "name": "head",
+      "kind": "head",
+      "bone": "head",
+      "color": "fur_capybara",
+      "center": [0, 0.48, 0.4],
+      "radii": [0.14, 0.165, 0.22],
+      "exponent": 0.55,
+      "pitchDeg": -12,
+      "segments": 16,
+      "rings": 10,
+      "speckle": {
+        "color": "fur_capybara_speckle",
+        "share": 0.22,
+        "seed": 11
+      }
+    },
+    {
+      "name": "muzzle",
+      "kind": "muzzle",
+      "bone": "head",
+      "color": "fur_capybara",
+      "center": [0, 0.43, 0.57],
+      "radii": [0.13, 0.135, 0.09],
+      "exponent": 0.5,
+      "segments": 14,
+      "rings": 8,
+      "pitchDeg": -12,
+      "speckle": {
+        "color": "fur_capybara_speckle",
+        "share": 0.22,
+        "seed": 13
+      }
+    },
+    {
+      "name": "morrillo",
+      "kind": "patch",
+      "bone": "head",
+      "color": "morrillo",
+      "center": [0, 0.596, 0.515],
+      "radii": [0.05, 0.02, 0.065],
+      "pitchDeg": -12,
+      "segments": 8,
+      "rings": 5
+    },
+    {
+      "name": "nose_l",
+      "kind": "nose",
+      "bone": "head",
+      "color": "nose_dark",
+      "center": [0.045, 0.51, 0.668],
+      "radii": [0.024, 0.015, 0.016],
+      "segments": 6,
+      "rings": 4,
+      "mirror": true
+    },
+    {
+      "name": "eye_l",
+      "kind": "eye",
+      "bone": "eyes",
+      "color": "eye_black",
+      "center": [0.128, 0.575, 0.42],
+      "radii": [0.02, 0.024, 0.024],
+      "segments": 8,
+      "rings": 6,
+      "mirror": true
+    },
+    {
+      "name": "shine_l",
+      "kind": "eye",
+      "bone": "eyes",
+      "color": "eye_shine",
+      "center": [0.146, 0.585, 0.43],
+      "radii": [0.006, 0.007, 0.007],
+      "segments": 6,
+      "rings": 4,
+      "mirror": true
+    },
+    {
+      "name": "ear_l",
+      "kind": "ear",
+      "bone": "ear_l",
+      "color": "fur_capybara_dark",
+      "center": [0.09, 0.645, 0.28],
+      "radii": [0.04, 0.04, 0.022],
+      "rollDeg": -15,
+      "segments": 10,
+      "rings": 6,
+      "mirror": true,
+      "mirrorOffset": [0, -0.012, 0.005]
+    },
+    {
+      "name": "inner_ear_l",
+      "kind": "patch",
+      "bone": "ear_l",
+      "color": "inner_ear",
+      "center": [0.09, 0.64, 0.297],
+      "radii": [0.026, 0.026, 0.008],
+      "rollDeg": -15,
+      "segments": 8,
+      "rings": 5,
+      "mirror": true,
+      "mirrorOffset": [0, -0.012, 0.005]
+    },
+    {
+      "name": "leg_fl",
+      "kind": "leg",
+      "bone": "leg_fl",
+      "color": "fur_capybara",
+      "start": [0.11, 0.36, 0.19],
+      "end": [0.12, 0.05, 0.21],
+      "startRadius": 0.075,
+      "endRadius": 0.055,
+      "segments": 10,
+      "mirror": true
+    },
+    {
+      "name": "leg_bl",
+      "kind": "leg",
+      "bone": "leg_bl",
+      "color": "fur_capybara",
+      "start": [0.11, 0.38, -0.28],
+      "end": [0.13, 0.05, -0.27],
+      "startRadius": 0.085,
+      "endRadius": 0.06,
+      "segments": 10,
+      "mirror": true
+    },
+    {
+      "name": "foot_fl",
+      "kind": "foot",
+      "bone": "leg_fl",
+      "color": "fur_capybara_dark",
+      "center": [0.12, 0.035, 0.235],
+      "radii": [0.06, 0.035, 0.075],
+      "segments": 10,
+      "rings": 6,
+      "mirror": true
+    },
+    {
+      "name": "foot_bl",
+      "kind": "foot",
+      "bone": "leg_bl",
+      "color": "fur_capybara_dark",
+      "center": [0.13, 0.035, -0.24],
+      "radii": [0.065, 0.035, 0.085],
+      "segments": 10,
+      "rings": 6,
+      "mirror": true
+    }
+  ],
+  "animations": {
+    "idle": {
+      "durationS": 4,
+      "breathsPerLoop": 2,
+      "breathScale": 0.03,
+      "blinkAtS": 2.4,
+      "earTwitchAtS": 1.2,
+      "earTwitchDeg": 20,
+      "headNodDeg": 2
+    },
+    "walk": {
+      "durationS": 1,
+      "legSwingDeg": 24,
+      "bodyBobM": 0.012,
+      "headNodDeg": 3
+    }
+  }
+}
