@@ -118,7 +118,7 @@ Ce que la phase 0 a réellement produit. Chaque tâche part de là : réutiliser
 | `npm run check` | Typage, lint, format, `assets:check`, tests avec couverture (≥ 90 % sur `src/sim` et `src/save`), construction |
 | `npm run e2e` | Construction puis Playwright (`tests/e2e/boot.spec.ts`) |
 | `npm run sim -- --days 7 --seed 42` | Simulateur d'économie (`tools/sim/run.ts`), sans rendu |
-| `npm run models` | Régénère les `.glb` avec Blender 4.3.2 (`tools/blender/run.ts`, voir `docs/blender.md`) |
+| `npm run models` | Régénère les `.glb` avec Blender 4.3 ou plus récent, testé avec 4.3.2 (`tools/blender/run.ts`, voir `docs/blender.md`) |
 | `npm run assets:check` | Valide chaque `.glb` de `assets/models` (`tools/assets/validate.ts`) |
 | `npm run android` | Construction puis synchronisation Capacitor (voir `docs/android.md`) |
 
@@ -185,15 +185,17 @@ Installées : `three`, `zod`, `@capacitor/core`, `@capacitor/android`, `@capacit
 1. **Animations obligatoires (tâche 1.7).** Le brief demande `sleep`, `eat` et une signature pour chaque espèce, mais `tools/assets/model-rules.ts` n'exige que `idle` et `walk`, et le prompt de la tâche interdit de modifier le validateur. Sans changement du validateur, l'absence d'une nouvelle animation passerait inaperçue. Faut-il autoriser la tâche 1.7 à ajouter ces animations aux règles ?
 2. **Modèles des visiteurs (tâche 1.9).** Le validateur s'applique à tout `.glb` de `assets/models` avec le budget d'un animal (1 500 à 4 000 triangles, `idle` et `walk`, une description d'espèce par modèle). Un visiteur (800 à 1 500 triangles selon le GDD) serait refusé. La tâche 1.9 devra modifier le validateur ou ranger les visiteurs ailleurs : à décider avant de la lancer.
 3. **Taille du terrain (tâche 1.4).** La taille du parc de départ (`STARTING_PARK_GRID`, 64 × 64) est aujourd'hui définie dans `src/render/park-view.ts`. Pour que la simulation valide les sorties de terrain, elle doit appartenir à `src/data` ou `src/sim`, et le rendu la lire. Le brief ne donne ni la taille du « grand terrain » ni l'emplacement de l'entrée et des parkings.
-4. **Retour haptique (tâche 1.10).** Le brief place le retour haptique dans le rendu, mais `render` n'a pas le droit d'appeler Capacitor (seul `platform` le fait), et aucune extension de vibration n'est installée. Il faudra passer par `platform` et `app`, et justifier la dépendance (par exemple `@capacitor/haptics`) dans `docs/decisions.md`.
+4. **Retour haptique (tâche 1.10).** Le brief place le retour haptique dans le rendu, mais d'après `AGENTS.md` (sections 3 et 4.1) l'accès aux vibrations et à Capacitor appartient à `platform` ; le lint ne l'interdit pas à `render`, la règle est donc à respecter à la main, et aucune extension de vibration n'est installée. Il faudra passer par `platform` et `app`, et justifier la dépendance (par exemple `@capacitor/haptics`) dans `docs/decisions.md`.
 5. **Clés de texte dans les données (tâche 1.1).** Le graphe de dépendances d'`AGENTS.md` ne place pas `i18n`. Le lint autorise aujourd'hui `src/data` à importer `src/i18n`. Faut-il typer les clés de texte des données avec `TranslationKey` (import de `i18n` par `data`), ou garder de simples chaînes vérifiées par un test ?
 6. **Courrier quotidien (tâche 1.6).** La règle parle de « jour réel », alors que la simulation ne connaît que le temps de jeu fourni par `advance` et `catchUp`. L'heure réelle devra être fournie par `app`, comme le temps. Par ailleurs, `catchUp` ignore toute absence au-delà de 12 h, alors que le GDD dit que les recettes sont « plafonnées » au-delà : à préciser (arrêt net ou taux réduit) à la tâche 1.6.
+7. **Fréquence de mise à jour des visiteurs (tâche 1.5).** La fréquence réduite doit être « fournie par `app` », mais `System = (state, stepMs, events)`, `advance` et `catchUp` ne prennent aucune entrée de ce genre. La tâche 1.5 devra changer l'API de `src/sim/time.ts` : la forme est à proposer dans son plan.
+8. **Titre de la tâche 1.2.** Le schéma « Ordre des tâches » dit « 1.2 Contenu des 5 espèces », alors que la tâche porte sur les 4 autres espèces (le capybara est fait à la tâche 1.1).
 
 ---
 
 ## Tâche 1.0 — Mise à jour du brief
 
-**Statut :** faite (branche `chore/phase-1-brief`).
+**Statut :** faite, en attente de fusion (branche `chore/phase-1-brief`).
 
 **But :** adapter ce brief à ce que la phase 0 a réellement produit (noms de fichiers, API, décisions), pour que les IA suivantes ne se trompent pas.
 
@@ -416,7 +418,7 @@ Termine par npm run check vert et le rapport final.
 - Animations obligatoires pour chaque espèce : `idle`, `walk`, `sleep`, `eat`, plus une animation signature (la loutre nage, le jaguar s'étire, le tapir bouge sa trompe, le pécari fouille le sol).
 - Ajout des mêmes animations au capybara (`sleep`, `eat`, `swim` en signature).
 
-**Repères :** descriptions dans `tools/blender/species/` (schéma `tools/assets/species.ts`), animations dans `tools/blender/animations.py`, génération par `npm run models` (Blender 4.3.2, voir `docs/blender.md`). Voir le point ouvert 1 sur le validateur.
+**Repères :** descriptions dans `tools/blender/species/` (schéma `tools/assets/species.ts`), animations dans `tools/blender/animations.py`, génération par `npm run models` (Blender 4.3 ou plus récent, testé avec 4.3.2, voir `docs/blender.md`). Voir le point ouvert 1 sur le validateur.
 
 **Critères d'acceptation :**
 
@@ -451,7 +453,7 @@ Termine par npm run check vert, la planche de silhouettes, et le rapport final.
 - Hasard visuel par un générateur à graine propre au rendu, jamais `Math.random`.
 - Animaux loin de la caméra animés à fréquence réduite.
 
-**Repères :** partir de `src/render/animals/` (`loadAnimalModel`, `pickClip`, `createAnimalSlot`) et étendre `AnimalAnimation`, aujourd'hui limitée à `'idle' | 'walk'`. Remplacer le capybara de démonstration (`DEMO_ANIMAL` dans `src/render/park-view.ts`) par les animaux de la simulation.
+**Repères :** partir de `src/render/animals/` (`loadAnimalModel`, `pickClip`, `createAnimalSlot`) et étendre `AnimalAnimation`, aujourd'hui limitée à `'idle' | 'walk'`. Pour le générateur à graine propre au rendu, réutiliser `createRng` et `randomFloat` de `src/sim/rng.ts` (le lint l'autorise) plutôt qu'en écrire un autre. Remplacer le capybara de démonstration (`DEMO_ANIMAL` dans `src/render/park-view.ts`) par les animaux de la simulation.
 
 **Critères d'acceptation :**
 
