@@ -11,6 +11,12 @@ describe('createGameState', () => {
       currencies: { coins: 0, arrivalTickets: 0, careMedals: 0, decorTickets: 0, shavings: 0 },
       enclosures: [],
       animals: [],
+      gacha: {
+        arrivalsSince: { rare: 0, veryRare: 0, iconic: 0 },
+        welcome: { arrivalsDone: 0, pendingChoice: null },
+        collection: [],
+        history: [],
+      },
     });
   });
 
@@ -28,6 +34,8 @@ describe('createGameState', () => {
     expect(second.rng).toEqual(createRng(1));
     expect(second.enclosures).not.toBe(first.enclosures);
     expect(second.animals).not.toBe(first.animals);
+    expect(second.gacha.arrivalsSince).not.toBe(first.gacha.arrivalsSince);
+    expect(second.gacha.history).not.toBe(first.gacha.history);
   });
 
   it('rejects an invalid seed', () => {

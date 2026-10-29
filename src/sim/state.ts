@@ -1,8 +1,9 @@
 import type { AnimalId, EnclosureId, SpeciesId } from '../shared/brand';
+import { createGachaState, type GachaState } from './gacha/gacha-state';
 import { createRng, type RngState } from './rng';
 
 /** Bumped whenever the shape of GameState changes; the save layer migrates older versions. */
-export const STATE_VERSION = 1;
+export const STATE_VERSION = 2;
 
 export interface GameClock {
   /** Game time elapsed since the park opened, in whole milliseconds. */
@@ -44,6 +45,8 @@ export interface GameState {
   currencies: Currencies;
   enclosures: EnclosureState[];
   animals: AnimalState[];
+  /** Arrivals: guarantee counters, welcome banner, species met and the full history. */
+  gacha: GachaState;
 }
 
 export function createGameState(seed: number): GameState {
@@ -54,5 +57,6 @@ export function createGameState(seed: number): GameState {
     currencies: { coins: 0, arrivalTickets: 0, careMedals: 0, decorTickets: 0, shavings: 0 },
     enclosures: [],
     animals: [],
+    gacha: createGachaState(),
   };
 }

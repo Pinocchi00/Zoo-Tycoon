@@ -1,5 +1,15 @@
+import type { GameData } from '../data/load';
 import { err, ok, type Result } from '../shared/result';
 import { emit, type EventQueue } from './events';
+import {
+  adoptFromCatalog,
+  chooseWelcomeSpecies,
+  performArrival,
+  type AdoptFromCatalogCommand,
+  type ArrivalError,
+  type ChooseWelcomeSpeciesCommand,
+  type PerformArrivalCommand,
+} from './gacha/arrivals';
 import type { GameState } from './state';
 
 /** Development-only cheat that proves the command pipeline; app never exposes it in production. */
@@ -9,9 +19,10 @@ export interface AddCoinsCommand {
 }
 
 /** Everything the player can ask for. The simulation validates, then applies. */
-export type Command = AddCoinsCommand;
+export type Command =
+  AddCoinsCommand | PerformArrivalCommand | ChooseWelcomeSpeciesCommand | AdoptFromCatalogCommand;
 
-export type CommandError = 'invalidAmount' | 'currencyOverflow';
+export type CommandError = 'invalidAmount' | 'currencyOverflow' | ArrivalError;
 
 function addCoins(
   state: GameState,
@@ -34,9 +45,17 @@ function addCoins(
 export function applyCommand(
   state: GameState,
   command: Command,
+  data: GameData,
   events: EventQueue,
 ): Result<void, CommandError> {
-  // A single-member union cannot be switched on without a lint error. Adding a second
-  // command breaks this call at compile time, which forces an exhaustive switch here.
-  return addCoins(state, command, events);
+  switch (command.type) {
+    case 'addCoins':
+      return addCoins(state, command, events);
+    case 'performArrival':
+      return performArrival(state, command, data, events);
+    case 'chooseWelcomeSpecies':
+      return chooseWelcomeSpecies(state, command, data, events);
+    case 'adoptFromCatalog':
+      return adoptFromCatalog(state, command, data, events);
+  }
 }

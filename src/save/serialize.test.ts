@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { animalId, enclosureId, err, speciesId, type Result } from '../shared';
+import { animalId, bannerId, enclosureId, err, speciesId, type Result } from '../shared';
+import { loadGameContent } from '../data';
 import {
   advance,
   applyCommand,
   createEventQueue,
   createGameState,
   nextUint32,
+  STATE_VERSION,
   STEP_MS,
   type GameState,
 } from '../sim';
@@ -16,6 +18,8 @@ const WRITTEN_AT_MS = 1_793_260_800_000;
 const SEED = 2024;
 const PLAYED_MS = 123_456;
 const SPENT_DRAWS = 17;
+/** Enough to reach the welcome banner's guaranteed choice, which stays pending. */
+const WELCOME_TICKETS = 18;
 
 function unwrap<T, E>(result: Result<T, E>): T {
   if (!result.ok) {
@@ -29,7 +33,13 @@ function playedState(): GameState {
   const state = createGameState(SEED);
   const events = createEventQueue();
   advance(state, PLAYED_MS + STEP_MS / 2, events);
-  applyCommand(state, { type: 'addCoins', amount: 1234 }, events);
+  const data = unwrap(loadGameContent());
+  applyCommand(state, { type: 'addCoins', amount: 1234 }, data, events);
+  state.currencies.arrivalTickets = WELCOME_TICKETS;
+  const welcome = unwrap(bannerId('welcome'));
+  for (let batch = 0; batch < 2; batch += 1) {
+    applyCommand(state, { type: 'performArrival', bannerId: welcome, mode: 'multi' }, data, events);
+  }
   for (let draw = 0; draw < SPENT_DRAWS; draw += 1) {
     nextUint32(state.rng);
   }
@@ -145,8 +155,9 @@ describe('damaged files', () => {
 
   it('reports a state from a newer game', () => {
     const state = playedState();
-    expect(deserialize(forgeSave({ ...state, version: 2 }))).toEqual(
-      err({ kind: 'versionFromFuture', version: 2 }),
+    const future = STATE_VERSION + 1;
+    expect(deserialize(forgeSave({ ...state, version: future }))).toEqual(
+      err({ kind: 'versionFromFuture', version: future }),
     );
   });
 });
@@ -208,16 +219,86 @@ describe('state validation', () => {
     });
   });
 
+  it('refuses impossible arrival progress', () => {
+    const gacha = state.gacha;
+    const [first] = gacha.collection;
+    if (first === undefined) {
+      throw new Error('The played state has met a species.');
+    }
+    expect(pathOf({ ...state, gacha: { ...gacha, collection: [{ ...first, stars: 6 }] } })).toEqual(
+      {
+        kind: 'invalidState',
+        path: 'gacha.collection.0.stars',
+      },
+    );
+    expect(pathOf({ ...state, gacha: { ...gacha, collection: [first, first] } })).toEqual({
+      kind: 'invalidState',
+      path: 'gacha.collection',
+    });
+    expect(
+      pathOf({
+        ...state,
+        gacha: { ...gacha, arrivalsSince: { ...gacha.arrivalsSince, rare: -1 } },
+      }),
+    ).toEqual({ kind: 'invalidState', path: 'gacha.arrivalsSince.rare' });
+    const pendingChoice = { bannerId: 'welcome', options: [] };
+    expect(
+      pathOf({ ...state, gacha: { ...gacha, welcome: { ...gacha.welcome, pendingChoice } } }),
+    ).toEqual({ kind: 'invalidState', path: 'gacha.welcome.pendingChoice.options' });
+  });
+
+  it('refuses a history with a gap or an unknown rarity', () => {
+    const history = state.gacha.history;
+    expect(pathOf({ ...state, gacha: { ...state.gacha, history: history.slice(1) } })).toEqual({
+      kind: 'invalidState',
+      path: 'gacha.history',
+    });
+    const [first, ...rest] = history;
+    const forged = [{ ...first, rarity: 'legendary' }, ...rest];
+    expect(pathOf({ ...state, gacha: { ...state.gacha, history: forged } })).toEqual({
+      kind: 'invalidState',
+      path: 'gacha.history.0.rarity',
+    });
+  });
+
   it('refuses an unknown field', () => {
     expect(pathOf({ ...state, hackedGems: 9999 })).toMatchObject({ kind: 'invalidState' });
+  });
+});
+
+const EMPTY_GACHA = {
+  arrivalsSince: { rare: 0, veryRare: 0, iconic: 0 },
+  welcome: { arrivalsDone: 0, pendingChoice: null },
+  collection: [],
+  history: [],
+};
+
+describe('migration from version 1', () => {
+  const state = playedState();
+  const { gacha: _gacha, ...stateV1 } = { ...state, version: 1 };
+
+  it('loads a version 1 save, with no arrival made yet', () => {
+    expect(deserialize(forgeSave(stateV1))).toEqual({
+      ok: true,
+      value: { ...state, gacha: EMPTY_GACHA },
+    });
+  });
+
+  it('reports a version 1 save that cannot be migrated', () => {
+    expect(deserialize(forgeSave([]))).toEqual(err({ kind: 'invalidPayload' }));
+    expect(deserialize(forgeSave({ version: 1 }))).toMatchObject({
+      ok: false,
+      error: { kind: 'invalidState' },
+    });
   });
 });
 
 describe('migration from version 0', () => {
   const state = playedState();
   const { shavings: _shavings, ...currenciesV0 } = state.currencies;
+  const { gacha: _gacha, ...stateV1 } = state;
   const stateV0 = {
-    ...state,
+    ...stateV1,
     version: 0,
     clock: { timeMs: state.clock.timeMs },
     currencies: currenciesV0,
@@ -230,6 +311,7 @@ describe('migration from version 0', () => {
         ...state,
         clock: { ...state.clock, accumulatorMs: 0 },
         currencies: { ...state.currencies, shavings: 0 },
+        gacha: EMPTY_GACHA,
       },
     });
   });

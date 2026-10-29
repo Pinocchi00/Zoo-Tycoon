@@ -1,10 +1,17 @@
 import { describe, expect, it } from 'vitest';
-import { applyCommand } from './commands';
+import { applyCommand, type Command } from './commands';
 import { createEventQueue, drain, type GameEvent } from './events';
 import { randomInt } from './rng';
+import { sliceGameData, testBannerId } from './gacha/test-support';
 import { createGameState } from './state';
 import { advance, catchUp } from './time';
 
+const GAME_DATA = sliceGameData();
+const ARRIVAL: Command = {
+  type: 'performArrival',
+  bannerId: testBannerId('refuge'),
+  mode: 'single',
+};
 const DAY_MS = 24 * 60 * 60 * 1000;
 const SIMULATED_DAYS = 30;
 /** Irregular frame durations, like a real screen that sometimes stutters. */
@@ -29,7 +36,14 @@ function playMonth(seed: number): PlayedGame {
       advance(state, FRAME_PATTERN_MS[frame % FRAME_PATTERN_MS.length] ?? 0, queue);
       if (frame % 100 === 0) {
         // The amount comes from the game's own generator, so its state is exercised too.
-        applyCommand(state, { type: 'addCoins', amount: randomInt(state.rng, 1, 500) }, queue);
+        applyCommand(
+          state,
+          { type: 'addCoins', amount: randomInt(state.rng, 1, 500) },
+          GAME_DATA,
+          queue,
+        );
+        state.currencies.arrivalTickets += 1;
+        applyCommand(state, ARRIVAL, GAME_DATA, queue);
       }
       events.push(...drain(queue));
     }
