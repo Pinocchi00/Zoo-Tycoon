@@ -743,7 +743,7 @@ Construire doit être aussi agréable que regarder : placement à un doigt, dép
 
 ### Le terrain
 
-- Le parc commence sur une petite parcelle et s'agrandit par achat de parcelles voisines (pièces et niveau de parc).
+- Le parc commence sur un immense terrain à développer, comme dans les tycoons mobiles. Il s'agrandit ensuite par achat de parcelles voisines (pièces et niveau de parc).
 - Parcelles variées : lac, colline, forêt existante, rivière, falaise, ancienne serre à restaurer.
 - Le relief se modifie : creuser une mare, lever une butte, tracer un ruisseau.
 

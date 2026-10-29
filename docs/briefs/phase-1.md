@@ -89,7 +89,7 @@ Une tâche par session, toujours.
 
 ```
 1.0 Mise à jour du brief
-1.1 Schémas de données ──► 1.2 Contenu des 5 espèces
+1.1 Schémas de données ──► 1.2 Contenu des 4 autres espèces
         │
         ├──► 1.3 Gacha
         ├──► 1.4 Construction du parc ──► 1.5 Visiteurs ──► 1.6 Économie
@@ -178,18 +178,18 @@ Installées : `three`, `zod`, `@capacitor/core`, `@capacitor/android`, `@capacit
 
 ---
 
-## Points ouverts (à trancher par le propriétaire)
+## Points tranchés avant la tâche 1.1
 
-Écarts relevés entre ce brief et le code de la phase 0 pendant la tâche 1.0. Ils ne sont pas tranchés ici : la tâche concernée s'arrête et pose la question si le point n'a pas été décidé avant.
+Écarts relevés entre ce brief et le code de la phase 0 pendant la tâche 1.0, puis tranchés par le propriétaire. Le détail et les raisons sont dans `docs/decisions.md` (D-018). Ces décisions priment sur le texte des tâches concernées.
 
-1. **Animations obligatoires (tâche 1.7).** Le brief demande `sleep`, `eat` et une signature pour chaque espèce, mais `tools/assets/model-rules.ts` n'exige que `idle` et `walk`, et le prompt de la tâche interdit de modifier le validateur. Sans changement du validateur, l'absence d'une nouvelle animation passerait inaperçue. Faut-il autoriser la tâche 1.7 à ajouter ces animations aux règles ?
-2. **Modèles des visiteurs (tâche 1.9).** Le validateur s'applique à tout `.glb` de `assets/models` avec le budget d'un animal (1 500 à 4 000 triangles, `idle` et `walk`, une description d'espèce par modèle). Un visiteur (800 à 1 500 triangles selon le GDD) serait refusé. La tâche 1.9 devra modifier le validateur ou ranger les visiteurs ailleurs : à décider avant de la lancer.
-3. **Taille du terrain (tâche 1.4).** La taille du parc de départ (`STARTING_PARK_GRID`, 64 × 64) est aujourd'hui définie dans `src/render/park-view.ts`. Pour que la simulation valide les sorties de terrain, elle doit appartenir à `src/data` ou `src/sim`, et le rendu la lire. Le brief ne donne ni la taille du « grand terrain » ni l'emplacement de l'entrée et des parkings.
-4. **Retour haptique (tâche 1.10).** Le brief place le retour haptique dans le rendu, mais d'après `AGENTS.md` (sections 3 et 4.1) l'accès aux vibrations et à Capacitor appartient à `platform` ; le lint ne l'interdit pas à `render`, la règle est donc à respecter à la main, et aucune extension de vibration n'est installée. Il faudra passer par `platform` et `app`, et justifier la dépendance (par exemple `@capacitor/haptics`) dans `docs/decisions.md`.
-5. **Clés de texte dans les données (tâche 1.1).** Le graphe de dépendances d'`AGENTS.md` ne place pas `i18n`. Le lint autorise aujourd'hui `src/data` à importer `src/i18n`. Faut-il typer les clés de texte des données avec `TranslationKey` (import de `i18n` par `data`), ou garder de simples chaînes vérifiées par un test ?
-6. **Courrier quotidien (tâche 1.6).** La règle parle de « jour réel », alors que la simulation ne connaît que le temps de jeu fourni par `advance` et `catchUp`. L'heure réelle devra être fournie par `app`, comme le temps. Par ailleurs, `catchUp` ignore toute absence au-delà de 12 h, alors que le GDD dit que les recettes sont « plafonnées » au-delà : à préciser (arrêt net ou taux réduit) à la tâche 1.6.
-7. **Fréquence de mise à jour des visiteurs (tâche 1.5).** La fréquence réduite doit être « fournie par `app` », mais `System = (state, stepMs, events)`, `advance` et `catchUp` ne prennent aucune entrée de ce genre. La tâche 1.5 devra changer l'API de `src/sim/time.ts` : la forme est à proposer dans son plan.
-8. **Titre de la tâche 1.2.** Le schéma « Ordre des tâches » dit « 1.2 Contenu des 5 espèces », alors que la tâche porte sur les 4 autres espèces (le capybara est fait à la tâche 1.1).
+1. **Animations obligatoires (tâche 1.7).** La tâche 1.7 est autorisée à modifier `tools/assets/model-rules.ts` et le schéma `tools/assets/species.ts` : `idle`, `walk`, `sleep` et `eat` deviennent obligatoires, et chaque description d'espèce déclare son animation signature (`swim` pour le capybara), dont la présence est vérifiée. La bibliothèque de pièces reste intouchable.
+2. **Modèles des visiteurs (tâche 1.9).** Deux familles de règles : les animaux restent dans `assets/models/` avec leurs règles, les visiteurs vont dans `assets/models/visitors/` avec les leurs (800 à 1 500 triangles, animations des visiteurs). La tâche 1.9 étend le validateur dans ce sens.
+3. **Terrain (tâche 1.4).** Le parc se construit sur un terrain immense à développer, comme dans les tycoons mobiles. La taille du terrain vit dans `src/data`, la simulation s'en sert pour valider, le rendu la lit (`STARTING_PARK_GRID` quitte `src/render`). Valeur de départ : 256 × 256 cases (256 m de côté), ajustable en données. Tout le terrain est constructible dans la tranche ; l'achat de parcelles reste hors tranche. L'entrée est au milieu du bord sud, les deux places de parking juste à l'extérieur, de part et d'autre de l'entrée ; la caméra démarre sur l'entrée.
+4. **Retour haptique (tâche 1.10).** Une petite fonction de vibration dans `src/platform` (`@capacitor/haptics` sur Android, vibration du navigateur sur le web), déclenchée par `app` quand la simulation annonce une pose. Le rendu ne vibre jamais. La dépendance est justifiée dans `docs/decisions.md` par la tâche 1.10.
+5. **Clés de texte dans les données (tâche 1.1).** Les clés sont typées avec `TranslationKey`, importé par `import type` depuis `src/i18n`. `AGENTS.md` (section 4.1) place désormais `i18n` dans le graphe : il ne dépend de rien, et `data` peut lire ses types.
+6. **Courrier quotidien et absence (tâche 1.6).** `app` donne le numéro du jour réel dans la commande de courrier ; la simulation retient le dernier jour réclamé et cumule au plus 3 jours. Au-delà de 12 h d'absence, les recettes s'arrêtent net : le gain total est plafonné à 12 h, comme le fait déjà `catchUp`.
+7. **Visiteurs lointains (tâche 1.5).** `app` fournit à `advance` la zone regardée par la caméra, comme une donnée d'entrée au même titre que les commandes. Un visiteur lointain est mis à jour moins souvent, avec un pas plus long pour ne pas prendre de retard. Le simulateur d'économie tourne sans zone, avec tous les visiteurs à pleine fréquence. La forme exacte de l'API est proposée dans le plan de la tâche 1.5.
+8. **Titre de la tâche 1.2.** Corrigé dans le schéma « Ordre des tâches » : « 4 autres espèces ».
 
 ---
 
@@ -224,7 +224,7 @@ Branche : chore/phase-1-brief. Termine par le rapport final.
 - Données de test synthétiques couvrant les 5 paliers de rareté, utilisées par les tests du gacha.
 - Les règles précisées plus haut ajoutées dans `docs/decisions.md`.
 
-**Repères :** `src/data/index.ts` est vide. Identifiants typés et `Result` dans `src/shared` ; la référence du modèle 3D d'une espèce `<id>` est `assets/models/<id>.glb`, dont la description Blender est `tools/blender/species/<id>.json`. Voir le point ouvert 5 sur les clés de texte.
+**Repères :** `src/data/index.ts` est vide. Identifiants typés et `Result` dans `src/shared` ; la référence du modèle 3D d'une espèce `<id>` est `assets/models/<id>.glb`, dont la description Blender est `tools/blender/species/<id>.json`. Voir le point tranché 5 sur les clés de texte.
 
 **Critères d'acceptation :**
 
@@ -318,7 +318,7 @@ Termine par npm run check vert, la sortie du test statistique, et le rapport fin
 - Annuler et rétablir illimités pendant la session.
 - Calcul de la note de vue d'un enclos (points de vue, distance, obstacles) selon le GDD.
 
-**Repères :** réutiliser la grille de `src/shared/grid.ts` (une case = 1 m) et `enclosureId` de `src/shared/brand.ts`. `EnclosureState` est un emplacement vide dans `src/sim/state.ts`. Voir le point ouvert 3 sur la taille du terrain.
+**Repères :** réutiliser la grille de `src/shared/grid.ts` (une case = 1 m) et `enclosureId` de `src/shared/brand.ts`. `EnclosureState` est un emplacement vide dans `src/sim/state.ts`. Voir le point tranché 3 sur la taille du terrain.
 
 **Critères d'acceptation :**
 
@@ -353,7 +353,7 @@ Termine par npm run check vert et le rapport final.
 - Dépenses aux services et départ du parc.
 - Simulation légère : les visiteurs loin de la caméra sont mis à jour moins souvent (fréquence fournie par `app`, jamais lue dans `sim`).
 
-**Repères :** le déplacement et les besoins sont des systèmes (`System`) ajoutés à la liste `SYSTEMS` de `src/sim/time.ts`. Le pas vaut `STEP_MS` (100 ms) en jeu et `OFFLINE_STEP_MS` (une minute) pendant le rattrapage hors ligne : chaque système doit rester juste avec les deux.
+**Repères :** le déplacement et les besoins sont des systèmes (`System`) ajoutés à la liste `SYSTEMS` de `src/sim/time.ts`. Le pas vaut `STEP_MS` (100 ms) en jeu et `OFFLINE_STEP_MS` (une minute) pendant le rattrapage hors ligne : chaque système doit rester juste avec les deux. Voir le point tranché 7 sur les visiteurs lointains.
 
 **Critères d'acceptation :**
 
@@ -387,7 +387,7 @@ Termine par npm run check vert, le résultat du test de performance, et le rappo
 - Niveaux du parc par étoiles, avec les déblocages de la tranche.
 - Simulateur `npm run sim` étendu aux trois profils du GDD, avec la cible de la tranche.
 
-**Repères :** le rattrapage hors ligne existe déjà (`catchUp` et `MAX_OFFLINE_MS` dans `src/sim/time.ts`). Le simulateur est `tools/sim/run.ts` (options `--days` et `--seed`). Voir le point ouvert 6.
+**Repères :** le rattrapage hors ligne existe déjà (`catchUp` et `MAX_OFFLINE_MS` dans `src/sim/time.ts`). Le simulateur est `tools/sim/run.ts` (options `--days` et `--seed`). Voir le point tranché 6.
 
 **Critères d'acceptation :**
 
@@ -418,7 +418,7 @@ Termine par npm run check vert et le rapport final.
 - Animations obligatoires pour chaque espèce : `idle`, `walk`, `sleep`, `eat`, plus une animation signature (la loutre nage, le jaguar s'étire, le tapir bouge sa trompe, le pécari fouille le sol).
 - Ajout des mêmes animations au capybara (`sleep`, `eat`, `swim` en signature).
 
-**Repères :** descriptions dans `tools/blender/species/` (schéma `tools/assets/species.ts`), animations dans `tools/blender/animations.py`, génération par `npm run models` (Blender 4.3 ou plus récent, testé avec 4.3.2, voir `docs/blender.md`). Voir le point ouvert 1 sur le validateur.
+**Repères :** descriptions dans `tools/blender/species/` (schéma `tools/assets/species.ts`), animations dans `tools/blender/animations.py`, génération par `npm run models` (Blender 4.3 ou plus récent, testé avec 4.3.2, voir `docs/blender.md`). Voir le point tranché 1 sur le validateur.
 
 **Critères d'acceptation :**
 
@@ -432,7 +432,7 @@ Lis AGENTS.md, puis docs/briefs/phase-1.md section "Tâche 1.7", puis tools/blen
 Crée les descriptions du Pécari à collier, du Tapir du Brésil, de la Loutre géante et du Jaguar en copiant exactement sa structure.
 Traits signatures : reprends la colonne Signature du tableau "Amérique tropicale" de docs/gdd.md et exagère ces trois traits.
 Ajoute les animations demandées par le brief, y compris pour le capybara.
-Ne modifie pas la bibliothèque de pièces ni le validateur. Branche : feat/models-tropical.
+Ne modifie pas la bibliothèque de pièces. Le validateur change seulement comme le dit le point tranché 1 du brief. Branche : feat/models-tropical.
 Délègue selon la section "Délégation aux sous-agents" de CLAUDE.md, puis fais relire par le sous-agent relecteur avant le rapport final.
 Termine par npm run check vert, la planche de silhouettes, et le rapport final.
 ```
@@ -485,6 +485,8 @@ Propose d'abord ton plan et attends mon OK. Termine par npm run check vert et le
 - Affichage par instanciation pour tenir 100 visiteurs à l'écran.
 - Bulle de pensée au toucher d'un visiteur.
 
+**Repères :** voir le point tranché 2 : les modèles des visiteurs vont dans `assets/models/visitors/`, avec leurs propres règles de validation.
+
 **Critères d'acceptation :**
 
 - `npm run assets:check` vert.
@@ -516,7 +518,7 @@ Termine par npm run check vert et le rapport final au format d'AGENTS.md.
 - Objets répétés en instanciation, imperfections voulues (légers décalages, variations de teinte).
 - Retour haptique léger à la pose.
 
-**Repères :** voir le point ouvert 4 : le retour haptique passe par `src/platform`, jamais par `render`.
+**Repères :** voir le point tranché 4 : le retour haptique passe par `src/platform`, jamais par `render`.
 
 **Prompt à coller :**
 

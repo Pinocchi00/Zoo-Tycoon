@@ -88,6 +88,7 @@ shared  ←  data  ←  sim  ←  save
 - `sim`, `data`, `save`, `shared` n'importent **jamais** `three`, Preact, Capacitor, ni aucun dossier `render`, `audio`, `ui`, `platform`, `app`.
 - `render`, `audio` et `ui` ne s'importent pas entre eux. Ils communiquent par la simulation (commandes et événements) ou par `app`.
 - Seul `app` câble les modules ensemble.
+- `i18n` ne dépend de rien. `data` peut en importer les types (`import type`, par exemple `TranslationKey`) pour que les clés de texte des données soient vérifiées à la compilation ; `ui` et `app` l'utilisent pour afficher les textes.
 
 ### 4.2 La simulation est pure et déterministe
 
