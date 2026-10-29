@@ -93,3 +93,16 @@ describe('recordFrame', () => {
     expect(decisions).toBe(1);
   });
 });
+
+describe('recordFrame with empty frames', () => {
+  it.each([0, -5, Number.NaN])('does not count a frame of %s ms', (frameMs) => {
+    const sampler = createFrameSampler();
+    const total = BENCHMARK_WARMUP_FRAMES + BENCHMARK_SAMPLE_FRAMES;
+    for (let frame = 0; frame < total - 1; frame += 1) {
+      expect(recordFrame(sampler, 16)).toBeNull();
+    }
+    expect(recordFrame(sampler, frameMs)).toBeNull();
+    expect(sampler.seen).toBe(total - 1);
+    expect(recordFrame(sampler, 16)).toBe('high');
+  });
+});
