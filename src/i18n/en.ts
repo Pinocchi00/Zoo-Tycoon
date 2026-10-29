@@ -65,7 +65,7 @@ export const en: Messages = {
   'behavior.scratchFlop': 'Flopping down for a scratch',
   'behavior.catchFish': 'Catching fish',
   'behavior.contactCall': 'Calling to the group',
-  'behavior.groupHunt': 'Hunting as a band',
+  'behavior.groupHunt': 'Fishing as a band',
   'behavior.periscope': 'Periscoping',
   'behavior.logRest': 'Resting on a log',
   'behavior.patrol': 'Patrolling',

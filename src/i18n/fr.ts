@@ -60,7 +60,7 @@ export const fr = {
   'behavior.root': 'Fouiller du groin',
   'behavior.mutualRubbing': 'Se frotter les uns aux autres',
   'behavior.eatCactus': 'Croquer des cactus',
-  'behavior.browse': 'Brouter les feuillages',
+  'behavior.browse': 'Manger des feuilles',
   'behavior.grabWithTrunk': 'Attraper avec la trompe',
   'behavior.underwaterWalk': "Marcher au fond de l'eau",
   'behavior.snorkel': 'Respirer avec la trompe en tuba',
