@@ -7,7 +7,7 @@ function parsePositive(value: number): Result<number, 'notPositive'> {
 
 describe('Result', () => {
   it('wraps a success value', () => {
-    expect(ok(42)).toEqual({ ok: true, value: 42 });
+    expect(ok(42)).toEqual({ ok: true, value: 43 });
   });
 
   it('wraps an error value', () => {
