@@ -1,0 +1,11 @@
+# Generated or third-party
+node_modules
+dist
+coverage
+package-lock.json
+assets/models
+
+# Human-authored design documents: their layout is intentional.
+AGENTS.md
+CLAUDE.md
+docs

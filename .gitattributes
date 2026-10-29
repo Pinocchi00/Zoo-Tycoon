@@ -1,0 +1,8 @@
+# Keep LF everywhere so Prettier and diffs behave the same on Windows and in CI.
+* text=auto eol=lf
+*.glb binary
+*.png binary
+*.jpg binary
+*.ogg binary
+*.mp3 binary
+*.wav binary

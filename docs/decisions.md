@@ -33,3 +33,31 @@ Chaque décision structurante est ajoutée ici, la plus récente en bas. Format 
 - **Contexte :** l'économie n'a pas besoin de 60 mises à jour par seconde ; le déterminisme exige un pas fixe.
 - **Décision :** 10 pas par seconde avec accumulateur ; rattrapage hors ligne par pas grossiers.
 - **Conséquences :** simulation légère sur mobile. Les animations restent fluides car elles vivent dans le rendu.
+
+## D-006 — TypeScript 6.0 plutôt que 7.0
+
+- **Contexte :** TypeScript 7.0 est sorti, mais `typescript-eslint` 8.72 (qui fait respecter les règles d'architecture) n'accepte que TypeScript < 6.1.
+- **Décision :** TypeScript 6.0.3, la dernière version compatible.
+- **Conséquences :** passage à la 7.x dès que `typescript-eslint` la prend en charge, dans une tâche dédiée.
+
+## D-007 — Dépendances de la tâche 0.1
+
+- **Contexte :** AGENTS.md exige de justifier chaque dépendance.
+- **Décision :** en plus des outils listés dans la stack (TypeScript, Vite, Vitest, ESLint, typescript-eslint, Prettier) :
+  - `@vitest/coverage-v8` : mesure de couverture exigée (90 % sur `sim` et `save`) ;
+  - `@eslint/js` et `globals` : règles de base et listes de variables globales d'ESLint, maintenues par l'équipe ESLint ;
+  - `@eslint-community/eslint-plugin-eslint-comments` : ESLint ne sait pas seul exiger une justification sur chaque `eslint-disable` ni interdire de désactiver les règles d'architecture ;
+  - `@types/node` (version 24, comme Node) : types de Node pour les fichiers de configuration et les outils de `tools/`, jamais pour `src/`.
+- **Conséquences :** toutes en développement uniquement, rien n'est livré dans le jeu.
+
+## D-008 — Organisation de la configuration
+
+- **Contexte :** le code du jeu ne doit pas voir les API de Node, et ESLint aurait besoin d'une dépendance de plus (`jiti`) pour lire une configuration TypeScript.
+- **Décision :**
+  - `tsconfig.json` couvre `src/` (navigateur, sans Node) ; `tsconfig.node.json` couvre la configuration, `tools/` et `tests/` (Node) ; les deux partagent `tsconfig.base.json` ;
+  - l'alias `@/` n'est déclaré que dans `tsconfig.json`, et Vite le lit via `resolve.tsconfigPaths` ;
+  - `eslint.config.js` reste en JavaScript ;
+  - `.gitattributes` impose des fins de ligne LF, pour que Prettier donne le même résultat sous Windows et en CI ;
+  - Prettier ignore `AGENTS.md`, `CLAUDE.md` et `docs/`, dont la mise en page est écrite à la main ;
+  - ESLint interdit de désactiver par commentaire les règles d'architecture (`no-restricted-imports`, `no-restricted-globals`, `no-restricted-properties`, `no-console`).
+- **Conséquences :** pour ajouter un dossier d'outils, l'inclure dans `tsconfig.node.json`.

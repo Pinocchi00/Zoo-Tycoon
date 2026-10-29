@@ -1,0 +1,39 @@
+# Dependencies
+node_modules/
+
+# Build and test output
+dist/
+coverage/
+test-results/
+playwright-report/
+playwright/.cache/
+*.tsbuildinfo
+.vite/
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+npm-debug.log*
+
+# Editors and OS
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Blender backups
+*.blend1
+*.blend2
+__pycache__/
+
+# Android / Capacitor (added in task 0.6)
+android/app/build/
+android/.gradle/
+android/local.properties
+android/captures/
