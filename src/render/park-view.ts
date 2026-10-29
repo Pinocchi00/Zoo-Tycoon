@@ -9,7 +9,8 @@ import {
 } from 'three';
 import { createGridSize, gridDepth, gridWidth, logger } from '@/shared';
 import capybaraUrl from '../../assets/models/capybara.glb?url';
-import { loadAnimalModel, type AnimalModel } from './animals/animal-model';
+import { loadAnimalModel } from './animals/animal-model';
+import { createAnimalSlot } from './animals/animal-slot';
 import {
   createCameraRig,
   ISO_YAW_RAD,
@@ -99,26 +100,14 @@ export function createParkView(canvas: HTMLCanvasElement, initialLevel: QualityL
   const viewport = { width: 1, height: 1 };
   const detachControls = attachCameraControls(canvas, rig, viewport);
 
-  const animals: AnimalModel[] = [];
-  let disposed = false;
-  loadAnimalModel(DEMO_ANIMAL.url, 'idle')
-    .then((loaded) => {
-      if (!loaded.ok) {
-        logger.warn(`Animal model has no "${loaded.error.name}" animation.`);
-        return;
-      }
-      if (disposed) {
-        loaded.value.dispose();
-        return;
-      }
-      loaded.value.root.position.set(DEMO_ANIMAL.x, 0, DEMO_ANIMAL.z);
-      loaded.value.root.rotation.y = DEMO_ANIMAL.yawRad;
-      scene.add(loaded.value.root);
-      animals.push(loaded.value);
-    })
-    .catch((error: unknown) => {
-      logger.warn('Could not load the animal model.', error);
-    });
+  const demoAnimal = createAnimalSlot(
+    scene,
+    loadAnimalModel(DEMO_ANIMAL.url, 'idle'),
+    DEMO_ANIMAL,
+    (problem) => {
+      logger.warn(`The demo animal could not be shown (${problem.kind}).`, problem);
+    },
+  );
 
   let level = initialLevel;
 
@@ -147,18 +136,13 @@ export function createParkView(canvas: HTMLCanvasElement, initialLevel: QualityL
     quality: () => level,
     frame: (elapsedMs) => {
       updateCameraRig(rig, elapsedMs);
-      for (const animal of animals) {
-        animal.update(elapsedMs);
-      }
+      demoAnimal.update(elapsedMs);
       applyCameraPose(camera, rig.current, viewport.width / viewport.height);
       renderer.render(scene, camera);
     },
     dispose: () => {
-      disposed = true;
       detachControls();
-      for (const animal of animals.splice(0)) {
-        animal.dispose();
-      }
+      demoAnimal.dispose();
       disposeScene(scene);
       renderer.dispose();
     },

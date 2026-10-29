@@ -4,7 +4,7 @@ import {
   LoopRepeat,
   Material,
   Mesh,
-  Texture,
+  MeshStandardMaterial,
   type AnimationClip,
   type Object3D,
 } from 'three';
@@ -64,24 +64,28 @@ function disposeModel(root: Object3D): void {
       geometry.dispose();
     }
     for (const material of materialsOf(object.material)) {
-      for (const value of Object.values(material)) {
-        if (value instanceof Texture) {
-          value.dispose();
-        }
+      // Animal models carry a single texture: the palette, as the base colour map.
+      if (material instanceof MeshStandardMaterial) {
+        material.map?.dispose();
       }
       material.dispose();
     }
   });
 }
 
-/** Loads a .glb animal and starts its `initial` animation in a loop. */
-export async function loadAnimalModel(
-  url: string,
+/** The parts of a loaded glTF that an animal needs. */
+export interface AnimalSource {
+  readonly scene: Object3D;
+  readonly animations: readonly AnimationClip[];
+}
+
+/** Builds an animal from loaded glTF data and starts its `initial` animation in a loop. */
+export function createAnimalModel(
+  source: AnimalSource,
   initial: AnimalAnimation,
-): Promise<Result<AnimalModel, MissingClip>> {
-  const gltf = await new GLTFLoader().loadAsync(url);
-  const root = gltf.scene;
-  const clip = pickClip(gltf.animations, initial);
+): Result<AnimalModel, MissingClip> {
+  const root = source.scene;
+  const clip = pickClip(source.animations, initial);
   if (!clip.ok) {
     disposeModel(root);
     return clip;
@@ -101,4 +105,24 @@ export async function loadAnimalModel(
       disposeModel(root);
     },
   });
+}
+
+/** Decodes a .glb animal and starts its `initial` animation in a loop. */
+export async function parseAnimalModel(
+  glb: ArrayBuffer,
+  initial: AnimalAnimation,
+): Promise<Result<AnimalModel, MissingClip>> {
+  return createAnimalModel(await new GLTFLoader().parseAsync(glb, ''), initial);
+}
+
+/** Downloads, decodes and animates a .glb animal. Network failures reject. */
+export async function loadAnimalModel(
+  url: string,
+  initial: AnimalAnimation,
+): Promise<Result<AnimalModel, MissingClip>> {
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Could not download ${url} (HTTP ${String(response.status)}).`);
+  }
+  return parseAnimalModel(await response.arrayBuffer(), initial);
 }
