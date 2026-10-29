@@ -12,7 +12,7 @@
 - [ ] Le parc vide tourne sur ton téléphone Android (navigateur, puis application installée).
 - [ ] Le pipeline Blender produit un capybara `.glb` validé automatiquement et affiché dans la scène.
 
-**Outil :** toute la phase 0 se fait avec **Claude Code**. Ce sont les fondations : elles doivent être écrites par le modèle le plus fiable. ChatGPT sert ici seulement de relecteur.
+**Outil :** toute la phase 0 se fait avec **Claude Code**. Claude Code tourne sur Opus et joue le rôle de chef : il planifie, écrit le cœur critique et relit. Il délègue l'exécution à des sous-agents de modèles moins chers (voir la section « Délégation aux sous-agents » de `CLAUDE.md`). La relecture est faite par le sous-agent `relecteur`, qui n'a pas écrit le code.
 
 ---
 
@@ -33,14 +33,28 @@
 
 Pour chaque tâche ci-dessous :
 
-1. Ouvre une **nouvelle** session Claude Code dans le dossier du dépôt.
+1. Ouvre **une** nouvelle session Claude Code (Opus) dans le dossier du dépôt.
 2. Colle le **prompt** de la tâche, tel quel.
 3. Claude propose un plan : lis-le, réponds « OK » ou corrige.
-4. À la fin, vérifie le rapport final et que `npm run check` est vert.
-5. Fais relire la branche par ChatGPT avec le **prompt de relecture** (en bas de ce fichier).
-6. Fusionne dans `main` seulement si la CI est verte et qu'il n'y a aucun point bloquant.
+4. Ensuite, Claude (le chef) fait tout seul : il délègue l'écriture aux sous-agents ou l'écrit lui-même selon le tableau ci-dessous, fait lancer les vérifications, puis fait relire la branche par le sous-agent `relecteur` et corriger les points Bloquant et À corriger.
+5. À la fin, lis seulement le rapport final et vérifie que la CI est verte.
+6. Fusionne dans `main` seulement si la CI est verte et que le rapport ne signale aucun point bloquant.
+
+Tu n'as plus besoin d'ouvrir une session séparée pour la relecture. Si tu veux quand même une seconde relecture, voir la section « Relecture manuelle (facultative) » en bas de ce fichier.
 
 Ne lance jamais deux tâches en même temps.
+
+### Qui écrit le code
+
+| Tâche | Qui écrit le code |
+| --- | --- |
+| 0.1 Socle du projet | `executant` |
+| 0.2 Intégration continue et test de démarrage | `executant` |
+| 0.3 Cœur de la simulation | le chef (Opus) |
+| 0.4 Sauvegarde blindée | le chef (Opus) |
+| 0.5 Le parc vide en 3D | `executant` |
+| 0.6 Application Android | `executant` |
+| 0.7 Pipeline Blender et premier animal | `executant` (le chef conçoit l'architecture des scripts) |
 
 ---
 
@@ -82,6 +96,7 @@ Lis AGENTS.md puis docs/briefs/phase-0.md, section "Tâche 0.1 — Socle du proj
 Réalise uniquement la tâche 0.1, sur une branche chore/project-foundation.
 Commence par me proposer un plan (fichiers, dépendances avec leurs rôles, configuration) et attends mon OK.
 Ensuite, fais les deux preuves demandées (frontières d'architecture et i18n) et montre-moi les sorties.
+Délègue selon la section "Délégation aux sous-agents" de CLAUDE.md, puis fais relire par le sous-agent relecteur avant le rapport final.
 Termine par npm run check entièrement vert et le rapport final au format d'AGENTS.md.
 ```
 
@@ -111,6 +126,7 @@ Lis AGENTS.md puis docs/briefs/phase-0.md, section "Tâche 0.2".
 Réalise uniquement la tâche 0.2, sur une branche chore/ci.
 Propose d'abord ton plan et attends mon OK.
 À la fin, donne-moi les étapes exactes, clic par clic, pour activer la protection de la branche main sur GitHub.
+Délègue selon la section "Délégation aux sous-agents" de CLAUDE.md, puis fais relire par le sous-agent relecteur avant le rapport final.
 Termine par npm run check et npm run e2e verts, puis le rapport final.
 ```
 
@@ -141,6 +157,7 @@ Termine par npm run check et npm run e2e verts, puis le rapport final.
 Lis AGENTS.md, docs/decisions.md puis docs/briefs/phase-0.md, section "Tâche 0.3".
 Réalise uniquement la tâche 0.3, sur une branche feat/sim-core.
 Avant de coder, propose-moi les types principaux (GameState, Command, GameEvent, l'API du générateur et d'advance) et attends mon OK.
+Délègue selon la section "Délégation aux sous-agents" de CLAUDE.md, puis fais relire par le sous-agent relecteur avant le rapport final.
 Écris les tests en même temps que le code. Termine par npm run check vert, la sortie de npm run sim -- --days 7 --seed 42, puis le rapport final.
 ```
 
@@ -171,6 +188,7 @@ Avant de coder, propose-moi les types principaux (GameState, Command, GameEvent,
 Lis AGENTS.md puis docs/briefs/phase-0.md, section "Tâche 0.4".
 Réalise uniquement la tâche 0.4, sur une branche feat/save.
 Propose d'abord le format de l'enveloppe de sauvegarde, la stratégie d'écriture sûre et la liste des tests, et attends mon OK.
+Délègue selon la section "Délégation aux sous-agents" de CLAUDE.md, puis fais relire par le sous-agent relecteur avant le rapport final.
 Termine par npm run check vert et le rapport final.
 ```
 
@@ -205,6 +223,7 @@ Lis AGENTS.md puis docs/briefs/phase-0.md, section "Tâche 0.5".
 Réalise uniquement la tâche 0.5, sur une branche feat/render-base.
 Propose d'abord ton plan (structure de render, contrôles de caméra, niveaux de qualité) et attends mon OK.
 À la fin, explique-moi comment ouvrir le jeu sur mon téléphone Android via le réseau local, étape par étape.
+Délègue selon la section "Délégation aux sous-agents" de CLAUDE.md, puis fais relire par le sous-agent relecteur avant le rapport final.
 Termine par npm run check et npm run e2e verts, puis le rapport final.
 ```
 
@@ -233,6 +252,7 @@ Termine par npm run check et npm run e2e verts, puis le rapport final.
 Lis AGENTS.md puis docs/briefs/phase-0.md, section "Tâche 0.6".
 Réalise uniquement la tâche 0.6, sur une branche feat/android.
 Je ne suis pas développeur : écris docs/android.md pour qu'un débutant puisse suivre sans aide.
+Délègue selon la section "Délégation aux sous-agents" de CLAUDE.md, puis fais relire par le sous-agent relecteur avant le rapport final.
 Propose d'abord ton plan et attends mon OK. Termine par npm run check vert et le rapport final.
 ```
 
@@ -266,18 +286,21 @@ Propose d'abord ton plan et attends mon OK. Termine par npm run check vert et le
 Lis AGENTS.md, la section "Direction artistique" et "Vie animale" de docs/gdd.md, puis docs/briefs/phase-0.md, section "Tâche 0.7".
 Réalise uniquement la tâche 0.7, sur une branche feat/blender-pipeline.
 Propose d'abord l'architecture des scripts Blender (pièces, palette, description d'espèce, animations) et attends mon OK.
+Délègue selon la section "Délégation aux sous-agents" de CLAUDE.md, puis fais relire par le sous-agent relecteur avant le rapport final.
 Fais la preuve du refus d'un mauvais modèle. Termine par npm run check vert, une capture du capybara dans la scène, et le rapport final.
 ```
 
 ---
 
-## Prompt de relecture (pour ChatGPT ou un autre modèle)
+## Relecture manuelle (facultative)
 
-Donne-lui l'accès au dépôt (ou colle le diff), puis :
+La relecture normale est faite par le sous-agent `relecteur`, pendant la session de la tâche. Cette section ne sert que si tu veux une seconde relecture, dans une **nouvelle** session Claude Code qui n'a pas écrit le code.
+
+Prompt de relecture :
 
 ```
-Tu es relecteur senior. Lis AGENTS.md (surtout la section 10) et le brief de la tâche docs/briefs/phase-0.md, section "Tâche X".
-Relis la branche <nom-de-branche> par rapport à main.
+Tu es relecteur senior et tu n'as pas écrit ce code. Lis CLAUDE.md, puis docs/briefs/phase-0.md, section "Tâche X".
+Relis la branche <nom-de-branche> en suivant la section "Relire une branche" de CLAUDE.md.
 Réponds uniquement par trois listes : Bloquant, À corriger, Suggestion. Pour chaque point, donne le fichier, la ligne et la raison.
 Ne réécris pas le code. Vérifie en particulier qu'aucun test n'a été affaibli et qu'aucune règle d'AGENTS.md n'a été contournée.
 ```

@@ -210,7 +210,7 @@ shared  ←  data  ←  sim  ←  save
 
 ## 10. Relecture croisée
 
-Le code écrit par un agent est relu par un autre modèle avant fusion. Le relecteur vérifie, dans cet ordre :
+Le code est relu avant fusion par un contexte distinct qui ne l'a pas écrit : le sous-agent `relecteur`, une nouvelle session, ou un autre modèle si on en ajoute un. Le relecteur vérifie, dans cet ordre :
 
 1. **Correction :** le code fait-il exactement ce que dit le brief ? Cas limites, valeurs nulles, listes vides, entiers.
 2. **Architecture :** sens des dépendances respecté, simulation pure, pas de `Math.random` ni de `Date` dans `sim`.
