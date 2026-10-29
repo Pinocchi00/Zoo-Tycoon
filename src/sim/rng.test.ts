@@ -14,6 +14,8 @@ import {
 const DRAWS = 1_000_000;
 /** 0.1 percentage point, as a fraction. */
 const TOLERANCE = 0.001;
+/** Headroom for the 1,000,000-draw tests when the machine is busy (coverage, dev server, CI). */
+const HEAVY_STATISTICAL_TEST_TIMEOUT_MS = 30_000;
 
 function draws(rng: RngState, count: number): number[] {
   return Array.from({ length: count }, () => nextUint32(rng));
@@ -70,17 +72,21 @@ describe('createRng', () => {
 });
 
 describe('randomInt', () => {
-  it('is uniform over 1,000,000 draws, each value within 0.1 point', () => {
-    const rng = createRng(2024);
-    const buckets = new Array<number>(10).fill(0);
-    for (let draw = 0; draw < DRAWS; draw += 1) {
-      const value = randomInt(rng, 0, 9);
-      buckets[value] = (buckets[value] ?? 0) + 1;
-    }
-    for (const count of buckets) {
-      expect(Math.abs(count / DRAWS - 0.1)).toBeLessThan(TOLERANCE);
-    }
-  });
+  it(
+    'is uniform over 1,000,000 draws, each value within 0.1 point',
+    () => {
+      const rng = createRng(2024);
+      const buckets = new Array<number>(10).fill(0);
+      for (let draw = 0; draw < DRAWS; draw += 1) {
+        const value = randomInt(rng, 0, 9);
+        buckets[value] = (buckets[value] ?? 0) + 1;
+      }
+      for (const count of buckets) {
+        expect(Math.abs(count / DRAWS - 0.1)).toBeLessThan(TOLERANCE);
+      }
+    },
+    HEAVY_STATISTICAL_TEST_TIMEOUT_MS,
+  );
 
   it('rejects biased draws when the range does not divide 2^32', () => {
     // Over 3 × 2^30 values, a quarter of the raw draws must be rejected. Without rejection,
@@ -130,43 +136,56 @@ describe('randomInt', () => {
 });
 
 describe('randomFloat', () => {
-  it('is uniform in [0, 1) over 1,000,000 draws', () => {
-    const rng = createRng(99);
-    const buckets = new Array<number>(10).fill(0);
-    for (let draw = 0; draw < DRAWS; draw += 1) {
-      const value = randomFloat(rng);
-      expect(value >= 0 && value < 1).toBe(true);
-      const bucket = Math.floor(value * 10);
-      buckets[bucket] = (buckets[bucket] ?? 0) + 1;
-    }
-    for (const count of buckets) {
-      expect(Math.abs(count / DRAWS - 0.1)).toBeLessThan(TOLERANCE);
-    }
-  });
+  it(
+    'is uniform in [0, 1) over 1,000,000 draws',
+    () => {
+      const rng = createRng(99);
+      const buckets = new Array<number>(10).fill(0);
+      // Counted rather than asserted per draw: a million expect() calls dominate the runtime.
+      let outOfRange = 0;
+      for (let draw = 0; draw < DRAWS; draw += 1) {
+        const value = randomFloat(rng);
+        if (!(value >= 0 && value < 1)) {
+          outOfRange += 1;
+        }
+        const bucket = Math.floor(value * 10);
+        buckets[bucket] = (buckets[bucket] ?? 0) + 1;
+      }
+      expect(outOfRange).toBe(0);
+      for (const count of buckets) {
+        expect(Math.abs(count / DRAWS - 0.1)).toBeLessThan(TOLERANCE);
+      }
+    },
+    HEAVY_STATISTICAL_TEST_TIMEOUT_MS,
+  );
 });
 
 describe('weightedPick', () => {
-  it('follows integer weights within 0.1 point over 1,000,000 draws', () => {
-    const entries = [
-      { value: 'common', weight: 6000 },
-      { value: 'uncommon', weight: 3000 },
-      { value: 'rare', weight: 900 },
-      { value: 'legendary', weight: 100 },
-      { value: 'never', weight: 0 },
-    ] as const;
-    const total = 10_000;
-    const rng = createRng(1);
-    const counts = new Map<string, number>();
-    for (let draw = 0; draw < DRAWS; draw += 1) {
-      const value = weightedPick(rng, entries);
-      counts.set(value, (counts.get(value) ?? 0) + 1);
-    }
-    for (const entry of entries) {
-      const share = (counts.get(entry.value) ?? 0) / DRAWS;
-      expect(Math.abs(share - entry.weight / total)).toBeLessThan(TOLERANCE);
-    }
-    expect(counts.has('never')).toBe(false);
-  });
+  it(
+    'follows integer weights within 0.1 point over 1,000,000 draws',
+    () => {
+      const entries = [
+        { value: 'common', weight: 6000 },
+        { value: 'uncommon', weight: 3000 },
+        { value: 'rare', weight: 900 },
+        { value: 'legendary', weight: 100 },
+        { value: 'never', weight: 0 },
+      ] as const;
+      const total = 10_000;
+      const rng = createRng(1);
+      const counts = new Map<string, number>();
+      for (let draw = 0; draw < DRAWS; draw += 1) {
+        const value = weightedPick(rng, entries);
+        counts.set(value, (counts.get(value) ?? 0) + 1);
+      }
+      for (const entry of entries) {
+        const share = (counts.get(entry.value) ?? 0) / DRAWS;
+        expect(Math.abs(share - entry.weight / total)).toBeLessThan(TOLERANCE);
+      }
+      expect(counts.has('never')).toBe(false);
+    },
+    HEAVY_STATISTICAL_TEST_TIMEOUT_MS,
+  );
 
   it('maps every position to an entry exactly as many times as its weight', () => {
     const entries = [
