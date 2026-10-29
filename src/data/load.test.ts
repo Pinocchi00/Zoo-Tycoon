@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { GAME_CONTENT } from './content';
+import { banners as gameBanners } from './content/banners';
 import { gachaRules } from './content/gacha-rules';
 import { capybara } from './content/species/capybara';
 import { SYNTHETIC_GACHA_CONTENT } from './fixtures/synthetic-gacha';
 import { formatDataErrors, loadGameContent, loadGameData, RARITIES, type DataError } from './index';
 import type { RawGameData } from './load';
+
+const [, welcomeBanner] = gameBanners;
 
 function withSpecies(...species: unknown[]): RawGameData {
   return { ...GAME_CONTENT, species };
@@ -211,6 +214,17 @@ describe('invalid species', () => {
     expect(errors).toContainEqual(expect.objectContaining({ path: 'habitatKit.vegetation.0' }));
   });
 
+  it('refuses an element given both by the kit and by a star', () => {
+    const starRewards = {
+      ...capybara.starRewards,
+      2: { elements: ['pond'], unlocksBehavior: 'forage-feeder' },
+    };
+    expectRefused(brokenCapybara({ starRewards }), {
+      path: 'starRewards.2.elements.0',
+      message: 'element "pond" given twice',
+    });
+  });
+
   it('refuses two species with the same id', () => {
     expectRefused(withSpecies(capybara, capybara), {
       source: 'species[1] (capybara)',
@@ -273,6 +287,17 @@ describe('invalid gacha rules and banners', () => {
     );
   });
 
+  it('refuses two welcome banners', () => {
+    const banners = [...GAME_CONTENT.banners, { ...welcomeBanner, id: 'welcome-again' }];
+    expectRefused(
+      { ...GAME_CONTENT, banners },
+      {
+        source: 'banners',
+        message: 'at most one welcome banner',
+      },
+    );
+  });
+
   it('refuses an unknown banner kind', () => {
     expectRefused(
       { ...GAME_CONTENT, banners: [{ kind: 'seasonal', id: 'summer' }] },
@@ -304,8 +329,8 @@ describe('invalid park content', () => {
     expectRefused(
       { ...GAME_CONTENT, buildings: [{ ...VALID_BUILDING, id: 'pond' }] },
       {
-        source: 'items (pond)',
-        message: 'id used by two items',
+        source: 'buildings',
+        message: 'id "pond" used by both habitatElements and buildings',
       },
     );
   });

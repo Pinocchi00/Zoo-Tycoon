@@ -96,7 +96,7 @@ export function loadGameData(raw: RawGameData): Result<GameData, readonly DataEr
   );
 
   checkBanners(banners, errors);
-  checkSharedItemIds([habitatElements, buildings, decor], errors);
+  checkSharedItemIds({ habitatElements, buildings, decor }, errors);
   species.forEach((entry, id) => {
     checkSpeciesReferences(entry, `species (${id})`, biomes, habitatElements, errors);
   });
@@ -170,24 +170,30 @@ function entrySource(collection: string, index: number, value: unknown): string 
 }
 
 function checkBanners(banners: ReadonlyMap<BannerId, Banner>, errors: DataError[]): void {
-  const hasPermanent = [...banners.values()].some((banner) => banner.kind === 'permanent');
-  if (!hasPermanent) {
+  const kinds = [...banners.values()].map((banner) => banner.kind);
+  if (!kinds.includes('permanent')) {
     errors.push({ source: 'banners', path: '', message: 'a permanent banner is required' });
+  }
+  // The welcome arrivals are a single run of first arrivals: two of them would overlap.
+  if (kinds.filter((kind) => kind === 'welcome').length > 1) {
+    errors.push({ source: 'banners', path: '', message: 'at most one welcome banner' });
   }
 }
 
 /** Habitat elements, buildings and decor share the `ItemId` space: one id, one thing. */
 function checkSharedItemIds(
-  collections: readonly ReadonlyMap<ItemId, unknown>[],
+  collections: Readonly<Record<string, ReadonlyMap<ItemId, unknown>>>,
   errors: DataError[],
 ): void {
-  const seen = new Set<ItemId>();
-  for (const collection of collections) {
+  const owners = new Map<ItemId, string>();
+  for (const [name, collection] of Object.entries(collections)) {
     for (const id of collection.keys()) {
-      if (seen.has(id)) {
-        errors.push({ source: `items (${id})`, path: 'id', message: 'id used by two items' });
+      const owner = owners.get(id);
+      if (owner !== undefined) {
+        const message = `id "${id}" used by both ${owner} and ${name}`;
+        errors.push({ source: name, path: 'id', message });
       }
-      seen.add(id);
+      owners.set(id, name);
     }
   }
 }
