@@ -82,6 +82,22 @@ describe('randomInt', () => {
     }
   });
 
+  it('rejects biased draws when the range does not divide 2^32', () => {
+    // Over 3 × 2^30 values, a quarter of the raw draws must be rejected. Without rejection,
+    // the first third of the range would come out half of the time instead of a third.
+    const third = 2 ** 30;
+    const rng = createRng(17);
+    const thirds = [0, 0, 0];
+    const rounds = 300_000;
+    for (let draw = 0; draw < rounds; draw += 1) {
+      const slice = Math.floor(randomInt(rng, 0, 3 * third - 1) / third);
+      thirds[slice] = (thirds[slice] ?? 0) + 1;
+    }
+    for (const count of thirds) {
+      expect(Math.abs(count / rounds - 1 / 3)).toBeLessThan(0.005);
+    }
+  });
+
   it('stays within its bounds, both included', () => {
     const rng = createRng(3);
     const seen = new Set<number>();
