@@ -64,7 +64,11 @@ describe('terrain', () => {
     const [west, east] = terrain.parking;
     expectRefused(withTerrain({ parking: [{ ...west, row: 250 }, east] }), {
       source: 'terrain',
-      message: 'parking must lie outside the land, south of it',
+      message: 'parking must lie just outside the south edge',
+    });
+    expectRefused(withTerrain({ parking: [{ ...west, row: 260 }, east] }), {
+      source: 'terrain',
+      message: 'parking must lie just outside the south edge',
     });
     expectRefused(withTerrain({ parking: [east, west] }), {
       source: 'terrain',
@@ -96,6 +100,16 @@ describe('build rules and path surfaces', () => {
         buildRules: { ...buildRules, enclosure: { maxAreaCells: 100, maxOutlinePoints: 2 } },
       },
       { source: 'buildRules', path: 'enclosure.maxOutlinePoints' },
+    );
+  });
+
+  it('lets the largest enclosure size fit under the maximum area', () => {
+    expectRefused(
+      {
+        ...GAME_CONTENT,
+        buildRules: { ...buildRules, enclosure: { maxAreaCells: 143, maxOutlinePoints: 32 } },
+      },
+      { source: 'buildRules', path: 'enclosure.maxAreaCells' },
     );
   });
 

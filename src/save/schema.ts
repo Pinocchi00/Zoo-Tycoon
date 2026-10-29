@@ -34,17 +34,36 @@ const speciesIdSchema = brandedId(speciesId);
 const bannerIdSchema = brandedId(bannerId);
 const itemIdSchema = brandedId(itemId);
 
+/**
+ * Coarse bounds for a hand-edited file: far above anything the game builds (the data allow 32
+ * corners on a 256-cell land), low enough that loading can never stall on a forged outline.
+ */
+const MAX_SAVED_OUTLINE_POINTS = 256;
+const MAX_SAVED_COORDINATE = 65_535;
+
+/** Ids are `<prefix>-<n>`, issued in order: every n is below the counter of the next id. */
+function isIssuedId(id: string, prefix: string, next: number): boolean {
+  if (!id.startsWith(`${prefix}-`)) {
+    return false;
+  }
+  const digits = id.slice(prefix.length + 1);
+  return /^[1-9][0-9]*$/.test(digits) && Number(digits) < next;
+}
+
 function hasDistinct<T>(values: readonly T[], key: (value: T) => string | number): boolean {
   return new Set(values.map(key)).size === values.length;
 }
 
-const cellCoordinate = z.int().min(0);
+const cellCoordinate = z.int().min(0).max(MAX_SAVED_COORDINATE);
 
 const enclosuresSchema = z
   .array(
     z.strictObject({
       id: brandedId(enclosureId),
-      outline: z.array(z.strictObject({ x: cellCoordinate, y: cellCoordinate })).min(3),
+      outline: z
+        .array(z.strictObject({ x: cellCoordinate, y: cellCoordinate }))
+        .min(3)
+        .max(MAX_SAVED_OUTLINE_POINTS),
       speciesId: speciesIdSchema.nullable(),
       viewScore: amount,
     }),
@@ -132,31 +151,44 @@ const gachaSchema = z.strictObject({
  * Full shape of the saved GameState (everything but the session). Strict: an unknown field means
  * the file is not ours. Overlaps are not checked here: only the simulation can build the park.
  */
-export const gameStateSchema = z.strictObject({
-  version: z.literal(STATE_VERSION),
-  clock: z.strictObject({
-    timeMs: amount,
-    // The accumulator never holds a whole step: advance() would have simulated it.
-    accumulatorMs: amount.max(STEP_MS - 1),
-  }),
-  // xoshiro128** never leaves the all-zero state: the game would draw the same value forever.
-  rng: z
-    .tuple([uint32, uint32, uint32, uint32])
-    .refine((words) => words.some((word) => word !== 0), { message: 'allZeroRng' }),
-  currencies: z.strictObject({
-    coins: amount,
-    arrivalTickets: amount,
-    careMedals: amount,
-    decorTickets: amount,
-    shavings: amount,
-  }),
-  enclosures: enclosuresSchema,
-  animals: z.array(z.strictObject({ id: brandedId(animalId), speciesId: speciesIdSchema })),
-  gacha: gachaSchema,
-  paths: pathsSchema,
-  buildings: buildingsSchema,
-  nextIds: z.strictObject({ enclosure: z.int().min(1), building: z.int().min(1) }),
-});
+export const gameStateSchema = z
+  .strictObject({
+    version: z.literal(STATE_VERSION),
+    clock: z.strictObject({
+      timeMs: amount,
+      // The accumulator never holds a whole step: advance() would have simulated it.
+      accumulatorMs: amount.max(STEP_MS - 1),
+    }),
+    // xoshiro128** never leaves the all-zero state: the game would draw the same value forever.
+    rng: z
+      .tuple([uint32, uint32, uint32, uint32])
+      .refine((words) => words.some((word) => word !== 0), { message: 'allZeroRng' }),
+    currencies: z.strictObject({
+      coins: amount,
+      arrivalTickets: amount,
+      careMedals: amount,
+      decorTickets: amount,
+      shavings: amount,
+    }),
+    enclosures: enclosuresSchema,
+    animals: z.array(z.strictObject({ id: brandedId(animalId), speciesId: speciesIdSchema })),
+    gacha: gachaSchema,
+    paths: pathsSchema,
+    buildings: buildingsSchema,
+    nextIds: z.strictObject({ enclosure: z.int().min(1), building: z.int().min(1) }),
+  })
+  // A counter behind an existing id would give the next object a twin, merged by every change.
+  .superRefine((state, context) => {
+    const { nextIds } = state;
+    if (!state.enclosures.every(({ id }) => isIssuedId(id, 'enclosure', nextIds.enclosure))) {
+      const path = ['nextIds', 'enclosure'];
+      context.addIssue({ code: 'custom', message: 'idNotIssuedYet', path });
+    }
+    if (!state.buildings.every(({ id }) => isIssuedId(id, 'building', nextIds.building))) {
+      const path = ['nextIds', 'building'];
+      context.addIssue({ code: 'custom', message: 'idNotIssuedYet', path });
+    }
+  });
 
 /** Dotted path of the first issue, e.g. `currencies.coins`, so that a bad save says what is wrong. */
 export function firstIssuePath(error: z.ZodError): string {

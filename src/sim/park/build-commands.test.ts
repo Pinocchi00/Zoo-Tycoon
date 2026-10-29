@@ -46,6 +46,7 @@ describe('placePath', () => {
     expect(events).toEqual([
       {
         type: 'pathTilesChanged',
+        cause: 'command',
         tiles: [
           { column: 12, row: 10, surface: GRAVEL },
           { column: 10, row: 11, surface: GRAVEL },
@@ -167,6 +168,7 @@ describe('removePath', () => {
     expect(ofType(events, 'pathTilesChanged')).toEqual([
       {
         type: 'pathTilesChanged',
+        cause: 'command',
         tiles: [
           { column: 11, row: 10, surface: null },
           { column: 12, row: 10, surface: null },
@@ -211,7 +213,7 @@ describe('placeEnclosure', () => {
     expect(state.nextIds.enclosure).toBe(3);
     expect(state.currencies.coins).toBe(START_COINS);
     expect(events).toEqual([
-      { type: 'enclosurePlaced', enclosureId: FIRST_ENCLOSURE, speciesId: null },
+      { type: 'enclosurePlaced', enclosureId: FIRST_ENCLOSURE, speciesId: null, cause: 'command' },
       { type: 'buildHistoryChanged', undoCount: 1, redoCount: 0 },
     ]);
   });
@@ -322,7 +324,7 @@ describe('moveEnclosure', () => {
     ]);
     expect(state.currencies.coins).toBe(START_COINS);
     expect(ofType(events, 'enclosureMoved')).toEqual([
-      { type: 'enclosureMoved', enclosureId: FIRST_ENCLOSURE },
+      { type: 'enclosureMoved', enclosureId: FIRST_ENCLOSURE, cause: 'command' },
     ]);
   });
 

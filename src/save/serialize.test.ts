@@ -368,6 +368,28 @@ describe('state validation', () => {
       kind: 'invalidState',
       path: 'nextIds.enclosure',
     });
+    // A counter behind the ids already given, or an id the game never issues.
+    expect(pathOf({ ...state, nextIds: { ...state.nextIds, enclosure: 1 } })).toEqual({
+      kind: 'invalidState',
+      path: 'nextIds.enclosure',
+    });
+    expect(pathOf({ ...state, enclosures: [{ ...enclosure, id: 'meadow-1' }] })).toEqual({
+      kind: 'invalidState',
+      path: 'nextIds.enclosure',
+    });
+    expect(
+      pathOf({ ...state, buildings: [{ ...bench, quarterTurns: 1, id: 'building-2' }] }),
+    ).toEqual({ kind: 'invalidState', path: 'nextIds.building' });
+    const far = { x: 70_000, y: 0 };
+    expect(pathOf({ ...state, enclosures: [{ ...enclosure, outline: [far, far, far] }] })).toEqual({
+      kind: 'invalidState',
+      path: 'enclosures.0.outline.0.x',
+    });
+    const corners = Array.from({ length: 257 }, (_unused, index) => ({ x: index, y: 0 }));
+    expect(pathOf({ ...state, enclosures: [{ ...enclosure, outline: corners }] })).toEqual({
+      kind: 'invalidState',
+      path: 'enclosures.0.outline',
+    });
   });
 
   it('refuses an unknown field', () => {

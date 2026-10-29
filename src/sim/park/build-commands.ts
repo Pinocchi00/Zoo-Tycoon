@@ -414,7 +414,7 @@ function performParkCommand(
   if (isEmptyChange(change.value)) {
     return ok(undefined);
   }
-  const applied = applyParkChange(state, change.value, data, events);
+  const applied = applyParkChange(state, change.value, 'command', data, events);
   if (!applied.ok) {
     return applied;
   }
@@ -433,7 +433,7 @@ function undoBuild(state: GameState, data: GameData, events: EventQueue): Result
   if (change === undefined) {
     return err('nothingToUndo');
   }
-  const applied = applyParkChange(state, invertChange(change), data, events);
+  const applied = applyParkChange(state, invertChange(change), 'undo', data, events);
   if (!applied.ok) {
     return applied;
   }
@@ -449,7 +449,7 @@ function redoBuild(state: GameState, data: GameData, events: EventQueue): Result
   if (change === undefined) {
     return err('nothingToRedo');
   }
-  const applied = applyParkChange(state, change, data, events);
+  const applied = applyParkChange(state, change, 'redo', data, events);
   if (!applied.ok) {
     return applied;
   }
