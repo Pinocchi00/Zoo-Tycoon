@@ -1,6 +1,10 @@
 import { describe, expect, expectTypeOf, it } from 'vitest';
 import {
   animalId,
+  archetypeId,
+  bannerId,
+  behaviorId,
+  biomeId,
   enclosureId,
   itemId,
   speciesId,
@@ -13,6 +17,10 @@ const CONSTRUCTORS = [
   ['animalId', animalId],
   ['enclosureId', enclosureId],
   ['itemId', itemId],
+  ['biomeId', biomeId],
+  ['bannerId', bannerId],
+  ['behaviorId', behaviorId],
+  ['archetypeId', archetypeId],
 ] as const;
 
 describe('typed identifiers', () => {
