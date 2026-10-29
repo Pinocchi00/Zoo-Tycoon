@@ -62,6 +62,8 @@ function arrivalsState(): GameState {
     id: unwrap(animalId('capy-1')),
     speciesId: unwrap(speciesId('capybara')),
   });
+  // What any older save becomes: the suggestion feed fades from the time it was written.
+  state.visitors.suggestionsHalvedAtMs = state.clock.timeMs;
   return state;
 }
 
@@ -477,6 +479,11 @@ describe('state validation', () => {
       kind: 'invalidState',
       path: 'visitors.nextNumber',
     });
+    const early = { ...state.visitors, suggestionsHalvedAtMs: state.clock.timeMs + 1 };
+    expect(pathOf({ ...state, visitors: early })).toEqual({
+      kind: 'invalidState',
+      path: 'visitors.suggestionsHalvedAtMs',
+    });
     const twins = { ...state.visitors, list: [visitor, visitor] };
     expect(pathOf({ ...state, visitors: twins })).toEqual({
       kind: 'invalidState',
@@ -503,7 +510,11 @@ describe('migration from version 3', () => {
   it('loads a version 3 save, with nobody in the park yet', () => {
     expect(deserialize(forgeSave(stateV3))).toEqual({
       ok: true,
-      value: { ...state, visitors: createVisitorsState(), session: createSessionState() },
+      value: {
+        ...state,
+        visitors: { ...createVisitorsState(), suggestionsHalvedAtMs: state.clock.timeMs },
+        session: createSessionState(),
+      },
     });
   });
 });

@@ -27,8 +27,10 @@ export const UNREACHABLE = -1;
  */
 export interface PathCache {
   /**
-   * The lists the cache was built from. Every change of the layout replaces them (see `commit` in
-   * park-change), and so does loading a game: a different list means a stale cache.
+   * The lists the cache was built from. Every change of the layout (a path, an outline, a
+   * footprint) replaces them (see `commit` in park-change), and so does loading a game: a
+   * different list means a stale cache. Only the view score is changed in place, and no route
+   * depends on it.
    */
   paths: readonly PathTile[] | null;
   enclosures: readonly EnclosureState[] | null;

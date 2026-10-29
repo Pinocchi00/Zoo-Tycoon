@@ -86,9 +86,14 @@ function migrateV2ToV3(data: unknown): Result<unknown, string> {
   });
 }
 
-const stateV3Schema = z.looseObject({ version: z.literal(3) });
+// A missing or broken clock is left to the final state check, which reports it with its path.
+const stateV3Schema = z.looseObject({ version: z.literal(3), clock: z.unknown().optional() });
+const clockTimeSchema = z.looseObject({ timeMs: z.int().min(0) });
 
-/** Version 4 adds the visitors: nobody in the park yet, no suggestion. */
+/**
+ * Version 4 adds the visitors: nobody in the park yet, no suggestion. The feed starts fading from
+ * the save's own time, never from the day the park opened.
+ */
 function migrateV3ToV4(data: unknown): Result<unknown, string> {
   const parsed = stateV3Schema.safeParse(data);
   if (!parsed.success) {
@@ -103,7 +108,7 @@ function migrateV3ToV4(data: unknown): Result<unknown, string> {
       arrivalProgress: 0,
       parkSatisfactionBp: null,
       suggestions: { foodDrink: 0, rest: 0, comfort: 0 },
-      suggestionsHalvedAtMs: 0,
+      suggestionsHalvedAtMs: clockTimeSchema.safeParse(parsed.data.clock).data?.timeMs ?? 0,
     },
   });
 }

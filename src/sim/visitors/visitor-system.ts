@@ -26,15 +26,24 @@ function isInFocus(visitor: VisitorState, focus: FocusArea | null): boolean {
   );
 }
 
-/** Old wishes fade: every half-life, each count of the suggestion feed is halved. */
+/** Beyond this many halvings, every safe integer count is already 0. */
+const MAX_USEFUL_HALVINGS = 53;
+
+/**
+ * Old wishes fade: every half-life, each count of the suggestion feed is halved. All the
+ * half-lives elapsed are applied at once, so that a long gap never loops.
+ */
 function fadeSuggestions(state: GameState, halfLifeMs: number, nowMs: number): void {
   const visitors = state.visitors;
-  while (nowMs - visitors.suggestionsHalvedAtMs >= halfLifeMs) {
-    for (const need of SERVICE_NEEDS) {
-      visitors.suggestions[need] = Math.floor(visitors.suggestions[need] / 2);
-    }
-    visitors.suggestionsHalvedAtMs += halfLifeMs;
+  const halvings = Math.floor((nowMs - visitors.suggestionsHalvedAtMs) / halfLifeMs);
+  if (halvings <= 0) {
+    return;
   }
+  const divisor = 2 ** Math.min(halvings, MAX_USEFUL_HALVINGS);
+  for (const need of SERVICE_NEEDS) {
+    visitors.suggestions[need] = Math.floor(visitors.suggestions[need] / divisor);
+  }
+  visitors.suggestionsHalvedAtMs += halvings * halfLifeMs;
 }
 
 function updateVisitors(

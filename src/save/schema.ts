@@ -265,6 +265,11 @@ export const gameStateSchema = z
       const path = ['visitors', 'nextNumber'];
       context.addIssue({ code: 'custom', message: 'idNotIssuedYet', path });
     }
+    // Ahead of the clock, the feed would never fade.
+    if (visitors.suggestionsHalvedAtMs > state.clock.timeMs) {
+      const path = ['visitors', 'suggestionsHalvedAtMs'];
+      context.addIssue({ code: 'custom', message: 'aheadOfClock', path });
+    }
     // A visitor ahead of the clock would be simulated backwards.
     if (visitors.list.some((visitor) => visitor.updatedAtMs > state.clock.timeMs)) {
       const path = ['visitors', 'list'];
