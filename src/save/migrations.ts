@@ -59,10 +59,38 @@ function migrateV1ToV2(data: unknown): Result<unknown, string> {
   });
 }
 
+// A missing list is left to the final state check, which reports it with its path.
+const stateV2Schema = z.looseObject({
+  version: z.literal(2),
+  enclosures: z.array(z.unknown()).optional(),
+});
+
+/**
+ * Version 3 adds construction: paths, buildings and the id counters. Version 2 had only an
+ * enclosure placeholder that nothing could fill, so a non-empty list is not a real save.
+ */
+function migrateV2ToV3(data: unknown): Result<unknown, string> {
+  const parsed = stateV2Schema.safeParse(data);
+  if (!parsed.success) {
+    return err('notAVersion2State');
+  }
+  if (parsed.data.enclosures !== undefined && parsed.data.enclosures.length > 0) {
+    return err('unexpectedVersion2Enclosures');
+  }
+  return ok({
+    ...parsed.data,
+    version: 3,
+    paths: [],
+    buildings: [],
+    nextIds: { enclosure: 1, building: 1 },
+  });
+}
+
 /** Every migration ever written, in order. Never edit a published one: add the next. */
 export const MIGRATIONS: readonly Migration[] = [
   { from: 0, migrate: migrateV0ToV1 },
   { from: 1, migrate: migrateV1ToV2 },
+  { from: 2, migrate: migrateV2ToV3 },
 ];
 
 /** Checks that the registry holds exactly one step for every version below the target. */

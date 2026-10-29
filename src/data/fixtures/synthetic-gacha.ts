@@ -1,9 +1,11 @@
 import { banners } from '../content/banners';
 import { biomes } from '../content/biomes';
+import { buildRules, pathSurfaces } from '../content/build-rules';
 import { enclosureSizes } from '../content/enclosure-sizes';
 import { gachaRules } from '../content/gacha-rules';
 import { habitatElements } from '../content/habitat-elements';
 import { capybara } from '../content/species/capybara';
+import { terrain } from '../content/terrain';
 import type { RawGameData } from '../load';
 import { RARITIES, type Rarity } from '../schemas/common';
 import type { SpeciesInput } from '../schemas/species';
@@ -22,6 +24,9 @@ function syntheticSpecies(rarity: Rarity, index: number): SpeciesInput {
 export const SYNTHETIC_GACHA_CONTENT: RawGameData = {
   gachaRules,
   enclosureSizes,
+  terrain,
+  buildRules,
+  pathSurfaces,
   banners,
   biomes,
   habitatElements,

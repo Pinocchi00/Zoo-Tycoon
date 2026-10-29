@@ -7,7 +7,7 @@ import {
   Scene,
   WebGLRenderer,
 } from 'three';
-import { createGridSize, gridDepth, gridWidth, logger } from '@/shared';
+import { gridDepth, gridWidth, logger, type GridSize } from '@/shared';
 import capybaraUrl from '../../assets/models/capybara.glb?url';
 import { loadAnimalModel } from './animals/animal-model';
 import { createAnimalSlot } from './animals/animal-slot';
@@ -23,9 +23,6 @@ import { applyCameraPose, createIsoCamera } from './camera/iso-camera';
 import { AFTERNOON, applyShadowQuality, createLighting } from './lighting/ambiance';
 import { qualitySettings, type QualityLevel } from './quality/quality';
 import { createDioramaBase } from './terrain/diorama-base';
-
-/** Provisional size of the starting plot; it moves to src/data once plots can be bought. */
-export const STARTING_PARK_GRID = createGridSize(64, 64);
 
 /** Closest view: about one small enclosure (4 × 4 cells) with its surroundings. */
 const MIN_VIEW_HEIGHT_M = 6;
@@ -43,24 +40,27 @@ export interface ParkView {
   dispose: () => void;
 }
 
-function cameraLimits(): CameraLimits {
+/** Where the camera looks when the game starts, in metres on the ground plane. */
+export interface ViewFocus {
+  readonly x: number;
+  readonly z: number;
+}
+
+function cameraLimits(grid: GridSize): CameraLimits {
   return {
     minViewHeight: MIN_VIEW_HEIGHT_M,
     maxViewHeight: MAX_VIEW_HEIGHT_M,
-    halfWidth: gridWidth(STARTING_PARK_GRID) / 2,
-    halfDepth: gridDepth(STARTING_PARK_GRID) / 2,
+    halfWidth: gridWidth(grid) / 2,
+    halfDepth: gridDepth(grid) / 2,
   };
 }
 
 /** Provisional: one resident shown at the park centre until the simulation places animals. */
 const DEMO_ANIMAL = { url: capybaraUrl, x: 0, z: 0, yawRad: Math.PI / 2 } as const;
 
-const START_POSE: Readonly<CameraPose> = {
-  x: 0,
-  z: 0,
-  viewHeight: START_VIEW_HEIGHT_M,
-  yaw: ISO_YAW_RAD,
-};
+function startPose(focus: ViewFocus): CameraPose {
+  return { x: focus.x, z: focus.z, viewHeight: START_VIEW_HEIGHT_M, yaw: ISO_YAW_RAD };
+}
 
 function disposeScene(scene: Scene): void {
   scene.traverse((object) => {
@@ -81,7 +81,12 @@ function disposeScene(scene: Scene): void {
 }
 
 /** The empty park in 3D, drawn into `canvas`. */
-export function createParkView(canvas: HTMLCanvasElement, initialLevel: QualityLevel): ParkView {
+export function createParkView(
+  canvas: HTMLCanvasElement,
+  initialLevel: QualityLevel,
+  grid: GridSize,
+  focus: ViewFocus,
+): ParkView {
   const renderer = new WebGLRenderer({
     canvas,
     antialias: true,
@@ -91,12 +96,12 @@ export function createParkView(canvas: HTMLCanvasElement, initialLevel: QualityL
   renderer.shadowMap.type = PCFShadowMap;
 
   const scene = new Scene();
-  scene.add(createDioramaBase(STARTING_PARK_GRID));
-  const reach = Math.hypot(gridWidth(STARTING_PARK_GRID), gridDepth(STARTING_PARK_GRID)) / 2;
+  scene.add(createDioramaBase(grid));
+  const reach = Math.hypot(gridWidth(grid), gridDepth(grid)) / 2;
   const lighting = createLighting(scene, AFTERNOON, reach);
 
   const camera = createIsoCamera();
-  const rig = createCameraRig(cameraLimits(), START_POSE);
+  const rig = createCameraRig(cameraLimits(grid), startPose(focus));
   const viewport = { width: 1, height: 1 };
   const detachControls = attachCameraControls(canvas, rig, viewport);
 

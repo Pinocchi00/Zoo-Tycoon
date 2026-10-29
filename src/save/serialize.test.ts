@@ -1,14 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import { animalId, bannerId, enclosureId, err, speciesId, type Result } from '../shared';
+import { animalId, bannerId, enclosureId, err, itemId, speciesId, type Result } from '../shared';
 import { loadGameContent } from '../data';
 import {
   advance,
   applyCommand,
   createEventQueue,
   createGameState,
+  createSessionState,
   nextUint32,
   STATE_VERSION,
   STEP_MS,
+  toSavedState,
   type GameState,
 } from '../sim';
 import { checksum } from './checksum';
@@ -28,8 +30,8 @@ function unwrap<T, E>(result: Result<T, E>): T {
   return result.value;
 }
 
-/** A state with something in every field, so that a lost field cannot go unnoticed. */
-function playedState(): GameState {
+/** Arrivals, coins, time and random draws, but nothing built: all that older saves could hold. */
+function arrivalsState(): GameState {
   const state = createGameState(SEED);
   const events = createEventQueue();
   advance(state, PLAYED_MS + STEP_MS / 2, events);
@@ -44,12 +46,67 @@ function playedState(): GameState {
     nextUint32(state.rng);
   }
   state.currencies.shavings = 7;
-  state.enclosures.push({ id: unwrap(enclosureId('meadow-1')) });
   state.animals.push({
     id: unwrap(animalId('capy-1')),
     speciesId: unwrap(speciesId('capybara')),
   });
   return state;
+}
+
+/** A state with something in every field, so that a lost field cannot go unnoticed. */
+function playedState(): GameState {
+  const state = arrivalsState();
+  const events = createEventQueue();
+  const data = unwrap(loadGameContent());
+  const [met] = state.gacha.collection;
+  if (met === undefined) {
+    throw new Error('The arrivals state has met a species.');
+  }
+  const square = [
+    { x: 100, y: 100 },
+    { x: 108, y: 100 },
+    { x: 108, y: 108 },
+    { x: 100, y: 108 },
+  ];
+  const pathCells = Array.from({ length: 8 }, (_unused, index) => ({
+    column: 100 + index,
+    row: 108,
+  }));
+  const commands = [
+    { type: 'placeEnclosure', outline: square },
+    { type: 'placePath', cells: pathCells, surface: unwrap(itemId('gravel')) },
+    {
+      type: 'installGroup',
+      enclosureId: unwrap(enclosureId('enclosure-1')),
+      speciesId: met.speciesId,
+    },
+    {
+      type: 'placeBuilding',
+      itemId: unwrap(itemId('bench')),
+      column: 100,
+      row: 109,
+      quarterTurns: 0,
+    },
+    { type: 'undoBuild' },
+  ] as const;
+  for (const command of commands) {
+    unwrap(applyCommand(state, command, data, events));
+  }
+  return state;
+}
+
+/** The fields that versions before 3 did not have. */
+function withoutPark(
+  state: GameState,
+): Omit<GameState, 'paths' | 'buildings' | 'nextIds' | 'session'> {
+  const {
+    paths: _paths,
+    buildings: _buildings,
+    nextIds: _nextIds,
+    session: _session,
+    ...rest
+  } = state;
+  return rest;
 }
 
 /** A save with a correct checksum around any payload: reaches the checks behind the checksum. */
@@ -69,11 +126,21 @@ function envelopeFields(payload: string): Record<string, unknown> {
 }
 
 describe('round trip', () => {
-  it('gives back exactly the same state', () => {
+  it('gives back exactly the same state, with a fresh session', () => {
     const state = playedState();
     const loaded = deserialize(serialize(state, WRITTEN_AT_MS));
-    expect(loaded).toEqual({ ok: true, value: state });
-    expect(JSON.stringify(unwrap(loaded))).toBe(JSON.stringify(state));
+    const expected = { ...state, session: createSessionState() };
+    expect(loaded).toEqual({ ok: true, value: expected });
+    expect(JSON.stringify(unwrap(loaded))).toBe(JSON.stringify(expected));
+  });
+
+  it('never writes the undo history', () => {
+    const state = playedState();
+    expect(state.session.buildHistory.undo.length).toBeGreaterThan(0);
+    expect(state.session.buildHistory.redo.length).toBeGreaterThan(0);
+    const text = serialize(state, WRITTEN_AT_MS);
+    expect(text).not.toContain('session');
+    expect(unwrap(deserialize(text)).session).toEqual(createSessionState());
   });
 
   it('restores the same future random draws', () => {
@@ -115,7 +182,7 @@ describe('damaged files', () => {
   });
 
   it('reports a changed payload as a checksum mismatch', () => {
-    const tampered = text.replace('1234', '9999');
+    const tampered = text.replace('"shavings\\":7', '"shavings\\":8');
     expect(tampered).not.toBe(text);
     expect(deserialize(tampered)).toEqual(err({ kind: 'checksumMismatch' }));
   });
@@ -163,7 +230,7 @@ describe('damaged files', () => {
 });
 
 describe('state validation', () => {
-  const state = playedState();
+  const state = toSavedState(playedState());
 
   function pathOf(rawState: unknown): unknown {
     const result = deserialize(forgeSave(rawState));
@@ -212,7 +279,7 @@ describe('state validation', () => {
   it('refuses a malformed identifier', () => {
     const animals = [{ id: 'Capy 1', speciesId: 'capybara' }];
     expect(pathOf({ ...state, animals })).toEqual({ kind: 'invalidState', path: 'animals.0.id' });
-    const enclosures = [{ id: '' }];
+    const enclosures = state.enclosures.map((enclosure) => ({ ...enclosure, id: '' }));
     expect(pathOf({ ...state, enclosures })).toEqual({
       kind: 'invalidState',
       path: 'enclosures.0.id',
@@ -268,6 +335,41 @@ describe('state validation', () => {
     });
   });
 
+  it('refuses an impossible park', () => {
+    const [enclosure] = state.enclosures;
+    const [tile] = state.paths;
+    if (enclosure === undefined || tile === undefined) {
+      throw new Error('The played state has built a park.');
+    }
+    expect(pathOf({ ...state, enclosures: [enclosure, enclosure] })).toEqual({
+      kind: 'invalidState',
+      path: 'enclosures',
+    });
+    const twin = { ...enclosure, id: 'enclosure-99' };
+    expect(pathOf({ ...state, enclosures: [enclosure, twin] })).toEqual({
+      kind: 'invalidState',
+      path: 'enclosures',
+    });
+    expect(pathOf({ ...state, enclosures: [{ ...enclosure, outline: [] }] })).toEqual({
+      kind: 'invalidState',
+      path: 'enclosures.0.outline',
+    });
+    expect(pathOf({ ...state, paths: [tile, tile] })).toEqual({
+      kind: 'invalidState',
+      path: 'paths',
+    });
+    const bench = { id: 'building-1', itemId: 'bench', column: 1, row: 1, quarterTurns: 4 };
+    expect(pathOf({ ...state, buildings: [bench] })).toEqual({
+      kind: 'invalidState',
+      path: 'buildings.0.quarterTurns',
+    });
+    expect(pathOf({ ...state, buildings: [{ ...bench, quarterTurns: 1 }] })).toBe('accepted');
+    expect(pathOf({ ...state, nextIds: { enclosure: 0, building: 1 } })).toEqual({
+      kind: 'invalidState',
+      path: 'nextIds.enclosure',
+    });
+  });
+
   it('refuses an unknown field', () => {
     expect(pathOf({ ...state, hackedGems: 9999 })).toMatchObject({ kind: 'invalidState' });
   });
@@ -280,9 +382,24 @@ const EMPTY_GACHA = {
   history: [],
 };
 
+describe('migration from version 2', () => {
+  const state = arrivalsState();
+  const stateV2 = { ...withoutPark(state), version: 2 };
+
+  it('loads a version 2 save, with nothing built yet', () => {
+    expect(deserialize(forgeSave(stateV2))).toEqual({ ok: true, value: state });
+  });
+
+  it('reports a version 2 save that cannot be migrated', () => {
+    expect(deserialize(forgeSave({ ...stateV2, enclosures: [{ id: 'meadow-1' }] }))).toEqual(
+      err({ kind: 'migrationFailed', from: 2, reason: 'unexpectedVersion2Enclosures' }),
+    );
+  });
+});
+
 describe('migration from version 1', () => {
-  const state = playedState();
-  const { gacha: _gacha, ...stateV1 } = { ...state, version: 1 };
+  const state = arrivalsState();
+  const { gacha: _gacha, ...stateV1 } = { ...withoutPark(state), version: 1 };
 
   it('loads a version 1 save, with no arrival made yet', () => {
     expect(deserialize(forgeSave(stateV1))).toEqual({
@@ -301,9 +418,9 @@ describe('migration from version 1', () => {
 });
 
 describe('migration from version 0', () => {
-  const state = playedState();
+  const state = arrivalsState();
   const { shavings: _shavings, ...currenciesV0 } = state.currencies;
-  const { gacha: _gacha, ...stateV1 } = state;
+  const { gacha: _gacha, ...stateV1 } = withoutPark(state);
   const stateV0 = {
     ...stateV1,
     version: 0,

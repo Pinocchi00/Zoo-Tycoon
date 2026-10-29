@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createRng } from './rng';
-import { createGameState, STATE_VERSION } from './state';
+import { createGameState, fromSavedState, STATE_VERSION, toSavedState } from './state';
 
 describe('createGameState', () => {
   it('starts an empty park at time zero with the seeded generator', () => {
@@ -17,7 +17,24 @@ describe('createGameState', () => {
         collection: [],
         history: [],
       },
+      paths: [],
+      buildings: [],
+      nextIds: { enclosure: 1, building: 1 },
+      session: { buildHistory: { undo: [], redo: [] } },
     });
+  });
+
+  it('saves everything but the session, and a loaded game starts a fresh one', () => {
+    const state = createGameState(3);
+    state.session.buildHistory.redo.push({
+      enclosures: [],
+      buildings: [],
+      paths: [],
+      coinsDelta: 5,
+    });
+    const saved = toSavedState(state);
+    expect(saved).not.toHaveProperty('session');
+    expect(fromSavedState(saved)).toEqual(createGameState(3));
   });
 
   it('survives a JSON round trip unchanged', () => {
@@ -36,6 +53,10 @@ describe('createGameState', () => {
     expect(second.animals).not.toBe(first.animals);
     expect(second.gacha.arrivalsSince).not.toBe(first.gacha.arrivalsSince);
     expect(second.gacha.history).not.toBe(first.gacha.history);
+    expect(second.paths).not.toBe(first.paths);
+    expect(second.buildings).not.toBe(first.buildings);
+    expect(second.nextIds).not.toBe(first.nextIds);
+    expect(second.session.buildHistory).not.toBe(first.session.buildHistory);
   });
 
   it('rejects an invalid seed', () => {
