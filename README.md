@@ -26,19 +26,20 @@ npm run check
 
 Enchaîne la vérification des types, le linter, le formatage, les tests avec couverture et la construction. Tout doit être vert avant de fusionner.
 
-| Script                  | Rôle                                             |
-| ----------------------- | ------------------------------------------------ |
-| `npm run dev`           | Serveur de développement                         |
-| `npm run build`         | Construction de production dans `dist/`          |
-| `npm run preview`       | Sert la construction de production               |
-| `npm run typecheck`     | Vérification des types TypeScript                |
-| `npm run lint`          | ESLint, dont les frontières d'architecture       |
-| `npm run format`        | Met le code en forme avec Prettier               |
-| `npm run format:check`  | Vérifie la mise en forme sans rien modifier      |
-| `npm run test`          | Tests unitaires (Vitest)                         |
-| `npm run test:coverage` | Tests avec couverture (90 % sur `sim` et `save`) |
-| `npm run check`         | Tout ce qui précède, dans l'ordre                |
-| `npm run e2e`           | Construit le jeu puis lance les tests Playwright |
+| Script                              | Rôle                                                       |
+| ----------------------------------- | ---------------------------------------------------------- |
+| `npm run dev`                       | Serveur de développement                                   |
+| `npm run build`                     | Construction de production dans `dist/`                    |
+| `npm run preview`                   | Sert la construction de production                         |
+| `npm run typecheck`                 | Vérification des types TypeScript                          |
+| `npm run lint`                      | ESLint, dont les frontières d'architecture                 |
+| `npm run format`                    | Met le code en forme avec Prettier                         |
+| `npm run format:check`              | Vérifie la mise en forme sans rien modifier                |
+| `npm run test`                      | Tests unitaires (Vitest)                                   |
+| `npm run test:coverage`             | Tests avec couverture (90 % sur `sim` et `save`)           |
+| `npm run check`                     | Tout ce qui précède, dans l'ordre                          |
+| `npm run e2e`                       | Construit le jeu puis lance les tests Playwright           |
+| `npm run sim -- --days 7 --seed 42` | Simule N jours de jeu sans affichage et résume le résultat |
 
 ## Tests de bout en bout
 

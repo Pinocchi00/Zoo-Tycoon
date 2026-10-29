@@ -84,3 +84,17 @@ Chaque décision structurante est ajoutée ici, la plus récente en bas. Format 
   - `playwright.config.ts` est ajouté à `tsconfig.node.json` (règle de D-008) ;
   - le contrôle exigé par la protection de `main` s'appelle `check`.
 - **Conséquences :** renommer le job `check` oblige à mettre à jour la protection de branche sur GitHub.
+
+## D-010 — Cœur de la simulation (tâche 0.3)
+
+- **Contexte :** la simulation doit être déterministe, sérialisable, et tourner 10 fois par seconde sur mobile sans produire de déchets mémoire.
+- **Décision :**
+  - `advance`, `catchUp` et `applyCommand` **modifient l'état sur place** au lieu d'en renvoyer une copie : recopier tout le parc à chaque image coûterait trop cher. Le déterminisme reste garanti : même état de départ et mêmes appels donnent le même résultat ;
+  - générateur xoshiro128** initialisé par splitmix32, son état (4 entiers 32 bits) vit dans `GameState.rng` ;
+  - la file d'événements est hors de `GameState`, pour ne jamais être sauvegardée ;
+  - une durée négative ou à virgule, ou une liste de poids vide, lève une exception : ces valeurs viennent de l'app ou de données déjà validées, c'est donc un bug ;
+  - les étoiles du parc ne sont pas stockées : le GDD les décrit comme jamais dépensées, elles se calculeront à partir de l'attractivité ;
+  - la commande `addCoins` sert au développement : la simulation l'accepte, c'est `app` qui ne l'expose qu'en mode développement ;
+  - `src/sim` importe `shared` par chemin relatif, car l'alias `@/` n'existe pas pour les outils de `tools/` ;
+  - `tools/sim/run.ts` est lancé directement par Node 24 (qui lit le TypeScript) et charge `src/sim` avec `runnerImport` de Vite : aucune dépendance ajoutée.
+- **Conséquences :** le rendu lit l'état sans le modifier et ne garde aucune copie entre deux images. Avec 1 000 000 de tirages, une tolérance de 0,1 point vaut environ 2 écarts-types pour un taux proche de 50 % : le test du gacha (phase suivante) devra choisir ses graines et ses tailles d'échantillon en connaissance de cause.
