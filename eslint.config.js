@@ -99,7 +99,7 @@ const ARCHITECTURE_RULES = [
 
 export default defineConfig(
   {
-    ignores: ['dist/', 'coverage/', 'node_modules/', 'assets/', 'playwright-report/'],
+    ignores: ['dist/', 'coverage/', 'node_modules/', 'assets/', 'playwright-report/', 'android/'],
   },
   {
     linterOptions: {

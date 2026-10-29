@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { openBrowserTextStore } from './browser-store';
 import { openIndexedDbTextStore } from './indexed-db-store';
 import { createLocalStorageTextStore } from './local-storage-store';
-import type { TextStore } from './text-store';
+import { checkTextStore } from './text-store-contract';
 
 /** In-memory Storage, with an optional quota to simulate a full or private-mode browser. */
 class FakeStorage implements Storage {
@@ -60,20 +60,6 @@ async function newerDatabaseFactory(): Promise<IDBFactory> {
     };
   });
   return factory;
-}
-
-/** The contract every backend must honour. */
-async function checkTextStore(store: TextStore): Promise<void> {
-  expect(await store.get('missing')).toBeNull();
-  await store.set('a', 'first');
-  await store.set('b', 'second');
-  await store.set('a', 'replaced');
-  expect(await store.get('a')).toBe('replaced');
-  expect((await store.keys()).sort()).toEqual(['a', 'b']);
-  await store.remove('a');
-  await store.remove('never-written');
-  expect(await store.get('a')).toBeNull();
-  expect(await store.keys()).toEqual(['b']);
 }
 
 describe('IndexedDB store', () => {

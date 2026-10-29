@@ -1,6 +1,12 @@
 import './style.css';
 import { DEFAULT_LOCALE, t } from '@/i18n';
-import { onForegroundChange, openBrowserTextStore, type TextStore } from '@/platform';
+import {
+  createSaveStorage,
+  onForegroundChange,
+  openPlatformTextStore,
+  type OpenedPlatformStore,
+  type TextStore,
+} from '@/platform';
 import {
   createFrameSampler,
   createParkView,
@@ -10,9 +16,11 @@ import {
   type QualityLevel,
 } from '@/render';
 import { logger } from '@/shared';
-import { advance, createEventQueue, createGameState, drain } from '@/sim';
+import { deserialize } from '@/save';
+import { advance, createEventQueue, drain } from '@/sim';
 import type { FpsCounter } from './dev-fps';
 import { createGameLoop, type FrameScheduler } from './game-loop';
+import { createAutosaver, loadOrCreatePark } from './park-save';
 
 const QUALITY_STORAGE_KEY = 'settings.quality';
 /** `?quality=low|medium|high` forces a level, and keeps it, until an options screen exists. */
@@ -51,9 +59,22 @@ function storeQuality(store: TextStore, level: QualityLevel): void {
   });
 }
 
-/** Until saves are wired in, every launch opens a new empty park. */
+/** Only for a new park: from then on, all randomness comes from the seeded generator in the save. */
 function newParkSeed(): number {
   return crypto.getRandomValues(new Uint32Array(1))[0] ?? 0;
+}
+
+function logStorage(opened: OpenedPlatformStore): void {
+  if (opened.nativeFailure !== null) {
+    logger.warn(`App files unavailable: ${opened.nativeFailure}`);
+  }
+  if (opened.indexedDbFailure !== null) {
+    logger.warn(`IndexedDB unavailable: ${opened.indexedDbFailure}`);
+  }
+  if (opened.kind === 'memory') {
+    // To be shown to the player once the interface exists.
+    logger.warn('No storage available: the park will not be saved.');
+  }
 }
 
 async function main(): Promise<void> {
@@ -63,7 +84,9 @@ async function main(): Promise<void> {
   const canvas = document.createElement('canvas');
   root.append(canvas);
 
-  const { store } = await openBrowserTextStore();
+  const opened = await openPlatformTextStore();
+  logStorage(opened);
+  const { store } = opened;
   const forced = parseQualityLevel(
     new URLSearchParams(window.location.search).get(QUALITY_QUERY_PARAMETER),
   );
@@ -86,11 +109,14 @@ async function main(): Promise<void> {
     fps = createFpsCounter(root);
   }
 
-  const state = createGameState(newParkSeed());
   const events = createEventQueue();
+  const saves = createSaveStorage(store, deserialize);
+  const state = await loadOrCreatePark(saves, events, newParkSeed);
+  const autosaver = createAutosaver(saves, state, () => Date.now());
 
   const loop = createGameLoop(browserScheduler, (frameMs, simulationMs) => {
     advance(state, simulationMs, events);
+    autosaver.record(simulationMs);
     // Nothing listens to the simulation yet; draining keeps the queue from growing.
     drain(events);
     view.frame(frameMs);
@@ -111,6 +137,7 @@ async function main(): Promise<void> {
       loop.start();
     } else {
       loop.stop();
+      void autosaver.saveNow();
     }
   });
   if (!document.hidden) {

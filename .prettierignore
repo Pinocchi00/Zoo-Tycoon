@@ -4,6 +4,7 @@ dist
 coverage
 package-lock.json
 assets/models
+android
 
 # Human-authored design documents: their layout is intentional.
 AGENTS.md
