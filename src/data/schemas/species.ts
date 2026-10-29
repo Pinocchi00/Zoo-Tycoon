@@ -108,6 +108,47 @@ export const speciesSchema = z
       }
       unlocked.add(reward.unlocksBehavior);
     }
+    addDuplicateElementIssues(species, context);
   });
+
+/** Each element is given once: by the arrival kit or by a single star. */
+function addDuplicateElementIssues(
+  species: {
+    readonly habitatKit: {
+      readonly ground: string;
+      readonly water: string | null;
+      readonly shelter: string;
+      readonly vegetation: readonly string[];
+    };
+    readonly starRewards: Readonly<Record<string, { readonly elements: readonly string[] }>>;
+  },
+  context: z.RefinementCtx,
+): void {
+  const kit = species.habitatKit;
+  const placed: readonly [string, PropertyKey[]][] = [
+    [kit.ground, ['habitatKit', 'ground']],
+    ...(kit.water === null
+      ? []
+      : [[kit.water, ['habitatKit', 'water']] satisfies [string, PropertyKey[]]]),
+    [kit.shelter, ['habitatKit', 'shelter']],
+    ...kit.vegetation.map((id, index): [string, PropertyKey[]] => [
+      id,
+      ['habitatKit', 'vegetation', index],
+    ]),
+    ...Object.entries(species.starRewards).flatMap(([star, reward]) =>
+      reward.elements.map((id, index): [string, PropertyKey[]] => [
+        id,
+        ['starRewards', star, 'elements', index],
+      ]),
+    ),
+  ];
+  const seen = new Set<string>();
+  for (const [id, path] of placed) {
+    if (seen.has(id)) {
+      context.addIssue({ code: 'custom', message: `element "${id}" given twice`, path });
+    }
+    seen.add(id);
+  }
+}
 export type Species = z.output<typeof speciesSchema>;
 export type SpeciesInput = z.input<typeof speciesSchema>;
