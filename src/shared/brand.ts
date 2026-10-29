@@ -12,6 +12,10 @@ export type SpeciesId = Brand<string, 'SpeciesId'>;
 export type AnimalId = Brand<string, 'AnimalId'>;
 export type EnclosureId = Brand<string, 'EnclosureId'>;
 export type ItemId = Brand<string, 'ItemId'>;
+export type BiomeId = Brand<string, 'BiomeId'>;
+export type BannerId = Brand<string, 'BannerId'>;
+export type BehaviorId = Brand<string, 'BehaviorId'>;
+export type ArchetypeId = Brand<string, 'ArchetypeId'>;
 
 export type IdError = 'emptyId' | 'invalidIdCharacters';
 
@@ -48,4 +52,20 @@ export function enclosureId(raw: string): Result<EnclosureId, IdError> {
 
 export function itemId(raw: string): Result<ItemId, IdError> {
   return brandId<'ItemId'>(raw);
+}
+
+export function biomeId(raw: string): Result<BiomeId, IdError> {
+  return brandId<'BiomeId'>(raw);
+}
+
+export function bannerId(raw: string): Result<BannerId, IdError> {
+  return brandId<'BannerId'>(raw);
+}
+
+export function behaviorId(raw: string): Result<BehaviorId, IdError> {
+  return brandId<'BehaviorId'>(raw);
+}
+
+export function archetypeId(raw: string): Result<ArchetypeId, IdError> {
+  return brandId<'ArchetypeId'>(raw);
 }

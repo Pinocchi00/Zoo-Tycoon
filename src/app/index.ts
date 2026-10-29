@@ -1,4 +1,5 @@
 import './style.css';
+import { formatDataErrors, loadGameContent, type GameData } from '@/data';
 import { DEFAULT_LOCALE, t } from '@/i18n';
 import {
   createSaveStorage,
@@ -77,7 +78,19 @@ function logStorage(opened: OpenedPlatformStore): void {
   }
 }
 
+/** Broken content is a bug of the build, never something the player can fix: stop loudly. */
+function requireGameData(): GameData {
+  const loaded = loadGameContent();
+  if (!loaded.ok) {
+    throw new Error(`Invalid game data:
+${formatDataErrors(loaded.error)}`);
+  }
+  return loaded.value;
+}
+
 async function main(): Promise<void> {
+  const data = requireGameData();
+  logger.info(`Game data loaded: ${String(data.species.size)} species.`);
   document.documentElement.lang = DEFAULT_LOCALE;
   document.title = t('app.title');
   const root = findRoot();
