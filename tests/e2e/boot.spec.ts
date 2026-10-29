@@ -19,5 +19,6 @@ test('the game boots without any console error or warning', async ({ page }) => 
   await page.waitForLoadState('networkidle');
 
   await expect(page.locator('canvas, #app').first()).toBeAttached();
+  await expect(page.locator('#app canvas')).toBeVisible();
   expect(problems).toEqual([]);
 });
