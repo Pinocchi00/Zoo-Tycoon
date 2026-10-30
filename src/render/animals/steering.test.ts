@@ -227,11 +227,12 @@ describe('steerStep', () => {
 
   it('reaches a target close to a neighbour at rest, without overlapping it', () => {
     const area = areaOf(ROOM);
-    const neighbour = createSteerBody(-4, 0, Math.PI / 2, 2.03);
-    const body = createSteerBody(-8, 2.5, 0, 2.03);
+    const neighbour = createSteerBody(-4, 0, Math.PI / 2, 1.18);
+    const body = createSteerBody(-8, 2.5, 0, 1.18);
     const world = worldOf(area, [body, neighbour]);
-    // A place a body's width from the neighbour, well inside the range where it pushes.
-    const target = { x: -4, z: 1.2 };
+    // The nearest place the herd picks (the clearance of a 1.18 m animal): still inside the range
+    // where the neighbour pushes.
+    const target = { x: -4, z: 1.5 };
     let steps = 0;
     while (!body.arrived && steps < 900) {
       steerStep(body, LIMITS, world, true, target.x, target.z, STEP_S);
@@ -239,6 +240,68 @@ describe('steerStep', () => {
       steps += 1;
     }
     expect(body.arrived).toBe(true);
+  });
+
+  it('reaches a target the neighbour pushes on, whatever the push: the pull of the target stays', () => {
+    const area = areaOf(ROOM);
+    const neighbour = createSteerBody(-4, 0, 0);
+    const body = createSteerBody(-8, 2.5, 0);
+    const world = worldOf(area, [body, neighbour]);
+    let steps = 0;
+    while (!body.arrived && steps < 900) {
+      steerStep(body, LIMITS, world, true, -4, 0.9, STEP_S);
+      steps += 1;
+    }
+    expect(body.arrived).toBe(true);
+  });
+
+  /** Runs some steps and checks the speed the animal really gets, from how far it moves. */
+  function checkRealisedSpeed(
+    body: SteerBody,
+    neighbour: SteerBody,
+    world: SteerWorld,
+    target: { x: number; z: number },
+    steps: number,
+  ): { slowest: number; closest: number } {
+    const TOLERANCE = 1e-6;
+    let previousSpeed = 0;
+    let slowest = Number.POSITIVE_INFINITY;
+    let closest = Number.POSITIVE_INFINITY;
+    for (let step = 0; step < steps; step += 1) {
+      const x = body.x;
+      const z = body.z;
+      steerStep(body, LIMITS, world, true, target.x, target.z, STEP_S);
+      const realised = Math.hypot(body.x - x, body.z - z) / STEP_S;
+      expect(realised).toBeLessThanOrEqual(LIMITS.maxSpeed + TOLERANCE);
+      expect(Math.abs(realised - previousSpeed)).toBeLessThanOrEqual(
+        LIMITS.maxAccel * STEP_S + TOLERANCE,
+      );
+      previousSpeed = realised;
+      closest = Math.min(closest, capsuleGap(body, neighbour));
+      slowest = Math.min(slowest, realised);
+    }
+    return { slowest, closest };
+  }
+
+  it('brakes in time for a neighbour straight ahead: no sudden stop, no contact', () => {
+    const area = areaOf(ROOM);
+    const neighbour = createSteerBody(-4, 0, 0, 2.03);
+    const body = createSteerBody(-9, 0, Math.PI / 2, 2.03);
+    const world = worldOf(area, [body, neighbour]);
+    const { slowest, closest } = checkRealisedSpeed(body, neighbour, world, { x: 1, z: 0 }, 400);
+    expect(closest).toBeGreaterThan(0);
+    expect(slowest).toBeLessThan(0.01);
+  });
+
+  it('brakes in time for a neighbour straight ahead along the fence', () => {
+    const area = areaOf(ROOM);
+    // Along the west fence (x = -10), 0.4 m from it, towards a neighbour standing there.
+    const neighbour = createSteerBody(-9.6, -2, 0, 2.03);
+    const body = createSteerBody(-9.6, 4, Math.PI, 2.03);
+    const world = worldOf(area, [body, neighbour]);
+    const { closest } = checkRealisedSpeed(body, neighbour, world, { x: -9.6, z: -4.5 }, 400);
+    expect(closest).toBeGreaterThan(0);
+    expect(containsPoint(area, body.x, body.z)).toBe(true);
   });
 
   it('never drives a long body into a neighbour in its way: it brakes and waits', () => {
@@ -285,6 +348,15 @@ describe('steerStep', () => {
     const area = areaOf(ROOM);
     const body = createSteerBody(CENTRE.x, CENTRE.z, 1);
     steerStep(body, LIMITS, worldOf(area, [body]), false, 0, 0, STEP_S);
-    expect(body).toMatchObject({ x: CENTRE.x, z: CENTRE.z, yaw: 1, speed: 0, arrived: false });
+    expect(body).toEqual({
+      x: CENTRE.x,
+      z: CENTRE.z,
+      yaw: 1,
+      speed: 0,
+      arrived: false,
+      lengthM: 0,
+      radius: 0,
+      halfSpan: 0,
+    });
   });
 });
