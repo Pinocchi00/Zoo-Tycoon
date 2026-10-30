@@ -47,7 +47,7 @@ export function createSteerBody(x: number, z: number, yaw: number): SteerBody {
   return { x, z, yaw, speed: 0, arrived: false };
 }
 
-function wrapAngle(angle: number): number {
+export function wrapAngle(angle: number): number {
   let wrapped = angle;
   while (wrapped > Math.PI) {
     wrapped -= TWO_PI;
@@ -89,6 +89,17 @@ function avoidance(body: SteerBody, world: SteerWorld, out: Point2): void {
 }
 
 const PUSH: Point2 = { x: 0, z: 0 };
+
+/** Turns a standing animal towards `headingRad`, no faster than `rateRadS`. */
+export function turnToward(
+  body: SteerBody,
+  rateRadS: number,
+  headingRad: number,
+  dtS: number,
+): void {
+  const error = wrapAngle(headingRad - body.yaw);
+  body.yaw = wrapAngle(body.yaw + clamp(error, rateRadS * dtS));
+}
 
 /** Replaces this step's turn by one towards the inside, still within the turn-rate cap. */
 function turnInwards(

@@ -16,6 +16,7 @@ import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js
 import { err, ok, type Result } from '@/shared';
 import { createRng, randomFloat } from '@/sim';
 import { clipNeeds, createBodyLife, type ClipNeeds } from './body-life';
+import { createGestures, type GazeInput } from './gestures';
 
 const MS_PER_SECOND = 1000;
 /** Short enough to feel responsive, long enough to hide the change of pose. */
@@ -33,10 +34,13 @@ export interface MissingClip {
   readonly name: RequiredClip;
 }
 
-/** A model must carry exactly one clip beyond the required ones: its signature. */
+/**
+ * A model carries one signature clip beyond the required ones. Other clips, which Blender may
+ * add later, are ignored; they never make a model refused.
+ */
 export interface BadSignature {
   readonly kind: 'badSignature';
-  /** The clips found beyond the required ones: none, or more than one. */
+  /** The clips found beyond the required ones: none, or several that could be the signature. */
   readonly clips: readonly string[];
 }
 
@@ -54,17 +58,46 @@ export function pickClip(
   return clip === undefined ? err({ kind: 'missingClip', name }) : ok(clip);
 }
 
-/** The signature is the one clip that is not required, so data needs no field for it. */
+/** Names of the signature clips of the species (D-024). */
+export const SIGNATURE_CLIPS = ['swim', 'stretch', 'trunk', 'root'] as const;
+
+function isSignatureName(name: string): boolean {
+  return SIGNATURE_CLIPS.some((known) => known === name);
+}
+
+/**
+ * The signature is the clip that is neither required nor unknown, so data needs no field for it:
+ * the only extra clip, or when a model has several, the only one with a signature name. Any
+ * other clip is left alone, so that new animations do not break existing models.
+ */
 export function findSignatureClip(
   clips: readonly AnimationClip[],
 ): Result<AnimationClip, BadSignature> {
   const extra = clips.filter((clip) => !isRequiredClip(clip.name));
   const [only, ...others] = extra;
-  if (only === undefined || others.length > 0) {
+  if (only !== undefined && others.length === 0) {
+    return ok(only);
+  }
+  const named = extra.filter((clip) => isSignatureName(clip.name));
+  const [signature, ...rivals] = named;
+  if (signature === undefined || rivals.length > 0) {
     return err({ kind: 'badSignature', clips: extra.map((clip) => clip.name) });
   }
-  return ok(only);
+  return ok(signature);
 }
+
+/** Walking clips are played at a speed that follows the real speed, so feet do not slide. */
+export const WALK_REFERENCE_SPEED_MPS = 0.6;
+const WALK_SCALE_MIN = 0.35;
+const WALK_SCALE_MAX = 1.6;
+
+/** Playback speed of the walk clip for an animal moving at `speedMps`. */
+export function walkClipScale(speedMps: number): number {
+  return Math.max(WALK_SCALE_MIN, Math.min(WALK_SCALE_MAX, speedMps / WALK_REFERENCE_SPEED_MPS));
+}
+
+/** The head looks about this much less while the animal eats. */
+const EATING_LOOK_CUT = 0.7;
 
 const ANIMATIONS: readonly AnimalAnimation[] = ['idle', 'walk', 'sleep', 'eat', 'signature'];
 
@@ -84,6 +117,12 @@ export interface AnimalModel {
   readonly signatureName: string;
   /** Longest horizontal side of the model's box, in metres: its size on screen follows from it. */
   readonly lengthM: number;
+  /** Where the neighbours are: the head may look their way. Written by the herd. */
+  readonly gaze: GazeInput;
+  /** How much the animal looks about, from 0 (head still) to 1; see `attentionOf`. */
+  setAttention: (attention: number) => void;
+  /** Speed of the walk clip, see `walkClipScale`. */
+  setWalkScale: (scale: number) => void;
   /** Fades to `animation`, from a random point of its loop; nothing if it is already playing. */
   play: (animation: AnimalAnimation) => void;
   setTimeScale: (scale: number) => void;
@@ -225,7 +264,13 @@ export function createAnimalModel(
   const { actions, needs, idleDurationS, signatureName } = created.value;
   const rng = createRng(look.seed);
   const life = createBodyLife(root, look.seed);
-  const playing = ANIMATIONS.map((name) => ({ action: actions[name], needs: needs[name] }));
+  const gestures = createGestures(root, look.seed);
+  const gaze: GazeInput = gestures?.gaze ?? { hasNeighbour: false, yaw: 0 };
+  const playing = ANIMATIONS.map((name) => ({
+    name,
+    action: actions[name],
+    needs: needs[name],
+  }));
   prepareMeshes(root);
   const size = new Box3().setFromObject(root).getSize(new Vector3());
   const lengthM = Math.max(size.x, size.z);
@@ -237,12 +282,22 @@ export function createAnimalModel(
     root,
     signatureName,
     lengthM,
+    gaze,
+    setAttention: (attention) => {
+      if (gestures !== null) {
+        gestures.drive.attention = attention;
+      }
+    },
+    setWalkScale: (scale) => {
+      actions.walk.timeScale = scale;
+    },
     play: (animation) => {
       if (animation === current) {
         return;
       }
       // Before a clip binds a bone for the first time, which would keep the layer's addition as its rest value.
       life?.undo();
+      gestures?.undo();
       const next = actions[animation];
       next.reset();
       next.time = randomFloat(rng) * next.getClip().duration;
@@ -256,23 +311,37 @@ export function createAnimalModel(
     update: (elapsedMs) => {
       const elapsedS = elapsedMs / MS_PER_SECOND;
       life?.undo();
+      gestures?.undo();
       mixer.update(elapsedS);
-      if (life === null) {
+      if (life === null && gestures === null) {
         return;
       }
       let total = 0;
       let breathing = 0;
       let blinking = 0;
-      for (const { action, needs: clip } of playing) {
+      let sleeping = 0;
+      let eating = 0;
+      let walking = 0;
+      for (const { name, action, needs: clip } of playing) {
         if (action.isRunning()) {
           const weight = action.getEffectiveWeight();
           total += weight;
           breathing += clip.breath ? weight : 0;
           blinking += clip.blink ? weight : 0;
+          sleeping += name === 'sleep' ? weight : 0;
+          eating += name === 'eat' ? weight : 0;
+          walking += name === 'walk' ? weight : 0;
         }
       }
-      const scale = total > 0 ? 1 / total : 0;
-      life.apply(elapsedS * mixer.timeScale, breathing * scale, blinking * scale);
+      const share = total > 0 ? 1 / total : 0;
+      const layerS = elapsedS * mixer.timeScale;
+      life?.apply(layerS, breathing * share, blinking * share);
+      if (gestures !== null) {
+        gestures.drive.awake = 1 - sleeping * share;
+        gestures.drive.lookScale = (1 - sleeping * share) * (1 - EATING_LOOK_CUT * eating * share);
+        gestures.drive.walking = walking * share;
+        gestures.apply(layerS);
+      }
     },
     dispose: () => {
       mixer.stopAllAction();

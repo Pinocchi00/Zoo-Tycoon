@@ -240,7 +240,7 @@ describe('approachPoint', () => {
 
   it('stands on a circle around the interest point, leaving its middle free', () => {
     const out = { x: 0, z: 0 };
-    expect(approachPoint(area, spot, 1, from, [], out)).toBe(true);
+    expect(approachPoint(area, spot, 1, APPROACH_RADIUS_M, from, [], out)).toBe(true);
     expect(Math.hypot(out.x - spot.x, out.z - spot.z)).toBeCloseTo(APPROACH_RADIUS_M);
     expect(containsPoint(area, out.x, out.z)).toBe(true);
   });
@@ -248,13 +248,13 @@ describe('approachPoint', () => {
   it('gives each angle its own place, and moves on to the next angle when one is taken', () => {
     const first = { x: 0, z: 0 };
     const second = { x: 0, z: 0 };
-    approachPoint(area, spot, 0, from, [], first);
-    approachPoint(area, spot, 2.4, from, [first], second);
+    approachPoint(area, spot, 0, APPROACH_RADIUS_M, from, [], first);
+    approachPoint(area, spot, 2.4, APPROACH_RADIUS_M, from, [first], second);
     expect(Math.hypot(first.x - second.x, first.z - second.z)).toBeGreaterThanOrEqual(
       CROWD_CLEARANCE_M,
     );
     const third = { x: 0, z: 0 };
-    expect(approachPoint(area, spot, 0, from, [first], third)).toBe(true);
+    expect(approachPoint(area, spot, 0, APPROACH_RADIUS_M, from, [first], third)).toBe(true);
     expect(Math.hypot(first.x - third.x, first.z - third.z)).toBeGreaterThanOrEqual(
       CROWD_CLEARANCE_M,
     );
@@ -265,9 +265,11 @@ describe('approachPoint', () => {
       x: spot.x + Math.sin((index * Math.PI) / 8) * APPROACH_RADIUS_M,
       z: spot.z + Math.cos((index * Math.PI) / 8) * APPROACH_RADIUS_M,
     }));
-    expect(approachPoint(area, spot, 0, from, ring, { x: 0, z: 0 })).toBe(false);
+    expect(approachPoint(area, spot, 0, APPROACH_RADIUS_M, from, ring, { x: 0, z: 0 })).toBe(false);
     // A spot in the notch of the L is out of the enclosure altogether.
-    expect(approachPoint(area, { x: 0, z: -3 }, 0, from, [], { x: 0, z: 0 })).toBe(false);
+    expect(
+      approachPoint(area, { x: 0, z: -3 }, 0, APPROACH_RADIUS_M, from, [], { x: 0, z: 0 }),
+    ).toBe(false);
   });
 });
 

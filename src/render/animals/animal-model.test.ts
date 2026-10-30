@@ -1,11 +1,13 @@
 import {
   AnimationClip,
+  Bone,
   BoxGeometry,
   Group,
   Mesh,
   MeshStandardMaterial,
   Texture,
   VectorKeyframeTrack,
+  Quaternion,
 } from 'three';
 import { describe, expect, it, vi } from 'vitest';
 import {
@@ -16,6 +18,8 @@ import {
   loadAnimalSource,
   parseAnimalSource,
   pickClip,
+  walkClipScale,
+  WALK_REFERENCE_SPEED_MPS,
   type AnimalLook,
   type AnimalSource,
 } from './animal-model';
@@ -94,6 +98,26 @@ describe('findSignatureClip', () => {
     expect(findSignatureClip(required)).toEqual({
       ok: false,
       error: { kind: 'badSignature', clips: [] },
+    });
+  });
+
+  it('ignores clips it does not know, even several, next to the signature', () => {
+    const swim = new AnimationClip('swim', 1, []);
+    const unknown = ['scratch', 'shake'].map((name) => new AnimationClip(name, 1, []));
+    expect(findSignatureClip([...required, unknown[0] ?? swim, swim, unknown[1] ?? swim])).toEqual({
+      ok: true,
+      value: swim,
+    });
+    // A single extra clip is taken for the signature whatever its name: new species come that way.
+    const odd = new AnimationClip('wallow', 1, []);
+    expect(findSignatureClip([...required, odd])).toEqual({ ok: true, value: odd });
+  });
+
+  it('refuses several unknown clips and no signature among them', () => {
+    const unknown = ['scratch', 'shake'].map((name) => new AnimationClip(name, 1, []));
+    expect(findSignatureClip([...required, ...unknown])).toEqual({
+      ok: false,
+      error: { kind: 'badSignature', clips: ['scratch', 'shake'] },
     });
   });
 
@@ -360,6 +384,113 @@ describe('loadAnimalSource', () => {
       await expect(loadAnimalSource('/missing.glb')).rejects.toThrow('HTTP 404');
     } finally {
       vi.unstubAllGlobals();
+    }
+  });
+});
+
+describe('walk clip speed', () => {
+  it('follows the real speed of the animal, within limits', () => {
+    expect(walkClipScale(WALK_REFERENCE_SPEED_MPS)).toBeCloseTo(1);
+    expect(walkClipScale(0)).toBeGreaterThan(0);
+    expect(walkClipScale(WALK_REFERENCE_SPEED_MPS / 2)).toBeLessThan(
+      walkClipScale(WALK_REFERENCE_SPEED_MPS),
+    );
+    expect(walkClipScale(WALK_REFERENCE_SPEED_MPS * 10)).toBe(
+      walkClipScale(WALK_REFERENCE_SPEED_MPS * 20),
+    );
+    let previous = 0;
+    for (let speed = 0; speed < 2; speed += 0.05) {
+      expect(walkClipScale(speed)).toBeGreaterThanOrEqual(previous);
+      previous = walkClipScale(speed);
+    }
+  });
+
+  it('plays the walk clip at the scale it is given, without touching the other clips', () => {
+    const source = fullSource();
+    const created = createAnimalModel(source, LOOK);
+    if (!created.ok) {
+      throw new Error('expected a model');
+    }
+    created.value.play('walk');
+    created.value.update(FADE_MS * 2);
+    const advance = (scale: number): number => {
+      created.value.setWalkScale(scale);
+      const before = source.scene.position.x;
+      created.value.update(100);
+      return (((source.scene.position.x - before) % 1) + 1) % 1;
+    };
+    expect(advance(1)).toBeCloseTo(0.1);
+    expect(advance(0.5)).toBeCloseTo(0.05);
+    expect(advance(1.6)).toBeCloseTo(0.16);
+  });
+});
+
+describe('gestures on a real kind of skeleton', () => {
+  function withBones(): {
+    model: ReturnType<typeof createAnimalModel>;
+    head: Bone;
+    tail: Bone;
+  } {
+    const root = new Group();
+    const head = new Bone();
+    head.name = 'head';
+    const tail = new Bone();
+    tail.name = 'tail';
+    root.add(head, tail);
+    // Clips that never touch the bones, nor the chest and eyes: only the layer moves them.
+    const names = ['idle', 'walk', 'sleep', 'eat', 'swim', 'scratch'];
+    const animations = names.map((name) => new AnimationClip(name, 1, []));
+    return { model: createAnimalModel({ scene: root, animations }, LOOK), head, tail };
+  }
+
+  it('moves the head and the tail, and ignores a clip it does not know', () => {
+    const { model, head, tail } = withBones();
+    if (!model.ok) {
+      throw new Error('expected a model');
+    }
+    expect(model.value.signatureName).toBe('swim');
+    let peak = 0;
+    let tailPeak = 0;
+    for (let frame = 0; frame < 60 * 120; frame += 1) {
+      model.value.update(1000 / 60);
+      peak = Math.max(peak, head.quaternion.angleTo(new Quaternion()));
+      tailPeak = Math.max(tailPeak, tail.quaternion.angleTo(new Quaternion()));
+    }
+    expect(peak).toBeGreaterThan(0.1);
+    expect(tailPeak).toBeGreaterThan(0.05);
+  });
+
+  it('never drifts, whatever clips follow one another', () => {
+    const { model, head } = withBones();
+    if (!model.ok) {
+      throw new Error('expected a model');
+    }
+    const sequence = ['walk', 'idle', 'eat', 'sleep', 'signature', 'idle'] as const;
+    const MAX_HEAD_RAD = 0.95;
+    for (let round = 0; round < 60; round += 1) {
+      for (const name of sequence) {
+        model.value.play(name);
+        model.value.setAttention(round % 2);
+        for (let frame = 0; frame < 120; frame += 1) {
+          model.value.update(1000 / 60);
+          expect(head.quaternion.angleTo(new Quaternion())).toBeLessThan(MAX_HEAD_RAD);
+        }
+      }
+    }
+  });
+
+  it('keeps the head still while asleep', () => {
+    const { model, head } = withBones();
+    if (!model.ok) {
+      throw new Error('expected a model');
+    }
+    model.value.play('sleep');
+    for (let frame = 0; frame < 60 * 5; frame += 1) {
+      model.value.update(1000 / 60);
+    }
+    for (let frame = 0; frame < 60 * 600; frame += 1) {
+      model.value.update(1000 / 60);
+      expect(head.quaternion.angleTo(new Quaternion())).toBeLessThan(0.02);
     }
   });
 });

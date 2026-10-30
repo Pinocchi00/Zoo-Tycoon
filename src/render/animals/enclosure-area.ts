@@ -315,8 +315,8 @@ export function pickDestination(
 }
 
 /**
- * Where an animal stands to use the interest point `spot`: on a circle around it, at
- * `angleRad`, so that each animal of a group has its own place and the element itself (whose
+ * Where an animal stands around `spot` (an interest point, or a sleeping neighbour): on a circle
+ * of `radiusM` (`APPROACH_RADIUS_M` for interest points), at `angleRad`, so that each animal of a group has its own place and the element itself (whose
  * model task 1.10 stands on `spot`) stays free. If that place is not reachable in a straight
  * line, the next angles are tried. Writes into `out`; false when none works.
  */
@@ -324,14 +324,15 @@ export function approachPoint(
   area: EnclosureArea,
   spot: Point2,
   angleRad: number,
+  radiusM: number,
   from: Point2,
   crowd: readonly Point2[],
   out: Point2,
 ): boolean {
   for (let turn = 0; turn < APPROACH_ROTATIONS; turn += 1) {
     const angle = angleRad + (turn * Math.PI * 2) / APPROACH_ROTATIONS;
-    const x = spot.x + Math.sin(angle) * APPROACH_RADIUS_M;
-    const z = spot.z + Math.cos(angle) * APPROACH_RADIUS_M;
+    const x = spot.x + Math.sin(angle) * radiusM;
+    const z = spot.z + Math.cos(angle) * radiusM;
     if (
       isClearOfCrowd(crowd, x, z, from, out, CROWD_CLEARANCE_M) &&
       segmentStaysInside(area, from.x, from.z, x, z, PATH_MARGIN_M) &&

@@ -2,15 +2,21 @@ import { describe, expect, it } from 'vitest';
 import { createRng, type RngState } from '@/sim';
 import {
   MAX_TRAVEL_MS,
+  NO_SOCIAL,
   advanceBehaviour,
   animationOf,
+  attentionOf,
+  beginSalute,
+  canSalute,
   createBehaviour,
+  rollPace,
   failTravel,
   hasEnrichment,
   isTravelling,
   type Activity,
   type AnimalBehaviour,
   type BehaviourContext,
+  type SocialView,
 } from './behaviour';
 
 const STEP_MS = 100;
@@ -35,6 +41,8 @@ function play(
   rng: RngState,
   where: BehaviourContext,
   totalMs: number,
+  social: SocialView = NO_SOCIAL,
+  travelMs: number = TRAVEL_MS,
 ): Run[] {
   const runs: Run[] = [];
   let arrived = false;
@@ -43,9 +51,9 @@ function play(
   let previousRemaining = behaviour.remainingMs;
   let previousTravelled = behaviour.travelledMs;
   for (let elapsed = 0; elapsed < totalMs; elapsed += STEP_MS) {
-    advanceBehaviour(behaviour, STEP_MS, arrived, rng, where);
+    advanceBehaviour(behaviour, STEP_MS, arrived, rng, where, social);
     behaviour.needsDestination = false;
-    arrived = isTravelling(behaviour.activity) && behaviour.travelledMs >= TRAVEL_MS;
+    arrived = isTravelling(behaviour.activity) && behaviour.travelledMs >= travelMs;
     const restarted =
       behaviour.activity !== current ||
       (isTravelling(behaviour.activity)
@@ -139,7 +147,8 @@ describe('routine', () => {
     const rng = createRng(2);
     const behaviour = createBehaviour(rng, false);
     const seen = new Set(play(behaviour, rng, context(), HOUR_MS).map((run) => run.activity));
-    expect(seen).toEqual(new Set(['walk', 'rest', 'eat', 'sleep', 'signature']));
+    // Alone, with walks too short to be interrupted: no social activity, no pause on the way.
+    expect(seen).toEqual(new Set(['walk', 'rest', 'eat', 'sleep', 'signature', 'lookAround']));
   });
 
   it('never sleeps twice in a row', () => {
@@ -323,6 +332,8 @@ describe('walks that cannot happen', () => {
   it('gives up a walk that never arrives', () => {
     const { behaviour, rng } = justStarted('walk', context());
     behaviour.needsDestination = false;
+    // Pauses on the way are tested apart: here the walk goes on without interruption.
+    behaviour.wayEventMs = Number.POSITIVE_INFINITY;
     advanceBehaviour(behaviour, MAX_TRAVEL_MS - 1, false, rng, context());
     expect(behaviour.activity).toBe('walk');
     advanceBehaviour(behaviour, 1, false, rng, context());
@@ -360,5 +371,240 @@ describe('first moments of an animal that was already there', () => {
         }
       });
     }
+  });
+});
+
+const LONG_WALK_MS = 25_000;
+
+function social(overrides: Partial<SocialView>): SocialView {
+  return { ...NO_SOCIAL, ...overrides };
+}
+
+describe('pace of a walk', () => {
+  it('is a stroll or a decided pace, within named ranges', () => {
+    const rng = createRng(3);
+    const paces = Array.from({ length: 2000 }, () => rollPace(rng));
+    expect(Math.min(...paces)).toBeGreaterThanOrEqual(0.45);
+    expect(Math.max(...paces)).toBeLessThanOrEqual(1);
+    const strolls = paces.filter((pace) => pace <= 0.65).length;
+    const brisk = paces.filter((pace) => pace >= 0.85).length;
+    expect(strolls + brisk).toBe(paces.length);
+    expect(strolls).toBeGreaterThan(brisk);
+    expect(brisk).toBeGreaterThan(300);
+  });
+
+  it('is repeatable', () => {
+    const first = createRng(8);
+    const second = createRng(8);
+    expect([rollPace(first), rollPace(first)]).toEqual([rollPace(second), rollPace(second)]);
+  });
+});
+
+describe('interruptions of a walk', () => {
+  it('stops now and then to look around or sniff the ground, then goes on to the same target', () => {
+    const rng = createRng(14);
+    const where = context();
+    const behaviour = createBehaviour(rng, false);
+    const kinds = new Set<Activity>();
+    let destinations = 0;
+    let walks = 0;
+    let previous: Activity = behaviour.activity;
+    let arrived = false;
+    for (let step = 0; step < (4 * HOUR_MS) / STEP_MS; step += 1) {
+      advanceBehaviour(behaviour, STEP_MS, arrived, rng, where);
+      if (behaviour.needsDestination) {
+        behaviour.needsDestination = false;
+        destinations += 1;
+      }
+      if (behaviour.activity === 'wayPause' || behaviour.activity === 'wayInspect') {
+        kinds.add(behaviour.activity);
+        expect(behaviour.resumeWalk).toBe(true);
+      }
+      if (previous === 'wayPause' || previous === 'wayInspect') {
+        // The walk resumes at once: no new target is asked for.
+        expect(behaviour.activity === 'walk' || behaviour.activity === previous).toBe(true);
+      }
+      walks += previous !== 'walk' && behaviour.activity === 'walk' ? 1 : 0;
+      previous = behaviour.activity;
+      arrived = isTravelling(behaviour.activity) && behaviour.travelledMs >= LONG_WALK_MS;
+    }
+    expect(kinds).toEqual(new Set(['wayPause', 'wayInspect']));
+    expect(destinations).toBeGreaterThan(50);
+    // More resumptions than targets: the pauses add walking stretches without new targets.
+    expect(walks).toBeGreaterThan(destinations);
+  });
+
+  it('never interrupts the short walks of the arrival', () => {
+    for (let seed = 1; seed <= 20; seed += 1) {
+      const rng = createRng(seed);
+      const behaviour = createBehaviour(rng, true);
+      const runs = play(behaviour, rng, context(), 60_000, NO_SOCIAL, LONG_WALK_MS);
+      const arrival = runs.slice(0, 5).map((run) => run.activity);
+      expect(arrival).not.toContain('wayPause');
+      expect(arrival).not.toContain('wayInspect');
+    }
+  });
+});
+
+describe('looking around and greeting', () => {
+  it('has the head most alert when looking around and still when asleep', () => {
+    expect(attentionOf('lookAround')).toBe(1);
+    expect(attentionOf('sleep')).toBe(0);
+    for (const activity of ['rest', 'walk', 'eat', 'salute', 'wayInspect'] as const) {
+      expect(attentionOf(activity)).toBeGreaterThan(0);
+      expect(attentionOf(activity)).toBeLessThan(1);
+    }
+  });
+
+  it('greets only when a resting neighbour is close, and never otherwise', () => {
+    const alone = createRng(5);
+    const lonely = play(createBehaviour(alone, false), alone, context(), 2 * HOUR_MS);
+    expect(lonely.some((run) => run.activity === 'salute')).toBe(false);
+
+    const rng = createRng(5);
+    const crowd = social({ neighbourClose: true });
+    const runs = play(createBehaviour(rng, false), rng, context(), 2 * HOUR_MS, crowd);
+    expect(runs.some((run) => run.activity === 'salute')).toBe(true);
+    for (const run of runs.filter((one) => one.activity === 'salute')) {
+      expect(run.durationMs).toBeGreaterThanOrEqual(1500);
+      expect(run.durationMs).toBeLessThanOrEqual(3600);
+    }
+  });
+
+  it('lets a neighbour who stands about be greeted at once, but not one who walks or sleeps', () => {
+    const rng = createRng(2);
+    const standing = createBehaviour(rng, false);
+    standing.activity = 'rest';
+    expect(canSalute(standing)).toBe(true);
+    beginSalute(standing, rng);
+    expect(standing.activity).toBe('salute');
+    expect(canSalute(standing)).toBe(false);
+    for (const activity of ['walk', 'sleep', 'eat'] as const) {
+      standing.activity = activity;
+      expect(canSalute(standing)).toBe(false);
+    }
+    const arriving = createBehaviour(rng, true);
+    arriving.activity = 'rest';
+    expect(canSalute(arriving)).toBe(false);
+  });
+});
+
+describe('following and regrouping', () => {
+  function destinations(view: SocialView, seeds: number): Map<string, number> {
+    const counts = new Map<string, number>();
+    for (let seed = 1; seed <= seeds; seed += 1) {
+      const rng = createRng(seed);
+      const behaviour = createBehaviour(rng, false);
+      let arrived = false;
+      for (let step = 0; step < (30 * 60_000) / STEP_MS; step += 1) {
+        advanceBehaviour(behaviour, STEP_MS, arrived, rng, context(), view);
+        if (behaviour.needsDestination) {
+          behaviour.needsDestination = false;
+          const key = `${behaviour.activity}:${behaviour.destination}`;
+          counts.set(key, (counts.get(key) ?? 0) + 1);
+        }
+        arrived = isTravelling(behaviour.activity) && behaviour.travelledMs >= TRAVEL_MS;
+      }
+    }
+    return counts;
+  }
+
+  it('follows only when a neighbour walks, and then looks around where it stops', () => {
+    expect(destinations(NO_SOCIAL, 5).get('followWalk:follow')).toBeUndefined();
+    expect(destinations(social({ walkerNear: true }), 5).get('followWalk:follow')).toBeGreaterThan(
+      10,
+    );
+    const rng = createRng(9);
+    const runs = play(
+      createBehaviour(rng, false),
+      rng,
+      context(),
+      HOUR_MS,
+      social({ walkerNear: true }),
+    );
+    runs.forEach((run, index) => {
+      if (run.activity === 'followWalk') {
+        const next = runs[index + 1]?.activity;
+        expect(next === 'lookAround' || next === 'rest' || index === runs.length - 1).toBe(true);
+      }
+    });
+  });
+
+  it('goes back to the group when scattered, as a clear favourite', () => {
+    const counts = destinations(social({ scattered: true }), 5);
+    const regroup = counts.get('regroupWalk:group') ?? 0;
+    const others = [...counts.entries()]
+      .filter(([key]) => key !== 'regroupWalk:group')
+      .reduce((sum, [, count]) => sum + count, 0);
+    expect(regroup).toBeGreaterThan(others / 2);
+    expect(destinations(NO_SOCIAL, 5).get('regroupWalk:group')).toBeUndefined();
+  });
+});
+
+describe('sleeping in a pile', () => {
+  it('goes next to a sleeper when there is one, in most cases, then sleeps there', () => {
+    const counts = new Map<string, number>();
+    let sleepsAfterWalk = 0;
+    let walksToSleeper = 0;
+    for (let seed = 1; seed <= 20; seed += 1) {
+      const rng = createRng(seed);
+      const view = social({ sleeperNear: true });
+      const runs = play(createBehaviour(rng, false), rng, context(), 2 * HOUR_MS, view);
+      runs.forEach((run, index) => {
+        counts.set(run.activity, (counts.get(run.activity) ?? 0) + 1);
+        if (run.activity === 'sleeperWalk') {
+          walksToSleeper += 1;
+          sleepsAfterWalk += runs[index + 1]?.activity === 'sleep' ? 1 : 0;
+        }
+      });
+    }
+    const alone = counts.get('sleep') ?? 0;
+    expect(walksToSleeper).toBeGreaterThan(alone / 2);
+    // A walk that arrives always ends in sleep (the last run of a trace may be cut short).
+    expect(sleepsAfterWalk).toBeGreaterThan(walksToSleeper - 25);
+  });
+
+  it('sleeps where it is when no neighbour sleeps, and never walks to a sleeper', () => {
+    const rng = createRng(4);
+    const runs = play(createBehaviour(rng, false), rng, context(), 4 * HOUR_MS);
+    expect(runs.some((run) => run.activity === 'sleep')).toBe(true);
+    expect(runs.some((run) => run.activity === 'sleeperWalk')).toBe(false);
+  });
+
+  it('still never sleeps twice in a row', () => {
+    for (let seed = 1; seed <= 10; seed += 1) {
+      const rng = createRng(seed);
+      const runs = play(
+        createBehaviour(rng, false),
+        rng,
+        context(),
+        4 * HOUR_MS,
+        social({ sleeperNear: true }),
+      );
+      runs.slice(1).forEach((run, index) => {
+        expect(run.activity === 'sleep' && runs[index]?.activity === 'sleep').toBe(false);
+      });
+    }
+  });
+
+  it('rests instead when the walk to the sleeper never arrives', () => {
+    const where = context();
+    for (let seed = 1; seed < 200; seed += 1) {
+      const rng = createRng(seed);
+      const behaviour = createBehaviour(rng, false);
+      let arrived = false;
+      for (let step = 0; step < HOUR_MS / STEP_MS; step += 1) {
+        advanceBehaviour(behaviour, STEP_MS, arrived, rng, where, social({ sleeperNear: true }));
+        if (behaviour.activity === 'sleeperWalk' && behaviour.needsDestination) {
+          behaviour.needsDestination = false;
+          advanceBehaviour(behaviour, MAX_TRAVEL_MS, false, rng, where, NO_SOCIAL);
+          expect(behaviour.activity).toBe('rest');
+          return;
+        }
+        behaviour.needsDestination = false;
+        arrived = isTravelling(behaviour.activity) && behaviour.travelledMs >= TRAVEL_MS;
+      }
+    }
+    throw new Error('no animal walked to a sleeper');
   });
 });

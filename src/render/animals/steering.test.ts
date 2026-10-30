@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { createGridSize } from '@/shared';
 import type { GridPoint } from '@/sim';
 import {
+  APPROACH_RADIUS_M,
   approachPoint,
   containsPoint,
   createEnclosureArea,
@@ -191,8 +192,8 @@ describe('steerStep', () => {
     const targetA = { x: first.x, z: first.z };
     const targetB = { x: second.x, z: second.z };
     const crowd = [first, targetA, second, targetB];
-    expect(approachPoint(area, spot, 0, first, crowd, targetA)).toBe(true);
-    expect(approachPoint(area, spot, 2.4, second, crowd, targetB)).toBe(true);
+    expect(approachPoint(area, spot, 0, APPROACH_RADIUS_M, first, crowd, targetA)).toBe(true);
+    expect(approachPoint(area, spot, 2.4, APPROACH_RADIUS_M, second, crowd, targetB)).toBe(true);
     const world = worldOf(area, [first, second]);
     for (let step = 0; step < 1000 && !(first.arrived && second.arrived); step += 1) {
       steerStep(first, LIMITS, world, !first.arrived, targetA.x, targetA.z, STEP_S);
