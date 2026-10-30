@@ -34,5 +34,5 @@ export const collaredPeccary = {
     nameKey: 'species.collaredPeccary.name',
     signatureKey: 'species.collaredPeccary.signature',
   },
-  modelId: null,
+  modelId: 'collared_peccary',
 } satisfies SpeciesInput;
