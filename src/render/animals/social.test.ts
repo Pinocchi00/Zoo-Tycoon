@@ -9,6 +9,7 @@ import {
   bearing,
   createSocialReport,
   followGapM,
+  keepsGap,
   regroupRadiusM,
   saluteRangeM,
   sleepContactM,
@@ -133,6 +134,18 @@ describe('distances follow the length of the animal', () => {
         const second = createSteerBody(sleepContactM(length), 0, (turn * Math.PI) / 4, length);
         expect(capsuleGap(first, second)).toBeGreaterThanOrEqual(0);
       }
+    }
+  });
+
+  it('counts a follower that holds its place behind the walker as keeping up', () => {
+    for (const length of LENGTHS) {
+      const gap = followGapM(length);
+      expect(keepsGap(gap, length)).toBe(true);
+      expect(keepsGap(gap + 0.4, length)).toBe(true);
+      expect(keepsGap(gap - 0.4, length)).toBe(true);
+      // Left behind, or closer than it should be: no.
+      expect(keepsGap(gap + 1.5, length)).toBe(false);
+      expect(keepsGap(0, length)).toBe(false);
     }
   });
 

@@ -23,6 +23,8 @@ const PIVOT_TURN_SHARE = 0.6;
 const BRAKE_LOOKAHEAD_M = 0.6;
 /** It aims to stop this far (free space between bodies) short of the neighbour in its way. */
 const STOP_MARGIN_M = 0.3;
+/** ... and this far (from the centre of its body) short of the fence. */
+const FENCE_STOP_MARGIN_M = 0.1;
 /** Neighbours further apart than the two reaches and this cannot touch within a step. */
 const REACH_MARGIN_M = 0.5;
 /** Rounds of halving to find the farthest free part of a step. */
@@ -252,6 +254,31 @@ function freeAhead(body: SteerBody, others: readonly SteerBody[], lookM: number)
   return near;
 }
 
+/** How far ahead (up to `lookM`) the centre of the body stays inside the enclosure. */
+function freeToFenceAhead(body: SteerBody, area: EnclosureArea, lookM: number): number {
+  const sx = Math.sin(body.yaw);
+  const sz = Math.cos(body.yaw);
+  if (containsPoint(area, body.x + sx * lookM, body.z + sz * lookM)) {
+    return lookM;
+  }
+  let near = 0;
+  let far = lookM;
+  for (let round = 0; round < BISECTION_STEPS; round += 1) {
+    const middle = (near + far) / 2;
+    if (containsPoint(area, body.x + sx * middle, body.z + sz * middle)) {
+      near = middle;
+    } else {
+      far = middle;
+    }
+  }
+  return near;
+}
+
+/** The speed from which the animal can stop `marginM` short of an obstacle `freeM` ahead. */
+function brakingSpeed(freeM: number, marginM: number, maxAccel: number): number {
+  return Math.sqrt(2 * maxAccel * Math.max(0, freeM - marginM));
+}
+
 /** Whether the body, moved by `fraction` of the step, is still inside and clear of neighbours. */
 function admissible(
   body: SteerBody,
@@ -405,17 +432,24 @@ export function steerStep(
       alignment = Math.max(0, Math.cos(error - turn));
       const arriveRatio = Math.min(1, distance / SLOW_RADIUS_M);
       wantedSpeed = limits.maxSpeed * Math.max(MIN_SPEED_RATIO, arriveRatio);
-      // A neighbour in the way: brake in time to stop short of it, at the usual rate.
-      // Only the way to the target counts: what lies beyond it does not matter.
+      // A neighbour or the fence in the way: brake in time to stop short of it, at the usual
+      // rate. Only the way to the target counts: what lies beyond it does not matter.
       const look = Math.min(
         distance,
         (body.speed * body.speed) / (2 * limits.maxAccel) + body.speed * dtS + BRAKE_LOOKAHEAD_M,
       );
-      const free = freeAhead(body, world.others, look);
-      if (free < look) {
+      const freeToAnimal = freeAhead(body, world.others, look);
+      if (freeToAnimal < look) {
         wantedSpeed = Math.min(
           wantedSpeed,
-          Math.sqrt(2 * limits.maxAccel * Math.max(0, free - STOP_MARGIN_M)),
+          brakingSpeed(freeToAnimal, STOP_MARGIN_M, limits.maxAccel),
+        );
+      }
+      const freeToFence = freeToFenceAhead(body, world.area, look);
+      if (freeToFence < look) {
+        wantedSpeed = Math.min(
+          wantedSpeed,
+          brakingSpeed(freeToFence, FENCE_STOP_MARGIN_M, limits.maxAccel),
         );
       }
     }
@@ -440,6 +474,8 @@ export function steerStep(
   if (fraction > 0) {
     body.x += brakedX * fraction;
     body.z += brakedZ * fraction;
+    // As fast as the step it really took.
+    body.speed *= fraction;
     return;
   }
   slideAlongFence(body, world, brakedX, brakedZ);
@@ -460,4 +496,5 @@ function slideAlongFence(body: SteerBody, world: SteerWorld, stepX: number, step
   const fraction = largestStep(body, world, slideX, slideZ);
   body.x += slideX * fraction;
   body.z += slideZ * fraction;
+  body.speed *= fraction;
 }
