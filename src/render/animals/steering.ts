@@ -10,7 +10,7 @@ const MIN_SPEED_RATIO = 0.2;
 export const SEPARATION_RADIUS_M = 1.2;
 /** The fence pushes back inside this distance. */
 const EDGE_RANGE_M = 0.9;
-const AVOID_GAIN = 1.5;
+const AVOID_GAIN = 2.5;
 const TWO_PI = Math.PI * 2;
 
 /** Moving state of one animal. Mutated in place, never replaced. */
@@ -90,11 +90,27 @@ function avoidance(body: SteerBody, world: SteerWorld, out: Point2): void {
 
 const PUSH: Point2 = { x: 0, z: 0 };
 
+/** Replaces this step's turn by one towards the inside, still within the turn-rate cap. */
+function turnInwards(
+  body: SteerBody,
+  limits: SteerLimits,
+  world: SteerWorld,
+  yawBefore: number,
+  dtS: number,
+): void {
+  const edge = world.scratch;
+  distanceToEdge(world.area, body.x, body.z, edge);
+  const inward = Math.atan2(body.x - edge.x, body.z - edge.z);
+  const error = wrapAngle(inward - yawBefore);
+  body.yaw = wrapAngle(yawBefore + clamp(error, limits.maxTurnRate * dtS));
+}
+
 /**
  * Advances `body` by `dtS` seconds. While `moving`, it turns towards the target and walks to it,
  * slowing down on arrival and swerving round neighbours and fences; otherwise it slows to a stop.
  * Acceleration and turn rate are capped, so no speed or heading ever jumps. A step that would
- * leave the enclosure is cancelled, so an animal can never end up outside.
+ * leave the enclosure brakes at the maximum rate and turns towards the inside; if even the
+ * braked step would leave, the animal stays put while it slows down. It never ends up outside.
  */
 export function steerStep(
   body: SteerBody,
@@ -105,6 +121,8 @@ export function steerStep(
   targetZ: number,
   dtS: number,
 ): void {
+  const yawBefore = body.yaw;
+  const speedBefore = body.speed;
   let wantedSpeed = 0;
   let alignment = 1;
   if (moving) {
@@ -132,7 +150,14 @@ export function steerStep(
   if (containsPoint(world.area, nextX, nextZ)) {
     body.x = nextX;
     body.z = nextZ;
-  } else {
-    body.speed = 0;
+    return;
+  }
+  turnInwards(body, limits, world, yawBefore, dtS);
+  body.speed = Math.max(0, speedBefore - limits.maxAccel * dtS);
+  const brakedX = body.x + Math.sin(body.yaw) * body.speed * dtS;
+  const brakedZ = body.z + Math.cos(body.yaw) * body.speed * dtS;
+  if (containsPoint(world.area, brakedX, brakedZ)) {
+    body.x = brakedX;
+    body.z = brakedZ;
   }
 }

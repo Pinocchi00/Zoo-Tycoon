@@ -12,6 +12,8 @@ import {
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { err, ok, type Result } from '@/shared';
+import { createRng, randomFloat } from '@/sim';
+import { clipNeeds, createBodyLife, type ClipNeeds } from './body-life';
 
 const MS_PER_SECOND = 1000;
 /** Short enough to feel responsive, long enough to hide the change of pose. */
@@ -62,19 +64,23 @@ export function findSignatureClip(
   return ok(only);
 }
 
+const ANIMATIONS: readonly AnimalAnimation[] = ['idle', 'walk', 'sleep', 'eat', 'signature'];
+
 /** Per-individual variation, so that two animals never breathe in step. */
 export interface AnimalLook {
   /** Where in the idle loop the animal starts, from 0 to 1. */
   readonly startPhase: number;
   /** Playback speed of every clip, close to 1. */
   readonly timeScale: number;
+  /** Unsigned 32-bit seed of this animal's own visual randomness (blinks, clip phases). */
+  readonly seed: number;
 }
 
 export interface AnimalModel {
   readonly root: Object3D;
   /** Name of the signature clip (`swim`, `stretch`, `trunk`, `root`). */
   readonly signatureName: string;
-  /** Fades to `animation`; does nothing when it is already the one playing. */
+  /** Fades to `animation`, from a random point of its loop; nothing if it is already playing. */
   play: (animation: AnimalAnimation) => void;
   setTimeScale: (scale: number) => void;
   /** Advances the playing animations by `elapsedMs`. */
@@ -142,6 +148,7 @@ export interface AnimalModelOptions {
 
 interface Playback {
   readonly actions: Readonly<Record<AnimalAnimation, AnimationAction>>;
+  readonly needs: Readonly<Record<AnimalAnimation, ClipNeeds>>;
   readonly idleDurationS: number;
   readonly signatureName: string;
 }
@@ -180,6 +187,13 @@ function createPlayback(
       eat: actionFor(eat.value),
       signature: actionFor(signature.value),
     },
+    needs: {
+      idle: clipNeeds(idle.value),
+      walk: clipNeeds(walk.value),
+      sleep: clipNeeds(sleep.value),
+      eat: clipNeeds(eat.value),
+      signature: clipNeeds(signature.value),
+    },
     idleDurationS: idle.value.duration,
     signatureName: signature.value.name,
   });
@@ -204,7 +218,10 @@ export function createAnimalModel(
     }
     return created;
   }
-  const { actions, idleDurationS, signatureName } = created.value;
+  const { actions, needs, idleDurationS, signatureName } = created.value;
+  const rng = createRng(look.seed);
+  const life = createBodyLife(root, look.seed);
+  const playing = ANIMATIONS.map((name) => ({ action: actions[name], needs: needs[name] }));
   prepareMeshes(root);
   mixer.timeScale = look.timeScale;
   actions.idle.time = look.startPhase * idleDurationS;
@@ -218,7 +235,9 @@ export function createAnimalModel(
         return;
       }
       const next = actions[animation];
-      next.reset().play();
+      next.reset();
+      next.time = randomFloat(rng) * next.getClip().duration;
+      next.play();
       actions[current].crossFadeTo(next, CROSS_FADE_S, false);
       current = animation;
     },
@@ -226,7 +245,25 @@ export function createAnimalModel(
       mixer.timeScale = scale;
     },
     update: (elapsedMs) => {
-      mixer.update(elapsedMs / MS_PER_SECOND);
+      const elapsedS = elapsedMs / MS_PER_SECOND;
+      life?.undo();
+      mixer.update(elapsedS);
+      if (life === null) {
+        return;
+      }
+      let total = 0;
+      let breathing = 0;
+      let blinking = 0;
+      for (const { action, needs: clip } of playing) {
+        if (action.isRunning()) {
+          const weight = action.getEffectiveWeight();
+          total += weight;
+          breathing += clip.breath ? weight : 0;
+          blinking += clip.blink ? weight : 0;
+        }
+      }
+      const scale = total > 0 ? 1 / total : 0;
+      life.apply(elapsedS * mixer.timeScale, breathing * scale, blinking * scale);
     },
     dispose: () => {
       mixer.stopAllAction();

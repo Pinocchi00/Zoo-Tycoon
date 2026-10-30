@@ -227,10 +227,56 @@ export function createEnclosureArea(
   return interior.length === 0 ? null : { cornersX, cornersZ, interior };
 }
 
+/** Animals pick resting places at least this far from each other, walkers and destinations included. */
+export const CROWD_CLEARANCE_M = 1;
+/** Distance from an interest point at which animals gather around it, leaving its middle free. */
+export const APPROACH_RADIUS_M = 0.9;
+const APPROACH_ROTATIONS = 8;
+
 /**
- * Picks where an animal at (fromX, fromZ) walks next, writing it into `out`. The walk is a
- * straight line that stays inside the enclosure and is between `minTripM` and `maxTripM` long;
- * if no such walk is found, any visible spot not too close will do. False when there is none.
+ * True when (x, z) is at least `gapM` from every point of `crowd`, except the two ignored
+ * ones (an animal does not crowd itself; they are told apart by reference, not by value).
+ */
+export function isClearOfCrowd(
+  crowd: readonly Point2[],
+  x: number,
+  z: number,
+  ignoredA: Point2,
+  ignoredB: Point2,
+  gapM: number,
+): boolean {
+  for (const other of crowd) {
+    if (other !== ignoredA && other !== ignoredB && Math.hypot(other.x - x, other.z - z) < gapM) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function isWalkable(
+  area: EnclosureArea,
+  from: Point2,
+  spot: Point2,
+  out: Point2,
+  crowd: readonly Point2[],
+  minTripM: number,
+  maxTripM: number,
+): boolean {
+  const distance = Math.hypot(spot.x - from.x, spot.z - from.z);
+  return (
+    distance >= minTripM &&
+    distance <= maxTripM &&
+    isClearOfCrowd(crowd, spot.x, spot.z, from, out, CROWD_CLEARANCE_M) &&
+    segmentStaysInside(area, from.x, from.z, spot.x, spot.z, PATH_MARGIN_M)
+  );
+}
+
+/**
+ * Picks where an animal at `from` walks next, writing it into `out` (the animal's own target).
+ * The walk is a straight line that stays inside the enclosure, between `minTripM` and
+ * `maxTripM` long, and ends clear of every point of `crowd` (the other animals and their
+ * targets, so that two animals never settle on top of each other). If no such walk is found,
+ * any visible spot not too close and clear of the crowd will do. False when there is none.
  */
 export function pickDestination(
   area: EnclosureArea,
@@ -239,6 +285,7 @@ export function pickDestination(
   minTripM: number,
   maxTripM: number,
   out: Point2,
+  crowd: readonly Point2[] = [],
 ): boolean {
   const count = area.interior.length;
   for (let attempt = 0; attempt < SAMPLE_ATTEMPTS; attempt += 1) {
@@ -246,12 +293,7 @@ export function pickDestination(
     if (spot === undefined) {
       return false;
     }
-    const distance = Math.hypot(spot.x - from.x, spot.z - from.z);
-    if (
-      distance >= minTripM &&
-      distance <= maxTripM &&
-      segmentStaysInside(area, from.x, from.z, spot.x, spot.z, PATH_MARGIN_M)
-    ) {
+    if (isWalkable(area, from, spot, out, crowd, minTripM, maxTripM)) {
       out.x = spot.x;
       out.z = spot.z;
       return true;
@@ -262,11 +304,41 @@ export function pickDestination(
     const spot = area.interior[(first + step) % count];
     if (
       spot !== undefined &&
-      Math.hypot(spot.x - from.x, spot.z - from.z) >= FALLBACK_MIN_TRIP_M &&
-      segmentStaysInside(area, from.x, from.z, spot.x, spot.z, PATH_MARGIN_M)
+      isWalkable(area, from, spot, out, crowd, FALLBACK_MIN_TRIP_M, Number.POSITIVE_INFINITY)
     ) {
       out.x = spot.x;
       out.z = spot.z;
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Where an animal stands to use the interest point `spot`: on a circle around it, at
+ * `angleRad`, so that each animal of a group has its own place and the element itself (whose
+ * model task 1.10 stands on `spot`) stays free. If that place is not reachable in a straight
+ * line, the next angles are tried. Writes into `out`; false when none works.
+ */
+export function approachPoint(
+  area: EnclosureArea,
+  spot: Point2,
+  angleRad: number,
+  from: Point2,
+  crowd: readonly Point2[],
+  out: Point2,
+): boolean {
+  for (let turn = 0; turn < APPROACH_ROTATIONS; turn += 1) {
+    const angle = angleRad + (turn * Math.PI * 2) / APPROACH_ROTATIONS;
+    const x = spot.x + Math.sin(angle) * APPROACH_RADIUS_M;
+    const z = spot.z + Math.cos(angle) * APPROACH_RADIUS_M;
+    if (
+      isClearOfCrowd(crowd, x, z, from, out, CROWD_CLEARANCE_M) &&
+      segmentStaysInside(area, from.x, from.z, x, z, PATH_MARGIN_M) &&
+      distanceToEdge(area, x, z, SCRATCH) >= PATH_MARGIN_M
+    ) {
+      out.x = x;
+      out.z = z;
       return true;
     }
   }

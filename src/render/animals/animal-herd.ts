@@ -27,11 +27,10 @@ import {
   type BehaviourContext,
 } from './behaviour';
 import {
-  PATH_MARGIN_M,
+  approachPoint,
   createEnclosureArea,
   pickDestination,
   placeInterestPoints,
-  segmentStaysInside,
   type EnclosureArea,
   type InterestPoints,
   type Point2,
@@ -60,8 +59,8 @@ const MS_PER_SECOND = 1000;
 const TIME_SCALE_MIN = 0.9;
 const TIME_SCALE_MAX = 1.1;
 const MAX_SPEED_MIN_MPS = 0.45;
-const MAX_SPEED_MAX_MPS = 0.75;
-const MAX_ACCEL_MPS2 = 0.5;
+export const MAX_SPEED_MAX_MPS = 0.75;
+export const MAX_ACCEL_MPS2 = 0.5;
 const MAX_TURN_RATE_RAD_S = 1.6;
 const MIN_TRIP_M = 1.5;
 const MAX_TRIP_M = 8;
@@ -69,6 +68,9 @@ const EXPLORE_MAX_TRIP_M = 3.5;
 const START_SPACING_M = 1.5;
 const START_ATTEMPTS = 10;
 const TWO_PI = Math.PI * 2;
+/** Successive animals of a group take well-spread places around an interest point. */
+const GOLDEN_ANGLE_RAD = 2.399_963;
+const MAX_SEED = 0x1_0000_0000;
 
 /** What the herd needs to know about a species; `app` builds it from the game data. */
 export interface SpeciesLook {
@@ -96,8 +98,12 @@ export interface AnimalHerd {
   syncAll: (world: HerdWorld) => void;
   /** Refreshes only the enclosures the events talk about. */
   handleEvents: (events: readonly GameEvent[], world: HerdWorld) => void;
-  /** Moves every animal by `elapsedMs`; far ones are updated less often. */
-  update: (elapsedMs: number, cameraX: number, cameraZ: number) => void;
+  /**
+   * Moves every animal by `elapsedMs`. (focusX, focusZ) is the ground point the camera looks at
+   * and `viewHeight` how much of the world it shows: the further an animal is from what is seen,
+   * the less often it is updated.
+   */
+  update: (elapsedMs: number, focusX: number, focusZ: number, viewHeight: number) => void;
   /** Settles when every animal now in the park has loaded or failed. */
   whenLoaded: () => Promise<void>;
   dispose: () => void;
@@ -110,8 +116,11 @@ interface Individual {
   readonly limits: SteerLimits;
   readonly target: Point2;
   shown: AnimalAnimation;
+  /** Where in the cycle of far updates this animal falls, so that far animals do not all update together. */
+  readonly farPhase: number;
+  /** Direction in which it stands around an interest point, different for each of the group. */
+  readonly approachAngle: number;
   pendingMs: number;
-  skippedFrames: number;
 }
 
 interface EnclosureGroup {
@@ -123,6 +132,8 @@ interface EnclosureGroup {
   readonly context: BehaviourContext;
   readonly individuals: Individual[];
   readonly bodies: SteerBody[];
+  /** Every body and every target of the group, for choosing places clear of the others. */
+  readonly crowd: Point2[];
   readonly steer: SteerWorld;
   pois: InterestPoints;
 }
@@ -142,6 +153,8 @@ export function createAnimalHerd(options: HerdOptions): AnimalHerd {
   const sources = new Map<string, SourceEntry>();
   const warned = new Set<string>();
   let disposed = false;
+  let frame = 0;
+  let created = 0;
 
   const sourceFor = (modelId: string): SourceEntry => {
     const known = sources.get(modelId);
@@ -195,6 +208,7 @@ export function createAnimalHerd(options: HerdOptions): AnimalHerd {
     const yaw = randomFloat(rng) * TWO_PI - Math.PI;
     const look = {
       startPhase: randomFloat(rng),
+      seed: randomInt(rng, 0, MAX_SEED - 1),
       timeScale: lerp(TIME_SCALE_MIN, TIME_SCALE_MAX, randomFloat(rng)),
     };
     const limits: SteerLimits = {
@@ -203,7 +217,7 @@ export function createAnimalHerd(options: HerdOptions): AnimalHerd {
       maxTurnRate: MAX_TURN_RATE_RAD_S,
     };
     const body = createSteerBody(start.x, start.z, yaw);
-    const behaviour = createBehaviour(rng, group.context, withArrival);
+    const behaviour = createBehaviour(rng, withArrival);
     const entry = sourceFor(group.modelId);
     const loading: Promise<Result<AnimalModel, AnimalModelProblem>> = entry.promise.then(
       (source) => {
@@ -225,23 +239,27 @@ export function createAnimalHerd(options: HerdOptions): AnimalHerd {
         reportProblem(group.modelId, problem);
       },
     );
+    const target: Point2 = { x: start.x, z: start.z };
     group.bodies.push(body);
+    group.crowd.push(body, target);
     group.individuals.push({
       slot,
       behaviour,
       body,
       limits,
-      target: { x: start.x, z: start.z },
+      target,
       shown: 'idle',
       pendingMs: 0,
-      // Spread far animals over the frames instead of updating them all in the same one.
-      skippedFrames: group.individuals.length % FAR_UPDATE_EVERY_FRAMES,
+      farPhase: created % FAR_UPDATE_EVERY_FRAMES,
+      approachAngle: group.individuals.length * GOLDEN_ANGLE_RAD,
     });
+    created += 1;
   };
 
   const removeLastIndividual = (group: EnclosureGroup): void => {
     group.individuals.pop()?.slot.dispose();
     group.bodies.pop();
+    group.crowd.length -= 2;
   };
 
   const removeGroup = (id: EnclosureId): void => {
@@ -282,6 +300,7 @@ export function createAnimalHerd(options: HerdOptions): AnimalHerd {
       context: { stars, enrichmentSpots: pois.enrichment.length, signatureAtWater: false },
       individuals: [],
       bodies,
+      crowd: [],
       steer: { area, others: bodies, scratch: { x: 0, z: 0 } },
     };
   };
@@ -335,24 +354,20 @@ export function createAnimalHerd(options: HerdOptions): AnimalHerd {
   const giveDestination = (group: EnclosureGroup, individual: Individual): void => {
     const { behaviour, body, target } = individual;
     behaviour.needsDestination = false;
-    let found = false;
+    let found: boolean;
     if (behaviour.destination === 'free') {
       const maxTrip = behaviour.shortTrip ? EXPLORE_MAX_TRIP_M : MAX_TRIP_M;
-      found = pickDestination(group.area, rng, body, MIN_TRIP_M, maxTrip, target);
+      found = pickDestination(group.area, rng, body, MIN_TRIP_M, maxTrip, target, group.crowd);
     } else {
       const spot =
         behaviour.destination === 'water'
           ? group.pois.water
           : group.pois.enrichment[behaviour.enrichmentSpot];
-      if (
+      // Each animal stands at its own place around the point, not on it nor on a neighbour.
+      found =
         spot !== null &&
         spot !== undefined &&
-        segmentStaysInside(group.area, body.x, body.z, spot.x, spot.z, PATH_MARGIN_M)
-      ) {
-        target.x = spot.x;
-        target.z = spot.z;
-        found = true;
-      }
+        approachPoint(group.area, spot, individual.approachAngle, body, group.crowd, target);
     }
     if (found) {
       body.arrived = false;
@@ -371,15 +386,21 @@ export function createAnimalHerd(options: HerdOptions): AnimalHerd {
     if (behaviour.needsDestination) {
       giveDestination(group, individual);
     }
+    const travelling = isTravelling(behaviour.activity);
     steerStep(
       body,
       individual.limits,
       group.steer,
-      isTravelling(behaviour.activity),
+      travelling,
       individual.target.x,
       individual.target.z,
       elapsedMs / MS_PER_SECOND,
     );
+    if (!travelling) {
+      // A resting animal claims the place where it stands, not the one it was heading for.
+      individual.target.x = body.x;
+      individual.target.z = body.z;
+    }
     model.root.position.set(body.x, 0, body.z);
     model.root.rotation.y = body.yaw;
     if (individual.shown !== behaviour.animation) {
@@ -421,19 +442,21 @@ export function createAnimalHerd(options: HerdOptions): AnimalHerd {
         }
       }
     },
-    update: (elapsedMs, cameraX, cameraZ) => {
+    update: (elapsedMs, focusX, focusZ, viewHeight) => {
+      frame += 1;
       for (const group of groups) {
         for (const individual of group.individuals) {
           individual.pendingMs += elapsedMs;
-          const dx = individual.body.x - cameraX;
-          const dz = individual.body.z - cameraZ;
-          if (dx * dx + dz * dz > farSquared) {
-            individual.skippedFrames += 1;
-            if (individual.skippedFrames < FAR_UPDATE_EVERY_FRAMES) {
-              continue;
-            }
+          const dx = individual.body.x - focusX;
+          const dz = individual.body.z - focusZ;
+          // A wide view shows animals small, however close they stand to its centre.
+          const effectiveSquared = dx * dx + dz * dz + viewHeight * viewHeight;
+          if (
+            effectiveSquared > farSquared &&
+            (frame + individual.farPhase) % FAR_UPDATE_EVERY_FRAMES !== 0
+          ) {
+            continue;
           }
-          individual.skippedFrames = 0;
           const step = Math.min(individual.pendingMs, MAX_STEP_MS);
           individual.pendingMs = 0;
           tick(group, individual, step);

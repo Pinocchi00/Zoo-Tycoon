@@ -72,6 +72,8 @@ interface DurationRange {
 }
 const HESITATE_MS: DurationRange = { minMs: 1500, maxMs: 5000 };
 const SNIFF_MS: DurationRange = { minMs: 1500, maxMs: 3500 };
+/** Animals that were already there start at different moments, never in step. */
+const SETTLE_MS: DurationRange = { minMs: 500, maxMs: 6000 };
 const REST_MS: DurationRange = { minMs: 3000, maxMs: 9000 };
 const EAT_MS: DurationRange = { minMs: 4000, maxMs: 10_000 };
 const SLEEP_MS: DurationRange = { minMs: 15_000, maxMs: 40_000 };
@@ -233,12 +235,12 @@ function useEnrichment(behaviour: AnimalBehaviour, rng: RngState, context: Behav
   }
 }
 
-/** A new animal. With `withArrival` it begins by hesitating; otherwise it joins the routine. */
-export function createBehaviour(
-  rng: RngState,
-  context: BehaviourContext,
-  withArrival: boolean,
-): AnimalBehaviour {
+/**
+ * A new animal. With `withArrival` it begins by hesitating; otherwise it rests a little first,
+ * then joins the routine. The first routine is chosen then, not now, because what the habitat
+ * offers (water for a swimmer) is only known once the model has loaded.
+ */
+export function createBehaviour(rng: RngState, withArrival: boolean): AnimalBehaviour {
   const behaviour: AnimalBehaviour = {
     activity: 'rest',
     animation: 'idle',
@@ -256,7 +258,7 @@ export function createBehaviour(
     behaviour.stage = 'hesitate';
     startTimed(behaviour, rng, 'hesitate', HESITATE_MS);
   } else {
-    chooseRoutine(behaviour, rng, context);
+    startTimed(behaviour, rng, 'rest', SETTLE_MS);
   }
   return behaviour;
 }

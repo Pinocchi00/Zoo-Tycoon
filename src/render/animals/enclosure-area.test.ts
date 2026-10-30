@@ -2,12 +2,16 @@ import { describe, expect, it } from 'vitest';
 import { createGridSize, gridDepth, gridWidth } from '@/shared';
 import { createRng, outlineCells, type GridPoint } from '@/sim';
 import {
+  APPROACH_RADIUS_M,
+  CROWD_CLEARANCE_M,
   INTERIOR_MARGIN_M,
   PATH_MARGIN_M,
+  approachPoint,
   containsPoint,
   createEnclosureArea,
   distanceToEdge,
   hashText,
+  isClearOfCrowd,
   pickDestination,
   placeInterestPoints,
   segmentStaysInside,
@@ -187,6 +191,83 @@ describe('pickDestination', () => {
     };
     const out = { x: 0, z: 0 };
     expect(pickDestination(lonely, createRng(1), { x: 1, z: 1 }, 1, 2, out)).toBe(false);
+  });
+});
+
+describe('isClearOfCrowd', () => {
+  it('compares with every point except the two ignored ones, told apart by reference', () => {
+    const self = { x: 0, z: 0 };
+    const target = { x: 0.1, z: 0 };
+    const neighbour = { x: 3, z: 0 };
+    const crowd = [self, target, neighbour];
+    expect(isClearOfCrowd(crowd, 0, 0, self, target, 1)).toBe(true);
+    expect(isClearOfCrowd(crowd, 2.5, 0, self, target, 1)).toBe(false);
+    expect(isClearOfCrowd(crowd, 0, 0, neighbour, neighbour, 1)).toBe(false);
+    expect(isClearOfCrowd([], 0, 0, self, target, 1)).toBe(true);
+  });
+});
+
+describe('destinations clear of the crowd', () => {
+  it('never ends a walk next to another animal or its target', () => {
+    const area = areaOf(SQUARE);
+    const rng = createRng(31);
+    const start = { x: -8, z: 2 };
+    const out = { x: 0, z: 0 };
+    const crowd = [start, out, { x: -6, z: -1 }, { x: -4, z: 1 }];
+    for (let index = 0; index < 200; index += 1) {
+      expect(pickDestination(area, rng, start, 1.5, 8, out, crowd)).toBe(true);
+      for (const other of crowd.slice(2)) {
+        expect(Math.hypot(out.x - other.x, out.z - other.z)).toBeGreaterThanOrEqual(
+          CROWD_CLEARANCE_M,
+        );
+      }
+    }
+  });
+
+  it('gives up when the crowd leaves no free place', () => {
+    const area = areaOf(SQUARE);
+    const everywhere = area.interior.map((spot) => ({ x: spot.x, z: spot.z }));
+    expect(
+      pickDestination(area, createRng(1), { x: -6, z: -1 }, 1, 8, { x: 0, z: 0 }, everywhere),
+    ).toBe(false);
+  });
+});
+
+describe('approachPoint', () => {
+  const area = areaOf(L_SHAPE);
+  const spot = { x: -7, z: 3 };
+  const from = { x: -3, z: 4 };
+
+  it('stands on a circle around the interest point, leaving its middle free', () => {
+    const out = { x: 0, z: 0 };
+    expect(approachPoint(area, spot, 1, from, [], out)).toBe(true);
+    expect(Math.hypot(out.x - spot.x, out.z - spot.z)).toBeCloseTo(APPROACH_RADIUS_M);
+    expect(containsPoint(area, out.x, out.z)).toBe(true);
+  });
+
+  it('gives each angle its own place, and moves on to the next angle when one is taken', () => {
+    const first = { x: 0, z: 0 };
+    const second = { x: 0, z: 0 };
+    approachPoint(area, spot, 0, from, [], first);
+    approachPoint(area, spot, 2.4, from, [first], second);
+    expect(Math.hypot(first.x - second.x, first.z - second.z)).toBeGreaterThanOrEqual(
+      CROWD_CLEARANCE_M,
+    );
+    const third = { x: 0, z: 0 };
+    expect(approachPoint(area, spot, 0, from, [first], third)).toBe(true);
+    expect(Math.hypot(first.x - third.x, first.z - third.z)).toBeGreaterThanOrEqual(
+      CROWD_CLEARANCE_M,
+    );
+  });
+
+  it('fails when every place around the point is out of reach or taken', () => {
+    const ring = Array.from({ length: 16 }, (_, index) => ({
+      x: spot.x + Math.sin((index * Math.PI) / 8) * APPROACH_RADIUS_M,
+      z: spot.z + Math.cos((index * Math.PI) / 8) * APPROACH_RADIUS_M,
+    }));
+    expect(approachPoint(area, spot, 0, from, ring, { x: 0, z: 0 })).toBe(false);
+    // A spot in the notch of the L is out of the enclosure altogether.
+    expect(approachPoint(area, { x: 0, z: -3 }, 0, from, [], { x: 0, z: 0 })).toBe(false);
   });
 });
 
