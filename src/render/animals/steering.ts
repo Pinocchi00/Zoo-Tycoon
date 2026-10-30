@@ -110,7 +110,8 @@ function turnInwards(
  * slowing down on arrival and swerving round neighbours and fences; otherwise it slows to a stop.
  * Acceleration and turn rate are capped, so no speed or heading ever jumps. A step that would
  * leave the enclosure brakes at the maximum rate and turns towards the inside; if even the
- * braked step would leave, the animal stays put while it slows down. It never ends up outside.
+ * braked step would leave, only its part along the fence is kept, and the animal stays put when
+ * that would leave too. It never ends up outside.
  */
 export function steerStep(
   body: SteerBody,
@@ -154,10 +155,30 @@ export function steerStep(
   }
   turnInwards(body, limits, world, yawBefore, dtS);
   body.speed = Math.max(0, speedBefore - limits.maxAccel * dtS);
-  const brakedX = body.x + Math.sin(body.yaw) * body.speed * dtS;
-  const brakedZ = body.z + Math.cos(body.yaw) * body.speed * dtS;
-  if (containsPoint(world.area, brakedX, brakedZ)) {
-    body.x = brakedX;
-    body.z = brakedZ;
+  const stepX = Math.sin(body.yaw) * body.speed * dtS;
+  const stepZ = Math.cos(body.yaw) * body.speed * dtS;
+  if (containsPoint(world.area, body.x + stepX, body.z + stepZ)) {
+    body.x += stepX;
+    body.z += stepZ;
+    return;
+  }
+  slideAlongFence(body, world, stepX, stepZ);
+}
+
+/** Keeps only the part of the step that runs along the fence, so the animal glides, not stops. */
+function slideAlongFence(body: SteerBody, world: SteerWorld, stepX: number, stepZ: number): void {
+  const edge = world.scratch;
+  const inwardX = body.x - edge.x;
+  const inwardZ = body.z - edge.z;
+  const length = Math.sqrt(inwardX * inwardX + inwardZ * inwardZ);
+  if (length === 0) {
+    return;
+  }
+  const into = (stepX * inwardX + stepZ * inwardZ) / length;
+  const slideX = into < 0 ? stepX - (into * inwardX) / length : stepX;
+  const slideZ = into < 0 ? stepZ - (into * inwardZ) / length : stepZ;
+  if (containsPoint(world.area, body.x + slideX, body.z + slideZ)) {
+    body.x += slideX;
+    body.z += slideZ;
   }
 }

@@ -50,6 +50,11 @@ const SWIM_SIGNATURE = 'swim';
 
 /** Animals further from the camera than this are animated less often. */
 export const FAR_DISTANCE_M = 30;
+/**
+ * From this view height on, every animal is drawn small enough to be updated less often. Well
+ * above the starting view (40 m), where animals are still big and a reduced rate would show.
+ */
+export const WIDE_VIEW_HEIGHT_M = 56;
 /** A far animal is updated one frame out of this many, with the time of all of them. */
 export const FAR_UPDATE_EVERY_FRAMES = 4;
 /** A longer gap (a stalled tab) is cut down, so that steering stays stable. */
@@ -100,8 +105,8 @@ export interface AnimalHerd {
   handleEvents: (events: readonly GameEvent[], world: HerdWorld) => void;
   /**
    * Moves every animal by `elapsedMs`. (focusX, focusZ) is the ground point the camera looks at
-   * and `viewHeight` how much of the world it shows: the further an animal is from what is seen,
-   * the less often it is updated.
+   * and `viewHeight` how much of the world it shows. An animal far from that point, or any animal
+   * when the view is very wide, is updated less often.
    */
   update: (elapsedMs: number, focusX: number, focusZ: number, viewHeight: number) => void;
   /** Settles when every animal now in the park has loaded or failed. */
@@ -449,10 +454,8 @@ export function createAnimalHerd(options: HerdOptions): AnimalHerd {
           individual.pendingMs += elapsedMs;
           const dx = individual.body.x - focusX;
           const dz = individual.body.z - focusZ;
-          // A wide view shows animals small, however close they stand to its centre.
-          const effectiveSquared = dx * dx + dz * dz + viewHeight * viewHeight;
           if (
-            effectiveSquared > farSquared &&
+            (dx * dx + dz * dz > farSquared || viewHeight > WIDE_VIEW_HEIGHT_M) &&
             (frame + individual.farPhase) % FAR_UPDATE_EVERY_FRAMES !== 0
           ) {
             continue;

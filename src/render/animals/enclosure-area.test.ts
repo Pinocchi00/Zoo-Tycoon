@@ -151,7 +151,7 @@ describe('pickDestination', () => {
       if (start === undefined) {
         throw new Error('expected a start');
       }
-      const found = pickDestination(area, rng, start, MIN_TRIP_M, MAX_TRIP_M, out);
+      const found = pickDestination(area, rng, start, MIN_TRIP_M, MAX_TRIP_M, out, []);
       expect(found).toBe(true);
       expect(containsPoint(area, out.x, out.z)).toBe(true);
       expect(segmentStaysInside(area, start.x, start.z, out.x, out.z, PATH_MARGIN_M)).toBe(true);
@@ -164,7 +164,7 @@ describe('pickDestination', () => {
     const out = { x: 0, z: 0 };
     const start = { x: -6, z: -1 };
     for (let index = 0; index < 100; index += 1) {
-      pickDestination(area, rng, start, MIN_TRIP_M, MAX_TRIP_M, out);
+      pickDestination(area, rng, start, MIN_TRIP_M, MAX_TRIP_M, out, []);
       const length = Math.hypot(out.x - start.x, out.z - start.z);
       expect(length).toBeGreaterThanOrEqual(MIN_TRIP_M);
       expect(length).toBeLessThanOrEqual(MAX_TRIP_M);
@@ -177,8 +177,8 @@ describe('pickDestination', () => {
     const first = { x: 0, z: 0 };
     const second = { x: 0, z: 0 };
     const tooLong = 100;
-    expect(pickDestination(area, createRng(3), start, tooLong, tooLong, first)).toBe(true);
-    expect(pickDestination(area, createRng(3), start, tooLong, tooLong, second)).toBe(true);
+    expect(pickDestination(area, createRng(3), start, tooLong, tooLong, first, [])).toBe(true);
+    expect(pickDestination(area, createRng(3), start, tooLong, tooLong, second, [])).toBe(true);
     expect(first).toEqual(second);
     expect(containsPoint(area, first.x, first.z)).toBe(true);
   });
@@ -190,7 +190,7 @@ describe('pickDestination', () => {
       interior: [{ x: 1, z: 1 }],
     };
     const out = { x: 0, z: 0 };
-    expect(pickDestination(lonely, createRng(1), { x: 1, z: 1 }, 1, 2, out)).toBe(false);
+    expect(pickDestination(lonely, createRng(1), { x: 1, z: 1 }, 1, 2, out, [])).toBe(false);
   });
 });
 

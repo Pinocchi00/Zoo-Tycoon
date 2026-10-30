@@ -234,6 +234,8 @@ export function createAnimalModel(
       if (animation === current) {
         return;
       }
+      // Before a clip binds a bone for the first time, which would keep the layer's addition as its rest value.
+      life?.undo();
       const next = actions[animation];
       next.reset();
       next.time = randomFloat(rng) * next.getClip().duration;
