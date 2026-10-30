@@ -1,4 +1,4 @@
-import { randomInt, weightedPick, type RngState } from '@/sim';
+import { randomFloat, randomInt, weightedPick, type RngState } from '@/sim';
 import type { AnimalAnimation } from './animal-model';
 
 /** What an animal is doing. Walking ones end on arrival, the others when their time is up. */
@@ -11,10 +11,44 @@ export type Activity =
   | 'sleep'
   | 'signature'
   | 'enrichmentWalk'
-  | 'waterWalk';
+  | 'waterWalk'
+  /** Standing still and looking about: the head gestures are at their liveliest. */
+  | 'lookAround'
+  /** Two neighbours turn to each other for a moment. */
+  | 'salute'
+  /** Stopped for a moment in the middle of a walk, looking around; the walk goes on after. */
+  | 'wayPause'
+  /** Nose to the ground in the middle of a walk; the walk goes on after. */
+  | 'wayInspect'
+  | 'followWalk'
+  | 'regroupWalk'
+  /** Walking to lie down next to a neighbour who already sleeps. */
+  | 'sleeperWalk';
 
 /** Where a walking activity goes; the herd turns this into a point of the enclosure. */
-export type DestinationKind = 'free' | 'enrichment' | 'water';
+export type DestinationKind = 'free' | 'enrichment' | 'water' | 'follow' | 'group' | 'sleeper';
+
+/**
+ * What an animal sees of its group, written by the herd before each step. Plain flags: the
+ * behaviour knows nothing of positions.
+ */
+export interface SocialView {
+  /** A neighbour is walking not far away: someone to follow. */
+  walkerNear: boolean;
+  /** A neighbour is asleep: someone to sleep next to. */
+  sleeperNear: boolean;
+  /** The group is spread out and this animal is far from the others. */
+  scattered: boolean;
+  /** A resting neighbour is close enough for a greeting. */
+  neighbourClose: boolean;
+}
+
+export const NO_SOCIAL: SocialView = {
+  walkerNear: false,
+  sleeperNear: false,
+  scattered: false,
+  neighbourClose: false,
+};
 
 /** A group that has just arrived hesitates, sniffs the air, then explores a little. */
 export type ArrivalStage = 'hesitate' | 'sniff' | 'explore' | 'done';
@@ -46,6 +80,10 @@ export interface AnimalBehaviour {
   stage: ArrivalStage;
   exploreWalksLeft: number;
   lastDurationMs: number;
+  /** Time before the walk is interrupted by a pause or a sniff; negative: not drawn yet. */
+  wayEventMs: number;
+  /** The timed activity is an interruption: the walk resumes, with the same target, after it. */
+  resumeWalk: boolean;
 }
 
 /** Fewest stars from which enrichment is used (star 1 is the arrival kit only). */
@@ -58,6 +96,14 @@ const REST_WEIGHT = 25;
 const EAT_WEIGHT = 20;
 const SLEEP_WEIGHT = 10;
 const SIGNATURE_WEIGHT = 10;
+const LOOK_AROUND_WEIGHT = 14;
+const FOLLOW_WEIGHT = 14;
+/** A scattered group pulls its far members back: this must be a clear favourite. */
+const REGROUP_WEIGHT = 60;
+const SALUTE_WEIGHT = 8;
+/** Share of the sleepers that lie next to a sleeping neighbour, when there is one. */
+const SLEEP_NEXT_TO_PERCENT = 75;
+const PERCENT_TOTAL = 100;
 /** Per star above the first: the richer the habitat, the more the animals use it. */
 const ENRICHMENT_WEIGHT_PER_STAR = 8;
 /** Using an enrichment element: eating is more common than the signature. */
@@ -78,12 +124,39 @@ const REST_MS: DurationRange = { minMs: 3000, maxMs: 9000 };
 const EAT_MS: DurationRange = { minMs: 4000, maxMs: 10_000 };
 const SLEEP_MS: DurationRange = { minMs: 15_000, maxMs: 40_000 };
 const SIGNATURE_MS: DurationRange = { minMs: 4000, maxMs: 9000 };
+const LOOK_AROUND_MS: DurationRange = { minMs: 3000, maxMs: 8000 };
+const SALUTE_MS: DurationRange = { minMs: 1500, maxMs: 3500 };
+const WAY_PAUSE_MS: DurationRange = { minMs: 1500, maxMs: 4000 };
+const WAY_INSPECT_MS: DurationRange = { minMs: 1200, maxMs: 2500 };
+/** Time between two interruptions of a walk (a pause, a sniff). */
+const WAY_EVENT_MS: DurationRange = { minMs: 3500, maxMs: 9000 };
+const WAY_PAUSE_PERCENT = 50;
+
+/** How fast a walk is, as a share of the top speed: a stroll or a decided pace. */
+interface PaceRange {
+  readonly minRatio: number;
+  readonly maxRatio: number;
+}
+const STROLL_PACE: PaceRange = { minRatio: 0.45, maxRatio: 0.65 };
+const BRISK_PACE: PaceRange = { minRatio: 0.85, maxRatio: 1 };
+const STROLL_PACE_WEIGHT = 60;
+const BRISK_PACE_WEIGHT = 40;
 const EXPLORE_WALKS_MIN = 2;
 const EXPLORE_WALKS_MAX = 3;
 /** Draws that land on the previous duration are redrawn this many times. */
 const DURATION_REDRAWS = 3;
 
-type Routine = 'walk' | 'rest' | 'eat' | 'sleep' | 'signature' | 'enrichment';
+type Routine =
+  | 'walk'
+  | 'rest'
+  | 'eat'
+  | 'sleep'
+  | 'signature'
+  | 'enrichment'
+  | 'lookAround'
+  | 'follow'
+  | 'regroup'
+  | 'salute';
 type EnrichmentUse = 'eat' | 'signature';
 interface Entry<T> {
   readonly value: T;
@@ -97,6 +170,10 @@ const eatEntry: Entry<Routine> = { value: 'eat', weight: 0 };
 const sleepEntry: Entry<Routine> = { value: 'sleep', weight: 0 };
 const signatureEntry: Entry<Routine> = { value: 'signature', weight: 0 };
 const enrichmentEntry: Entry<Routine> = { value: 'enrichment', weight: 0 };
+const lookAroundEntry: Entry<Routine> = { value: 'lookAround', weight: 0 };
+const followEntry: Entry<Routine> = { value: 'follow', weight: 0 };
+const regroupEntry: Entry<Routine> = { value: 'regroup', weight: 0 };
+const saluteEntry: Entry<Routine> = { value: 'salute', weight: 0 };
 const ROUTINE_ENTRIES: readonly Entry<Routine>[] = [
   walkEntry,
   restEntry,
@@ -104,7 +181,14 @@ const ROUTINE_ENTRIES: readonly Entry<Routine>[] = [
   sleepEntry,
   signatureEntry,
   enrichmentEntry,
+  lookAroundEntry,
+  followEntry,
+  regroupEntry,
+  saluteEntry,
 ];
+const strollEntry: Entry<PaceRange> = { value: STROLL_PACE, weight: STROLL_PACE_WEIGHT };
+const briskEntry: Entry<PaceRange> = { value: BRISK_PACE, weight: BRISK_PACE_WEIGHT };
+const PACE_ENTRIES: readonly Entry<PaceRange>[] = [strollEntry, briskEntry];
 const useEatEntry: Entry<EnrichmentUse> = { value: 'eat', weight: 0 };
 const useSignatureEntry: Entry<EnrichmentUse> = { value: 'signature', weight: 0 };
 const USE_ENTRIES: readonly Entry<EnrichmentUse>[] = [useEatEntry, useSignatureEntry];
@@ -113,13 +197,20 @@ export function animationOf(activity: Activity): AnimalAnimation {
   switch (activity) {
     case 'hesitate':
     case 'rest':
+    case 'lookAround':
+    case 'salute':
+    case 'wayPause':
       return 'idle';
     case 'walk':
     case 'enrichmentWalk':
     case 'waterWalk':
+    case 'followWalk':
+    case 'regroupWalk':
+    case 'sleeperWalk':
       return 'walk';
     case 'sniff':
     case 'eat':
+    case 'wayInspect':
       return 'eat';
     case 'sleep':
       return 'sleep';
@@ -130,7 +221,59 @@ export function animationOf(activity: Activity): AnimalAnimation {
 
 /** Walking activities move the animal; the others keep it where it stands. */
 export function isTravelling(activity: Activity): boolean {
-  return activity === 'walk' || activity === 'enrichmentWalk' || activity === 'waterWalk';
+  switch (activity) {
+    case 'walk':
+    case 'enrichmentWalk':
+    case 'waterWalk':
+    case 'followWalk':
+    case 'regroupWalk':
+    case 'sleeperWalk':
+      return true;
+    case 'hesitate':
+    case 'sniff':
+    case 'rest':
+    case 'eat':
+    case 'sleep':
+    case 'signature':
+    case 'lookAround':
+    case 'salute':
+    case 'wayPause':
+    case 'wayInspect':
+      return false;
+  }
+}
+
+/** How much the animal looks about, from 0 (head still) to 1 (looking around). */
+export function attentionOf(activity: Activity): number {
+  switch (activity) {
+    case 'lookAround':
+    case 'wayPause':
+    case 'hesitate':
+    case 'sniff':
+      return 1;
+    case 'rest':
+    case 'salute':
+      return 0.5;
+    case 'walk':
+    case 'enrichmentWalk':
+    case 'waterWalk':
+    case 'followWalk':
+    case 'regroupWalk':
+    case 'sleeperWalk':
+    case 'signature':
+    case 'wayInspect':
+      return 0.3;
+    case 'eat':
+      return 0.2;
+    case 'sleep':
+      return 0;
+  }
+}
+
+/** The share of its top speed an animal walks at this time: a stroll more often than a brisk pace. */
+export function rollPace(rng: RngState): number {
+  const range = weightedPick(rng, PACE_ENTRIES);
+  return range.minRatio + randomFloat(rng) * (range.maxRatio - range.minRatio);
 }
 
 export function hasEnrichment(context: BehaviourContext): boolean {
@@ -163,6 +306,7 @@ function startTimed(
   behaviour.animation = animationOf(activity);
   behaviour.remainingMs = rollDuration(behaviour, rng, range);
   behaviour.needsDestination = false;
+  behaviour.resumeWalk = false;
 }
 
 function startTravel(
@@ -177,6 +321,8 @@ function startTravel(
   behaviour.shortTrip = shortTrip;
   behaviour.travelledMs = 0;
   behaviour.needsDestination = true;
+  behaviour.resumeWalk = false;
+  behaviour.wayEventMs = -1;
 }
 
 function startRest(behaviour: AnimalBehaviour, rng: RngState): void {
@@ -187,7 +333,12 @@ function startSignature(behaviour: AnimalBehaviour, rng: RngState): void {
   startTimed(behaviour, rng, 'signature', SIGNATURE_MS);
 }
 
-function chooseRoutine(behaviour: AnimalBehaviour, rng: RngState, context: BehaviourContext): void {
+function chooseRoutine(
+  behaviour: AnimalBehaviour,
+  rng: RngState,
+  context: BehaviourContext,
+  social: SocialView,
+): void {
   walkEntry.weight = WALK_WEIGHT;
   restEntry.weight = REST_WEIGHT;
   eatEntry.weight = EAT_WEIGHT;
@@ -197,6 +348,10 @@ function chooseRoutine(behaviour: AnimalBehaviour, rng: RngState, context: Behav
   enrichmentEntry.weight = hasEnrichment(context)
     ? ENRICHMENT_WEIGHT_PER_STAR * (context.stars - 1)
     : 0;
+  lookAroundEntry.weight = LOOK_AROUND_WEIGHT;
+  followEntry.weight = social.walkerNear ? FOLLOW_WEIGHT : 0;
+  regroupEntry.weight = social.scattered ? REGROUP_WEIGHT : 0;
+  saluteEntry.weight = social.neighbourClose ? SALUTE_WEIGHT : 0;
   switch (weightedPick(rng, ROUTINE_ENTRIES)) {
     case 'walk':
       startTravel(behaviour, 'walk', 'free', false);
@@ -208,7 +363,11 @@ function chooseRoutine(behaviour: AnimalBehaviour, rng: RngState, context: Behav
       startTimed(behaviour, rng, 'eat', EAT_MS);
       return;
     case 'sleep':
-      startTimed(behaviour, rng, 'sleep', SLEEP_MS);
+      if (social.sleeperNear && randomInt(rng, 1, PERCENT_TOTAL) <= SLEEP_NEXT_TO_PERCENT) {
+        startTravel(behaviour, 'sleeperWalk', 'sleeper', false);
+      } else {
+        startTimed(behaviour, rng, 'sleep', SLEEP_MS);
+      }
       return;
     case 'signature':
       if (context.signatureAtWater) {
@@ -221,7 +380,32 @@ function chooseRoutine(behaviour: AnimalBehaviour, rng: RngState, context: Behav
       behaviour.enrichmentSpot = randomInt(rng, 0, context.enrichmentSpots - 1);
       startTravel(behaviour, 'enrichmentWalk', 'enrichment', false);
       return;
+    case 'lookAround':
+      startTimed(behaviour, rng, 'lookAround', LOOK_AROUND_MS);
+      return;
+    case 'follow':
+      startTravel(behaviour, 'followWalk', 'follow', false);
+      return;
+    case 'regroup':
+      startTravel(behaviour, 'regroupWalk', 'group', false);
+      return;
+    case 'salute':
+      startTimed(behaviour, rng, 'salute', SALUTE_MS);
+      return;
   }
+}
+
+/** Whether a greeting can start now: only an animal standing about, past its arrival. */
+export function canSalute(behaviour: AnimalBehaviour): boolean {
+  return (
+    behaviour.stage === 'done' &&
+    (behaviour.activity === 'rest' || behaviour.activity === 'lookAround')
+  );
+}
+
+/** Starts a greeting the partner asked for (see `canSalute`). */
+export function beginSalute(behaviour: AnimalBehaviour, rng: RngState): void {
+  startTimed(behaviour, rng, 'salute', SALUTE_MS);
 }
 
 function useEnrichment(behaviour: AnimalBehaviour, rng: RngState, context: BehaviourContext): void {
@@ -253,6 +437,8 @@ export function createBehaviour(rng: RngState, withArrival: boolean): AnimalBeha
     stage: 'done',
     exploreWalksLeft: 0,
     lastDurationMs: 0,
+    wayEventMs: -1,
+    resumeWalk: false,
   };
   if (withArrival) {
     behaviour.stage = 'hesitate';
@@ -267,8 +453,19 @@ function startExploreWalk(behaviour: AnimalBehaviour): void {
   startTravel(behaviour, 'walk', 'free', true);
 }
 
-function finishTimed(behaviour: AnimalBehaviour, rng: RngState, context: BehaviourContext): void {
-  if (behaviour.stage === 'hesitate') {
+function finishTimed(
+  behaviour: AnimalBehaviour,
+  rng: RngState,
+  context: BehaviourContext,
+  social: SocialView,
+): void {
+  if (behaviour.resumeWalk) {
+    // The interruption is over: back to the same walk, towards the same target.
+    behaviour.resumeWalk = false;
+    behaviour.activity = 'walk';
+    behaviour.animation = animationOf('walk');
+    behaviour.wayEventMs = -1;
+  } else if (behaviour.stage === 'hesitate') {
     behaviour.stage = 'sniff';
     startTimed(behaviour, rng, 'sniff', SNIFF_MS);
   } else if (behaviour.stage === 'sniff') {
@@ -276,7 +473,7 @@ function finishTimed(behaviour: AnimalBehaviour, rng: RngState, context: Behavio
     behaviour.exploreWalksLeft = randomInt(rng, EXPLORE_WALKS_MIN, EXPLORE_WALKS_MAX);
     startExploreWalk(behaviour);
   } else {
-    chooseRoutine(behaviour, rng, context);
+    chooseRoutine(behaviour, rng, context, social);
   }
 }
 
@@ -285,6 +482,7 @@ function finishTravel(
   arrived: boolean,
   rng: RngState,
   context: BehaviourContext,
+  social: SocialView,
 ): void {
   if (behaviour.activity === 'walk') {
     if (behaviour.stage === 'explore') {
@@ -295,14 +493,36 @@ function finishTravel(
       }
       behaviour.stage = 'done';
     }
-    chooseRoutine(behaviour, rng, context);
+    chooseRoutine(behaviour, rng, context, social);
   } else if (!arrived) {
     startRest(behaviour, rng);
   } else if (behaviour.activity === 'waterWalk') {
     startSignature(behaviour, rng);
+  } else if (behaviour.activity === 'sleeperWalk') {
+    startTimed(behaviour, rng, 'sleep', SLEEP_MS);
+  } else if (behaviour.activity === 'followWalk' || behaviour.activity === 'regroupWalk') {
+    startTimed(behaviour, rng, 'lookAround', LOOK_AROUND_MS);
   } else {
     useEnrichment(behaviour, rng, context);
   }
+}
+
+/** Interrupts a free walk now and then: a stop to look around, or a sniff of the ground. */
+function interruptWalk(behaviour: AnimalBehaviour, elapsedMs: number, rng: RngState): void {
+  if (behaviour.wayEventMs < 0) {
+    behaviour.wayEventMs =
+      randomInt(rng, toSteps(WAY_EVENT_MS.minMs), toSteps(WAY_EVENT_MS.maxMs)) * DURATION_STEP_MS;
+  }
+  behaviour.wayEventMs -= elapsedMs;
+  if (behaviour.wayEventMs > 0) {
+    return;
+  }
+  if (randomInt(rng, 1, PERCENT_TOTAL) <= WAY_PAUSE_PERCENT) {
+    startTimed(behaviour, rng, 'wayPause', WAY_PAUSE_MS);
+  } else {
+    startTimed(behaviour, rng, 'wayInspect', WAY_INSPECT_MS);
+  }
+  behaviour.resumeWalk = true;
 }
 
 /**
@@ -315,6 +535,7 @@ export function advanceBehaviour(
   arrived: boolean,
   rng: RngState,
   context: BehaviourContext,
+  social: SocialView = NO_SOCIAL,
 ): void {
   if (isTravelling(behaviour.activity)) {
     if (behaviour.needsDestination) {
@@ -322,13 +543,15 @@ export function advanceBehaviour(
     }
     behaviour.travelledMs += elapsedMs;
     if (arrived || behaviour.travelledMs >= MAX_TRAVEL_MS) {
-      finishTravel(behaviour, arrived, rng, context);
+      finishTravel(behaviour, arrived, rng, context, social);
+    } else if (behaviour.activity === 'walk' && !behaviour.shortTrip) {
+      interruptWalk(behaviour, elapsedMs, rng);
     }
     return;
   }
   behaviour.remainingMs -= elapsedMs;
   if (behaviour.remainingMs <= 0) {
-    finishTimed(behaviour, rng, context);
+    finishTimed(behaviour, rng, context, social);
   }
 }
 

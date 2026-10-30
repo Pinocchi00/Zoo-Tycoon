@@ -21,6 +21,7 @@ import {
   cloneAnimalSource,
   createAnimalModel,
   disposeAnimalSource,
+  walkClipScale,
   type AnimalAnimation,
   type AnimalModel,
   type AnimalModelProblem,
@@ -29,15 +30,25 @@ import {
 import { createAnimalSlot, type AnimalSlot, type AnimalSlotProblem } from './animal-slot';
 import {
   advanceBehaviour,
+  attentionOf,
+  beginSalute,
+  canSalute,
   createBehaviour,
   failTravel,
   isTravelling,
+  rollPace,
+  type Activity,
   type AnimalBehaviour,
   type BehaviourContext,
 } from './behaviour';
 import {
+  CROWD_CLEARANCE_M,
+  APPROACH_RADIUS_M,
+  PATH_MARGIN_M,
   approachPoint,
   createEnclosureArea,
+  isClearOfCrowd,
+  segmentStaysInside,
   pickDestination,
   placeInterestPoints,
   type EnclosureArea,
@@ -45,10 +56,21 @@ import {
   type Point2,
 } from './enclosure-area';
 import {
+  bearing,
+  createSocialReport,
+  FOLLOW_GAP_M,
+  observeGroup,
+  pointBehind,
+  REGROUP_RADIUS_M,
+  SLEEP_CONTACT_M,
+  type SocialReport,
+} from './social';
+import {
   createSteerBody,
   steerStep,
+  turnToward,
+  wrapAngle,
   type SteerBody,
-  type SteerLimits,
   type SteerWorld,
 } from './steering';
 
@@ -86,6 +108,9 @@ const EXPLORE_MAX_TRIP_M = 3.5;
 const START_SPACING_M = 1.5;
 const START_ATTEMPTS = 10;
 const TWO_PI = Math.PI * 2;
+/** Two animals greeting each other turn more slowly than they walk round. */
+const SALUTE_TURN_SHARE = 0.6;
+const SCRATCH_POINT: Point2 = { x: 0, z: 0 };
 /** Successive animals of a group take well-spread places around an interest point. */
 const GOLDEN_ANGLE_RAD = 2.399_963;
 const MAX_SEED = 0x1_0000_0000;
@@ -122,16 +147,29 @@ export interface AnimalHerd {
    * show; they only decide how often the animation of an animal is advanced.
    */
   update: (elapsedMs: number, pixelsPerMetre: number, visible: Readonly<FocusArea>) => void;
+  /** What each animal does now, group by group (allocates: for tests and development). */
+  activities: () => Activity[];
   /** Settles when every animal now in the park has loaded or failed. */
   whenLoaded: () => Promise<void>;
   dispose: () => void;
+}
+
+/** The limits of one animal; the top speed follows the pace of the current walk. */
+interface Limits {
+  maxSpeed: number;
+  readonly maxAccel: number;
+  readonly maxTurnRate: number;
 }
 
 interface Individual {
   readonly slot: AnimalSlot;
   readonly behaviour: AnimalBehaviour;
   readonly body: SteerBody;
-  readonly limits: SteerLimits;
+  readonly limits: Limits;
+  /** Top speed before the pace of the walk is applied. */
+  readonly topSpeed: number;
+  readonly social: SocialReport;
+  lastActivity: Activity;
   readonly target: Point2;
   shown: AnimalAnimation;
   /** Where this animal falls in the cycle of animation updates, to spread them over the images. */
@@ -230,8 +268,9 @@ export function createAnimalHerd(options: HerdOptions): AnimalHerd {
       seed: randomInt(rng, 0, MAX_SEED - 1),
       timeScale: lerp(TIME_SCALE_MIN, TIME_SCALE_MAX, randomFloat(rng)),
     };
-    const limits: SteerLimits = {
-      maxSpeed: lerp(MAX_SPEED_MIN_MPS, MAX_SPEED_MAX_MPS, randomFloat(rng)),
+    const topSpeed = lerp(MAX_SPEED_MIN_MPS, MAX_SPEED_MAX_MPS, randomFloat(rng));
+    const limits: Limits = {
+      maxSpeed: topSpeed,
       maxAccel: MAX_ACCEL_MPS2,
       maxTurnRate: MAX_TURN_RATE_RAD_S,
     };
@@ -266,6 +305,9 @@ export function createAnimalHerd(options: HerdOptions): AnimalHerd {
       behaviour,
       body,
       limits,
+      topSpeed,
+      social: createSocialReport(),
+      lastActivity: behaviour.activity,
       target,
       shown: 'idle',
       mixerMs: 0,
@@ -370,28 +412,98 @@ export function createAnimalHerd(options: HerdOptions): AnimalHerd {
     }
   };
 
-  const giveDestination = (group: EnclosureGroup, individual: Individual): void => {
-    const { behaviour, body, target } = individual;
-    behaviour.needsDestination = false;
-    let found: boolean;
-    if (behaviour.destination === 'free') {
-      const maxTrip = behaviour.shortTrip ? EXPLORE_MAX_TRIP_M : MAX_TRIP_M;
-      found = pickDestination(group.area, rng, body, MIN_TRIP_M, maxTrip, target, group.crowd);
-    } else {
-      const spot =
-        behaviour.destination === 'water'
-          ? group.pois.water
-          : group.pois.enrichment[behaviour.enrichmentSpot];
-      // Each animal stands at its own place around the point, not on it nor on a neighbour.
-      found =
-        spot !== null &&
-        spot !== undefined &&
-        approachPoint(group.area, spot, individual.approachAngle, body, group.crowd, target);
+  /** Where a walk of the kind the behaviour asked for ends; false when there is no way. */
+  const chooseTarget = (group: EnclosureGroup, individual: Individual): boolean => {
+    const { behaviour, body, target, social } = individual;
+    const { area, crowd } = group;
+    switch (behaviour.destination) {
+      case 'free': {
+        const maxTrip = behaviour.shortTrip ? EXPLORE_MAX_TRIP_M : MAX_TRIP_M;
+        return pickDestination(area, rng, body, MIN_TRIP_M, maxTrip, target, crowd);
+      }
+      case 'water':
+      case 'enrichment': {
+        const spot =
+          behaviour.destination === 'water'
+            ? group.pois.water
+            : group.pois.enrichment[behaviour.enrichmentSpot];
+        // Each animal stands at its own place around the point, not on it nor on a neighbour.
+        return (
+          spot !== null &&
+          spot !== undefined &&
+          approachPoint(
+            area,
+            spot,
+            individual.approachAngle,
+            APPROACH_RADIUS_M,
+            body,
+            crowd,
+            target,
+          )
+        );
+      }
+      case 'follow': {
+        const walker = group.individuals[social.walker];
+        if (walker === undefined) {
+          return false;
+        }
+        pointBehind(walker.body, FOLLOW_GAP_M, SCRATCH_POINT);
+        const { x, z } = SCRATCH_POINT;
+        if (
+          !isClearOfCrowd(crowd, x, z, body, target, CROWD_CLEARANCE_M) ||
+          !segmentStaysInside(area, body.x, body.z, x, z, PATH_MARGIN_M)
+        ) {
+          return false;
+        }
+        target.x = x;
+        target.z = z;
+        return true;
+      }
+      case 'sleeper': {
+        const sleeper = group.individuals[social.sleeper];
+        return (
+          sleeper !== undefined &&
+          approachPoint(
+            area,
+            sleeper.body,
+            individual.approachAngle,
+            SLEEP_CONTACT_M,
+            body,
+            crowd,
+            target,
+          )
+        );
+      }
+      case 'group':
+        return approachPoint(
+          area,
+          social.centre,
+          individual.approachAngle,
+          REGROUP_RADIUS_M,
+          body,
+          crowd,
+          target,
+        );
     }
-    if (found) {
+  };
+
+  const giveDestination = (group: EnclosureGroup, individual: Individual): void => {
+    const { behaviour, body } = individual;
+    behaviour.needsDestination = false;
+    if (chooseTarget(group, individual)) {
       body.arrived = false;
+      // A stroll or a decided pace, for the whole walk.
+      individual.limits.maxSpeed = individual.topSpeed * rollPace(rng);
     } else {
       failTravel(behaviour, rng);
+    }
+  };
+
+  /** Two neighbours who start a greeting turn to each other. */
+  const greet = (group: EnclosureGroup, individual: Individual): void => {
+    const partner = group.individuals[individual.social.nearest];
+    if (partner !== undefined && canSalute(partner.behaviour)) {
+      beginSalute(partner.behaviour, rng);
     }
   };
 
@@ -401,8 +513,10 @@ export function createAnimalHerd(options: HerdOptions): AnimalHerd {
     model: AnimalModel,
     elapsedMs: number,
   ): void => {
-    const { behaviour, body } = individual;
-    advanceBehaviour(behaviour, elapsedMs, body.arrived, rng, group.context);
+    const { behaviour, body, social } = individual;
+    const dtS = elapsedMs / MS_PER_SECOND;
+    observeGroup(individual, group.individuals, social);
+    advanceBehaviour(behaviour, elapsedMs, body.arrived, rng, group.context, social.view);
     if (behaviour.needsDestination) {
       giveDestination(group, individual);
     }
@@ -414,9 +528,22 @@ export function createAnimalHerd(options: HerdOptions): AnimalHerd {
       travelling,
       individual.target.x,
       individual.target.z,
-      elapsedMs / MS_PER_SECOND,
+      dtS,
     );
-    if (!travelling) {
+    const neighbour = group.individuals[social.nearest];
+    if (behaviour.activity === 'salute' && neighbour !== undefined) {
+      if (individual.lastActivity !== 'salute') {
+        greet(group, individual);
+      }
+      turnToward(
+        body,
+        individual.limits.maxTurnRate * SALUTE_TURN_SHARE,
+        bearing(body.x, body.z, neighbour.body.x, neighbour.body.z),
+        dtS,
+      );
+    }
+    individual.lastActivity = behaviour.activity;
+    if (!travelling && !behaviour.resumeWalk) {
       // A resting animal claims the place where it stands, not the one it was heading for.
       individual.target.x = body.x;
       individual.target.z = body.z;
@@ -426,6 +553,16 @@ export function createAnimalHerd(options: HerdOptions): AnimalHerd {
     if (individual.shown !== behaviour.animation) {
       model.play(behaviour.animation);
       individual.shown = behaviour.animation;
+    }
+    if (individual.shown === 'walk') {
+      model.setWalkScale(walkClipScale(body.speed));
+    }
+    model.setAttention(attentionOf(behaviour.activity));
+    model.gaze.hasNeighbour = neighbour !== undefined;
+    if (neighbour !== undefined) {
+      model.gaze.yaw = wrapAngle(
+        bearing(body.x, body.z, neighbour.body.x, neighbour.body.z) - body.yaw,
+      );
     }
   };
 
@@ -502,6 +639,8 @@ export function createAnimalHerd(options: HerdOptions): AnimalHerd {
         }
       }
     },
+    activities: () =>
+      groups.flatMap((group) => group.individuals.map((one) => one.behaviour.activity)),
     whenLoaded: async () => {
       const pending = groups.flatMap((group) => group.individuals.map((one) => one.slot.ready));
       await Promise.all(pending);
