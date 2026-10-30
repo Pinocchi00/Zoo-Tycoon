@@ -172,6 +172,17 @@ describe('steerStep', () => {
     expect(slowed).toBe(true);
   });
 
+  it('glides along the fence instead of stopping when its step would leave', () => {
+    const area = areaOf(ROOM);
+    // Against the west fence (x = -10), heading north-west at full speed.
+    const body = createSteerBody(-9.97, 0, (-3 * Math.PI) / 4);
+    body.speed = LIMITS.maxSpeed;
+    steerStep(body, LIMITS, worldOf(area, [body]), true, -30, -30, STEP_S);
+    expect(containsPoint(area, body.x, body.z)).toBe(true);
+    expect(body.z).toBeLessThan(-0.02);
+    expect(body.speed).toBeCloseTo(LIMITS.maxSpeed - LIMITS.maxAccel * STEP_S);
+  });
+
   it('lets two animals sent to the same interest point both arrive, at places of their own', () => {
     const area = areaOf(ROOM);
     const spot = { x: -4, z: 0 };

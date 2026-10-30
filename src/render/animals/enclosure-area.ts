@@ -285,7 +285,7 @@ export function pickDestination(
   minTripM: number,
   maxTripM: number,
   out: Point2,
-  crowd: readonly Point2[] = [],
+  crowd: readonly Point2[],
 ): boolean {
   const count = area.interior.length;
   for (let attempt = 0; attempt < SAMPLE_ATTEMPTS; attempt += 1) {

@@ -204,4 +204,37 @@ describe('an animal model that walks, eats and sleeps', () => {
       expect(chest.scale.x).toBeGreaterThanOrEqual(1);
     }
   });
+
+  it('never drifts when clips without chest and eye tracks follow one another again and again', () => {
+    const { root, chest, eyes } = skeleton();
+    const created = createAnimalModel(
+      {
+        scene: root,
+        animations: [
+          clip('idle', BREATHING, BLINKING),
+          clip('walk'),
+          clip('sleep', BREATHING, CLOSED_EYES),
+          clip('eat'),
+          clip('stretch'),
+        ],
+      },
+      LOOK,
+    );
+    if (!created.ok) {
+      throw new Error('expected a model');
+    }
+    const sequence: readonly AnimalAnimation[] = ['walk', 'idle', 'eat', 'sleep', 'signature'];
+    for (let round = 0; round < 40; round += 1) {
+      for (const name of sequence) {
+        created.value.play(name);
+        for (let frame = 0; frame < 45; frame += 1) {
+          created.value.update(FRAME_MS);
+          expect(chest.scale.x).toBeGreaterThanOrEqual(1 - 1e-9);
+          expect(chest.scale.x).toBeLessThanOrEqual(BREATH_MAX + 1e-9);
+          expect(eyes.scale.y).toBeGreaterThanOrEqual(0.1 - 1e-9);
+          expect(eyes.scale.y).toBeLessThanOrEqual(1 + 1e-9);
+        }
+      }
+    }
+  });
 });

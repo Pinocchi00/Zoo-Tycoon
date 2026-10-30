@@ -24,6 +24,7 @@ import {
   MAX_ACCEL_MPS2,
   MAX_SPEED_MAX_MPS,
   FAR_UPDATE_EVERY_FRAMES,
+  WIDE_VIEW_HEIGHT_M,
   createAnimalHerd,
   type HerdWorld,
   type SpeciesLook,
@@ -47,6 +48,8 @@ const FRAME_MS = 100;
 /** A close view: only the distance to what is looked at tells near from far. */
 const NEAR_VIEW_M = 6;
 const SIGNATURE_SCALE = 3;
+/** Eating lifts the body by this much: a mark no other clip leaves. */
+const EAT_LIFT_M = 1;
 const CLIP_LENGTH_S = 10;
 const CAPYBARA = unwrap(speciesId('capybara'));
 const JAGUAR = unwrap(speciesId('jaguar'));
@@ -95,12 +98,19 @@ function fakeSource(signature: string): AnimalSource {
   const signatureClip = new AnimationClip(signature, CLIP_LENGTH_S, [
     new VectorKeyframeTrack('body.scale', [0, CLIP_LENGTH_S], Array(6).fill(SIGNATURE_SCALE)),
   ]);
+  const eatClip = new AnimationClip('eat', CLIP_LENGTH_S, [
+    new VectorKeyframeTrack(
+      'body.position',
+      [0, CLIP_LENGTH_S],
+      [0, EAT_LIFT_M, 0, 0, EAT_LIFT_M, 0],
+    ),
+  ]);
   const idle = new AnimationClip('idle', CLIP_LENGTH_S, [
     new VectorKeyframeTrack('body.scale', [0, CLIP_LENGTH_S], [1, 1, 1, 2, 2, 2]),
   ]);
   return {
     scene,
-    animations: [idle, nudge('walk'), nudge('sleep'), nudge('eat'), signatureClip],
+    animations: [idle, nudge('walk'), nudge('sleep'), eatClip, signatureClip],
   };
 }
 
@@ -420,7 +430,9 @@ describe('life in the enclosure', () => {
     const enclosure = outlineEnclosure('enclosure-1', SQUARE, JAGUAR);
     const spots = placeInterestPoints(area, enclosure.id, false, 5).enrichment;
     expect(spots).toHaveLength(4);
-    const REACHED_M = APPROACH_RADIUS_M + 0.3;
+    // The ring where animals stand around a point, the middle being left to the element.
+    const RING_MIN_M = 0.6;
+    const RING_MAX_M = 1.2;
     const hour = (60 * 60 * 1000) / FRAME_MS;
     const framesAtSpots = async (stars: number): Promise<number> => {
       const { herd, parent } = setup();
@@ -430,18 +442,24 @@ describe('life in the enclosure', () => {
       for (let frame = 0; frame < hour; frame += 1) {
         herd.update(FRAME_MS, 0, 0, NEAR_VIEW_M);
         for (const child of parent.children) {
-          const near = spots.some(
-            (spot) => Math.hypot(child.position.x - spot.x, child.position.z - spot.z) < REACHED_M,
-          );
-          frames += near ? 1 : 0;
+          // Fully eating (body lifted) or playing (body scaled): marks no other clip leaves.
+          const body = child.getObjectByName('body');
+          const busy =
+            (body?.scale.x ?? 0) > SIGNATURE_SCALE - 0.1 ||
+            (body?.position.y ?? 0) > EAT_LIFT_M - 0.1;
+          const onRing = spots.some((spot) => {
+            const away = Math.hypot(child.position.x - spot.x, child.position.z - spot.z);
+            return away >= RING_MIN_M && away <= RING_MAX_M;
+          });
+          frames += busy && onRing ? 1 : 0;
         }
       }
       return frames;
     };
-    // At one star the animals only pass by those places by chance.
+    // At one star the animals only happen to eat or play near those places.
     const rich = await framesAtSpots(5);
     const poor = await framesAtSpots(1);
-    expect(rich).toBeGreaterThan(1.5 * poor);
+    expect(rich).toBeGreaterThan(3 * poor);
   });
 });
 
@@ -659,15 +677,23 @@ describe('animals far from the camera', () => {
     expect(breathing()).toBeGreaterThan(1);
   });
 
-  it('counts a wide view as far, even for an animal at the centre of it', async () => {
-    const { herd, breathing } = await lonelyAnimal();
-    const WIDE_VIEW_M = FAR_DISTANCE_M * 2;
+  it('animates a near animal at every image in the starting view, and less often in the widest', async () => {
+    const START_VIEW_M = 40;
+    const WIDEST_VIEW_M = 72;
+    expect(START_VIEW_M).toBeLessThan(WIDE_VIEW_HEIGHT_M);
+    expect(WIDEST_VIEW_M).toBeGreaterThan(WIDE_VIEW_HEIGHT_M);
+
+    const started = await lonelyAnimal();
+    started.herd.update(FRAME_MS, 0, 0, START_VIEW_M);
+    expect(started.breathing()).toBeGreaterThan(1);
+
+    const widest = await lonelyAnimal();
     for (let frame = 1; frame < FAR_UPDATE_EVERY_FRAMES; frame += 1) {
-      herd.update(FRAME_MS, 0, 0, WIDE_VIEW_M);
-      expect(breathing()).toBe(1);
+      widest.herd.update(FRAME_MS, 0, 0, WIDEST_VIEW_M);
+      expect(widest.breathing()).toBe(1);
     }
-    herd.update(FRAME_MS, 0, 0, WIDE_VIEW_M);
-    expect(breathing()).toBeGreaterThan(1);
+    widest.herd.update(FRAME_MS, 0, 0, WIDEST_VIEW_M);
+    expect(widest.breathing()).toBeGreaterThan(1);
   });
 
   it('keeps far animals spread over the images, even when they all turn far at once', async () => {
