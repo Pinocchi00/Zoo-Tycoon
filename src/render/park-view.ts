@@ -7,11 +7,10 @@ import {
   Scene,
   WebGLRenderer,
 } from 'three';
-import { gridDepth, gridWidth, logger, type GridSize } from '@/shared';
-import type { FocusArea } from '@/sim';
-import capybaraUrl from '../../assets/models/capybara.glb?url';
-import { loadAnimalModel } from './animals/animal-model';
-import { createAnimalSlot } from './animals/animal-slot';
+import { gridDepth, gridWidth, type GridSize, type SpeciesId } from '@/shared';
+import type { FocusArea, GameEvent } from '@/sim';
+import { createAnimalHerd, type HerdWorld, type SpeciesLook } from './animals/animal-herd';
+import { loadSpeciesModel } from './animals/model-urls';
 import {
   createCameraRig,
   ISO_YAW_RAD,
@@ -41,6 +40,10 @@ export interface ParkView {
   frame: (elapsedMs: number) => void;
   /** Fills `out` with the cells the camera may show, without allocating. */
   writeFocusArea: (out: FocusArea) => void;
+  /** Puts the animals of the state in their enclosures, e.g. after loading a save. */
+  syncAnimals: (world: HerdWorld) => void;
+  /** Updates the animals of the enclosures the events talk about. */
+  handleEvents: (events: readonly GameEvent[], world: HerdWorld) => void;
   dispose: () => void;
 }
 
@@ -58,9 +61,6 @@ function cameraLimits(grid: GridSize): CameraLimits {
     halfDepth: gridDepth(grid) / 2,
   };
 }
-
-/** Provisional: one resident shown at the park centre until the simulation places animals. */
-const DEMO_ANIMAL = { url: capybaraUrl, x: 0, z: 0, yawRad: Math.PI / 2 } as const;
 
 function startPose(focus: ViewFocus): CameraPose {
   return { x: focus.x, z: focus.z, viewHeight: START_VIEW_HEIGHT_M, yaw: ISO_YAW_RAD };
@@ -84,12 +84,13 @@ function disposeScene(scene: Scene): void {
   });
 }
 
-/** The empty park in 3D, drawn into `canvas`. */
+/** The park in 3D, drawn into `canvas`. */
 export function createParkView(
   canvas: HTMLCanvasElement,
   initialLevel: QualityLevel,
   grid: GridSize,
   focus: ViewFocus,
+  lookupSpecies: (id: SpeciesId) => SpeciesLook | undefined,
 ): ParkView {
   const renderer = new WebGLRenderer({
     canvas,
@@ -109,14 +110,12 @@ export function createParkView(
   const viewport = { width: 1, height: 1 };
   const detachControls = attachCameraControls(canvas, rig, viewport);
 
-  const demoAnimal = createAnimalSlot(
-    scene,
-    loadAnimalModel(DEMO_ANIMAL.url, 'idle'),
-    DEMO_ANIMAL,
-    (problem) => {
-      logger.warn(`The demo animal could not be shown (${problem.kind}).`, problem);
-    },
-  );
+  const herd = createAnimalHerd({
+    parent: scene,
+    grid,
+    lookupSpecies,
+    loadSource: loadSpeciesModel,
+  });
 
   let level = initialLevel;
 
@@ -145,16 +144,18 @@ export function createParkView(
     quality: () => level,
     frame: (elapsedMs) => {
       updateCameraRig(rig, elapsedMs);
-      demoAnimal.update(elapsedMs);
+      herd.update(elapsedMs, rig.current.x, rig.current.z);
       applyCameraPose(camera, rig.current, viewport.width / viewport.height);
       renderer.render(scene, camera);
     },
     writeFocusArea: (out) => {
       writeFocusArea(rig.current, viewport.width / viewport.height, grid, out);
     },
+    syncAnimals: herd.syncAll,
+    handleEvents: herd.handleEvents,
     dispose: () => {
       detachControls();
-      demoAnimal.dispose();
+      herd.dispose();
       disposeScene(scene);
       renderer.dispose();
     },

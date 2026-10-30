@@ -1,6 +1,6 @@
 import type { Object3D } from 'three';
 import type { Result } from '@/shared';
-import type { AnimalModel, MissingClip } from './animal-model';
+import type { AnimalModel, AnimalModelProblem } from './animal-model';
 
 export interface AnimalPlacement {
   readonly x: number;
@@ -10,12 +10,14 @@ export interface AnimalPlacement {
 
 /** Why an animal could not be shown; the caller decides how to report it. */
 export type AnimalSlotProblem =
-  | { readonly kind: 'missingClip'; readonly clip: MissingClip['name'] }
+  | { readonly kind: 'invalidModel'; readonly problem: AnimalModelProblem }
   | { readonly kind: 'loadFailed'; readonly error: unknown };
 
 export interface AnimalSlot {
   /** Settles once the model is shown, refused or abandoned; never rejects. */
   readonly ready: Promise<void>;
+  /** The model once it is shown; undefined while loading, after a failure, and once disposed. */
+  model: () => AnimalModel | undefined;
   update: (elapsedMs: number) => void;
   dispose: () => void;
 }
@@ -26,7 +28,7 @@ export interface AnimalSlot {
  */
 export function createAnimalSlot(
   parent: Object3D,
-  load: Promise<Result<AnimalModel, MissingClip>>,
+  load: Promise<Result<AnimalModel, AnimalModelProblem>>,
   placement: AnimalPlacement,
   onProblem: (problem: AnimalSlotProblem) => void,
 ): AnimalSlot {
@@ -36,7 +38,7 @@ export function createAnimalSlot(
   const ready = load.then(
     (loaded) => {
       if (!loaded.ok) {
-        onProblem({ kind: 'missingClip', clip: loaded.error.name });
+        onProblem({ kind: 'invalidModel', problem: loaded.error });
         return;
       }
       if (disposed) {
@@ -55,6 +57,7 @@ export function createAnimalSlot(
 
   return {
     ready,
+    model: () => model,
     update: (elapsedMs) => {
       model?.update(elapsedMs);
     },
