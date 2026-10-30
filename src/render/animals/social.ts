@@ -26,6 +26,14 @@ const REGROUP_RADIUS_MIN_M = 1.6;
 const REGROUP_LENGTH_SHARE = 1.2;
 const REGROUP_SLACK_M = 0.5;
 
+/** A follower this close to the place it wants (in metres) keeps its place behind the walker. */
+const FOLLOW_HOLD_TOLERANCE_M = 0.5;
+
+/** Whether a follower at `distanceM` from the walker holds the gap it is to keep. */
+export function keepsGap(distanceM: number, lengthM: number): boolean {
+  return Math.abs(distanceM - followGapM(lengthM)) <= FOLLOW_HOLD_TOLERANCE_M;
+}
+
 /** A follower stops behind the walker, centre to centre, at least as far as its own length. */
 export function followGapM(lengthM: number): number {
   return lengthM + FOLLOW_SLACK_M;

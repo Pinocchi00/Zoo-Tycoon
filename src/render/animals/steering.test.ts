@@ -4,6 +4,7 @@ import type { GridPoint } from '@/sim';
 import {
   APPROACH_RADIUS_M,
   approachPoint,
+  clearanceFor,
   containsPoint,
   createEnclosureArea,
   type EnclosureArea,
@@ -151,7 +152,8 @@ describe('steerStep', () => {
 
   it('brakes progressively and turns inwards when sent through a wall', () => {
     const area = areaOf(ROOM);
-    const body = createSteerBody(1.7, 0, Math.PI / 2);
+    // Far enough from the wall (1.1 m) to stop in time from full speed: it brakes ahead of the fence.
+    const body = createSteerBody(0.9, 0, Math.PI / 2);
     body.speed = LIMITS.maxSpeed;
     const world = worldOf(area, [body]);
     let previousSpeed = body.speed;
@@ -174,15 +176,44 @@ describe('steerStep', () => {
     expect(slowed).toBe(true);
   });
 
-  it('glides along the fence instead of stopping when its step would leave', () => {
+  it('glides along the fence when it is too late to stop, and its speed never jumps back up', () => {
     const area = areaOf(ROOM);
-    // Against the west fence (x = -10), heading north-west at full speed.
+    // Against the west fence (x = -10), heading north-west at full speed: no room to stop.
     const body = createSteerBody(-9.97, 0, (-3 * Math.PI) / 4);
     body.speed = LIMITS.maxSpeed;
-    steerStep(body, LIMITS, worldOf(area, [body]), true, -30, -30, STEP_S);
-    expect(containsPoint(area, body.x, body.z)).toBe(true);
-    expect(body.z).toBeLessThan(-0.02);
-    expect(body.speed).toBeCloseTo(LIMITS.maxSpeed - LIMITS.maxAccel * STEP_S);
+    const world = worldOf(area, [body]);
+    let previousRealised = Number.POSITIVE_INFINITY;
+    let glided = false;
+    for (let step = 0; step < 40; step += 1) {
+      const x = body.x;
+      const z = body.z;
+      steerStep(body, LIMITS, world, true, -30, -30, STEP_S);
+      expect(containsPoint(area, body.x, body.z)).toBe(true);
+      const realised = Math.hypot(body.x - x, body.z - z) / STEP_S;
+      // No sudden rise of the speed it really gets, as when a clipped step leaves the speed high.
+      expect(realised - previousRealised).toBeLessThanOrEqual(LIMITS.maxAccel * STEP_S + EPSILON);
+      // The speed it is credited with follows the step it really took.
+      expect(body.speed).toBeLessThanOrEqual(LIMITS.maxSpeed);
+      glided = glided || body.z < z - 0.01;
+      previousRealised = realised;
+    }
+    expect(glided).toBe(true);
+  });
+
+  it('brakes in time for a tapir-sized neighbour at the nearest place the herd picks', () => {
+    const area = areaOf(ROOM);
+    const neighbour = createSteerBody(-4, 0, Math.PI / 2, 2.03);
+    const body = createSteerBody(-8, 2.5, 0, 2.03);
+    const world = worldOf(area, [body, neighbour]);
+    // Right at the clearance of a 2.03 m animal from the neighbour's centre.
+    const target = { x: -4, z: clearanceFor(2.03) };
+    let steps = 0;
+    while (!body.arrived && steps < 1200) {
+      steerStep(body, LIMITS, world, true, target.x, target.z, STEP_S);
+      expect(capsuleGap(body, neighbour)).toBeGreaterThan(-0.02);
+      steps += 1;
+    }
+    expect(body.arrived).toBe(true);
   });
 
   it('lets two animals sent to the same interest point both arrive, at places of their own', () => {

@@ -65,6 +65,7 @@ import {
   bearing,
   createSocialReport,
   followGapM,
+  keepsGap,
   observeGroup,
   pointBehind,
   regroupRadiusM,
@@ -155,6 +156,8 @@ export interface HerdOptions {
   readonly parent: Object3D;
   readonly grid: GridSize;
   readonly lookupSpecies: (id: SpeciesId) => SpeciesLook | undefined;
+  /** Seed of the visual randomness; a constant of the herd unless a test wants another life. */
+  readonly seed?: number | undefined;
   /** Downloads and decodes a model; called once per model, rejects when it cannot. */
   readonly loadSource: (modelId: string) => Promise<AnimalSource>;
 }
@@ -258,7 +261,7 @@ function lerp(min: number, max: number, ratio: number): number {
 }
 
 export function createAnimalHerd(options: HerdOptions): AnimalHerd {
-  const rng = createRng(HERD_SEED);
+  const rng = createRng(options.seed ?? HERD_SEED);
   const groups: EnclosureGroup[] = [];
   const sources = new Map<string, SourceEntry>();
   const warned = new Set<string>();
@@ -665,12 +668,19 @@ export function createAnimalHerd(options: HerdOptions): AnimalHerd {
     individual: Individual,
     elapsedMs: number,
   ): void => {
-    const { behaviour } = individual;
+    const { behaviour, body } = individual;
     if (!isTravelling(behaviour.activity) || behaviour.needsDestination) {
       individual.noProgressMs = 0;
       return;
     }
     const distance = distanceToGoal(group, individual);
+    // A follower that keeps its place behind the walker is doing what it is meant to: it is not
+    // stuck, even if it never quite reaches a target that moves.
+    if (behaviour.activity === 'followWalk' && keepsGap(distance, body.lengthM)) {
+      individual.bestDistance = distance;
+      individual.noProgressMs = 0;
+      return;
+    }
     if (distance < individual.bestDistance - PROGRESS_M) {
       individual.bestDistance = distance;
       individual.noProgressMs = 0;
