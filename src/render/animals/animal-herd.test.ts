@@ -32,8 +32,10 @@ import {
   type HerdWorld,
   type SpeciesLook,
 } from './animal-herd';
+import { capsuleGap, createSteerBody } from './steering';
 import {
   APPROACH_RADIUS_M,
+  approachRadiusFor,
   containsPoint,
   createEnclosureArea,
   placeInterestPoints,
@@ -73,15 +75,30 @@ const EAT_LIFT_M = 1;
 const CLIP_LENGTH_S = 10;
 const CAPYBARA = unwrap(speciesId('capybara'));
 const JAGUAR = unwrap(speciesId('jaguar'));
+const PECCARY = unwrap(speciesId('collared-peccary'));
+const TAPIR = unwrap(speciesId('lowland-tapir'));
+const OTTER = unwrap(speciesId('giant-otter'));
 const GHOST = unwrap(speciesId('ghost'));
 const BROKEN = unwrap(speciesId('broken'));
 
 const LOOKS = new Map<SpeciesId, SpeciesLook>([
   [CAPYBARA, { modelId: 'capybara', hasWater: true }],
   [JAGUAR, { modelId: 'jaguar', hasWater: false }],
+  [PECCARY, { modelId: 'collared_peccary', hasWater: true }],
+  [TAPIR, { modelId: 'lowland_tapir', hasWater: true }],
+  [OTTER, { modelId: 'giant_otter', hasWater: true }],
   [GHOST, { modelId: null, hasWater: false }],
   [BROKEN, { modelId: 'broken', hasWater: false }],
 ]);
+
+/** The real models: signature clip and length in metres (read in assets/models). */
+const SPECIES_MODELS: Readonly<Record<string, { signature: string; lengthM: number }>> = {
+  capybara: { signature: 'swim', lengthM: 1.18 },
+  collared_peccary: { signature: 'root', lengthM: 1.07 },
+  lowland_tapir: { signature: 'trunk', lengthM: 2.03 },
+  giant_otter: { signature: 'swim', lengthM: 1.27 },
+  jaguar: { signature: 'stretch', lengthM: 1.64 },
+};
 
 const SQUARE: readonly GridPoint[] = [
   { x: 10, y: 10 },
@@ -105,8 +122,8 @@ const FAR_AWAY_SQUARE: readonly GridPoint[] = [
 ];
 
 /** Each clip leaves its own mark on the body, so that each is visible alone. */
-function fakeSource(signature: string): AnimalSource {
-  const mesh = new Mesh(new BoxGeometry(0.5, 0.7, MODEL_LENGTH_M), new MeshStandardMaterial());
+function fakeSource(signature: string, lengthM = MODEL_LENGTH_M): AnimalSource {
+  const mesh = new Mesh(new BoxGeometry(0.5, 0.7, lengthM), new MeshStandardMaterial());
   mesh.name = 'body';
   const head = new Bone();
   head.name = 'head';
@@ -176,7 +193,12 @@ function setup(): {
       downloads.push(modelId);
       return modelId === 'broken'
         ? Promise.reject(new Error('404'))
-        : Promise.resolve(fakeSource(modelId === 'capybara' ? 'swim' : 'stretch'));
+        : Promise.resolve(
+            fakeSource(
+              SPECIES_MODELS[modelId]?.signature ?? 'stretch',
+              SPECIES_MODELS[modelId]?.lengthM,
+            ),
+          );
     },
   });
   return { herd, parent, downloads };
@@ -289,7 +311,8 @@ describe('syncAll', () => {
   });
 });
 
-describe('life in the enclosure', () => {
+// Long simulated times: slow under coverage.
+describe('life in the enclosure', { timeout: 120_000 }, () => {
   it('keeps every animal inside a non-convex enclosure, always', async () => {
     const { herd, parent } = setup();
     const area = createEnclosureArea(L_SHAPE, GRID);
@@ -353,8 +376,8 @@ describe('life in the enclosure', () => {
       ),
     );
     await herd.whenLoaded();
-    const MIN_WALKING_APART_M = 0.3;
-    const MIN_RESTING_APART_M = 0.7;
+    // Bodies, nose to tail, not centres: a long animal is not a point (see the capsule tests).
+    const MIN_GAP_M = -0.02;
     let closest = Number.POSITIVE_INFINITY;
     let closestAtRest = Number.POSITIVE_INFINITY;
     let previous = parent.children.map((child) => child.position.clone());
@@ -365,7 +388,15 @@ describe('life in the enclosure', () => {
       );
       for (const [index, first] of parent.children.entries()) {
         for (const [offset, second] of parent.children.slice(index + 1).entries()) {
-          const apart = first.position.distanceTo(second.position);
+          const apart = capsuleGap(
+            createSteerBody(first.position.x, first.position.z, first.rotation.y, MODEL_LENGTH_M),
+            createSteerBody(
+              second.position.x,
+              second.position.z,
+              second.rotation.y,
+              MODEL_LENGTH_M,
+            ),
+          );
           closest = Math.min(closest, apart);
           if (still[index] === true && still[index + 1 + offset] === true) {
             closestAtRest = Math.min(closestAtRest, apart);
@@ -374,8 +405,8 @@ describe('life in the enclosure', () => {
       }
       previous = parent.children.map((child) => child.position.clone());
     }
-    expect(closest).toBeGreaterThan(MIN_WALKING_APART_M);
-    expect(closestAtRest).toBeGreaterThan(MIN_RESTING_APART_M);
+    expect(closest).toBeGreaterThan(MIN_GAP_M);
+    expect(closestAtRest).toBeGreaterThan(MIN_GAP_M);
   });
 
   it('plays a swimming signature at the water only, from the very first routine', async () => {
@@ -462,8 +493,9 @@ describe('life in the enclosure', () => {
     const spots = placeInterestPoints(area, enclosure.id, false, 5).enrichment;
     expect(spots).toHaveLength(4);
     // The ring where animals stand around a point, the middle being left to the element.
-    const RING_MIN_M = 0.6;
-    const RING_MAX_M = 1.2;
+    const ringM = approachRadiusFor(SPECIES_MODELS['jaguar']?.lengthM ?? 0);
+    const RING_MIN_M = ringM - 0.3;
+    const RING_MAX_M = ringM + 0.3;
     const hour = (60 * 60 * 1000) / FRAME_MS;
     const framesAtSpots = async (stars: number): Promise<number> => {
       const { herd, parent } = setup();
@@ -671,7 +703,8 @@ describe('enclosure events', () => {
   });
 });
 
-describe('animation rate by size on screen', () => {
+// Long simulated times: slow under coverage.
+describe('animation rate by size on screen', { timeout: 120_000 }, () => {
   async function group(size: number): Promise<{
     herd: ReturnType<typeof createAnimalHerd>;
     parent: Group;
@@ -815,7 +848,8 @@ describe('dispose', () => {
   });
 });
 
-describe('life of a big group', () => {
+// Long simulated times: slow under coverage.
+describe('life of a big group', { timeout: 120_000 }, () => {
   const BIG_FIELD: readonly GridPoint[] = [
     { x: 3, y: 3 },
     { x: 33, y: 3 },
@@ -1156,5 +1190,276 @@ describe('life of a big group', () => {
     expect(fast).toBeGreaterThan(500);
     expect(checked).toBeGreaterThan(500);
     expect(matching / checked).toBeGreaterThan(0.9);
+  });
+});
+
+// Long simulated times: slow under coverage.
+describe(
+  'what an animal does matches how it moves, whatever its length',
+  { timeout: 120_000 },
+  () => {
+    const SPECIES = [
+      { name: 'capybara', id: CAPYBARA, size: 4, swims: true },
+      { name: 'peccary', id: PECCARY, size: 4, swims: false },
+      { name: 'tapir', id: TAPIR, size: 4, swims: false },
+      { name: 'otter', id: OTTER, size: 4, swims: true },
+      { name: 'jaguar', id: JAGUAR, size: 3, swims: false },
+    ] as const;
+    const FRAMES = (2 * 60 * 60 * 1000) / FRAME_MS;
+    const dtS = FRAME_MS / 1000;
+    /** Above these, an animal plainly moves or turns: its clip must be a walk (or a swim). */
+    const NOTABLE_SPEED_MPS = 0.08;
+    const NOTABLE_TURN_RAD_S = 0.4;
+    /** Longest an animal may turn on the spot or circle without getting anywhere. */
+    const MAX_SPIN_S = 6;
+    /** Longest a walk clip may play with the animal standing still. */
+    const MAX_WALK_IN_PLACE_S = 1.5;
+
+    it.each(SPECIES)(
+      '$name: the clip fits the movement, and no spinning on the spot',
+      async (kind) => {
+        const { herd, parent } = setup();
+        herd.syncAll(
+          worldOf(
+            [outlineEnclosure('enclosure-1', L_SHAPE, kind.id)],
+            [{ speciesId: kind.id, stars: 3, groupSize: kind.size }],
+          ),
+        );
+        await herd.whenLoaded();
+        let previous = parent.children.map((child) => ({
+          x: child.position.x,
+          z: child.position.z,
+          yaw: child.rotation.y,
+        }));
+        const spinning = parent.children.map(() => 0);
+        const walkingInPlace = parent.children.map(() => 0);
+        const mismatches: string[] = [];
+        let longestSpin = 0;
+        let longestWalkInPlace = 0;
+        for (let frame = 0; frame < FRAMES; frame += 1) {
+          herd.update(FRAME_MS, CLOSE_SCALE, ALL_VISIBLE);
+          const shown = herd.animations();
+          const activities = herd.activities();
+          parent.children.forEach((child, index) => {
+            const before = previous[index];
+            if (before === undefined) {
+              return;
+            }
+            const speed =
+              Math.hypot(child.position.x - before.x, child.position.z - before.z) / dtS;
+            const turn =
+              Math.abs(
+                Math.atan2(
+                  Math.sin(child.rotation.y - before.yaw),
+                  Math.cos(child.rotation.y - before.yaw),
+                ),
+              ) / dtS;
+            const clip = shown[index];
+            const moving = speed > NOTABLE_SPEED_MPS || turn > NOTABLE_TURN_RAD_S;
+            const swimming = kind.swims && clip === 'signature';
+            if (moving && clip !== 'walk' && !swimming && mismatches.length < 5) {
+              mismatches.push(
+                `frame ${String(frame)} animal ${String(index)}: ${clip ?? '?'} (${activities[index] ?? '?'}) at ${speed.toFixed(2)} m/s, ${turn.toFixed(2)} rad/s`,
+              );
+            }
+            spinning[index] =
+              turn > NOTABLE_TURN_RAD_S * 0.75 && speed < NOTABLE_SPEED_MPS
+                ? (spinning[index] ?? 0) + 1
+                : 0;
+            walkingInPlace[index] =
+              clip === 'walk' && speed < 0.02 && turn < 0.1 ? (walkingInPlace[index] ?? 0) + 1 : 0;
+            longestSpin = Math.max(longestSpin, (spinning[index] ?? 0) * dtS);
+            longestWalkInPlace = Math.max(longestWalkInPlace, (walkingInPlace[index] ?? 0) * dtS);
+          });
+          previous = parent.children.map((child) => ({
+            x: child.position.x,
+            z: child.position.z,
+            yaw: child.rotation.y,
+          }));
+        }
+        expect(mismatches).toEqual([]);
+        expect(longestSpin).toBeLessThanOrEqual(MAX_SPIN_S);
+        expect(longestWalkInPlace).toBeLessThanOrEqual(MAX_WALK_IN_PLACE_S);
+      },
+    );
+  },
+);
+
+// Long simulated times: slow under coverage.
+describe('bodies never run into each other, whatever their length', { timeout: 120_000 }, () => {
+  const KINDS = [
+    { name: 'capybara', id: CAPYBARA, lengthM: 1.18, size: 6 },
+    { name: 'peccary', id: PECCARY, lengthM: 1.07, size: 6 },
+    { name: 'tapir', id: TAPIR, lengthM: 2.03, size: 4 },
+  ] as const;
+  /** How far two capsules may overlap before it counts as a collision. */
+  const OVERLAP_TOLERANCE_M = 0.02;
+  const FRAMES = (2 * 60 * 60 * 1000) / FRAME_MS;
+
+  it.each(KINDS)(
+    '$name: no overlap of the capsules in two hours, at rest or on the move',
+    async (kind) => {
+      const { herd, parent } = setup();
+      herd.syncAll(
+        worldOf(
+          [outlineEnclosure('enclosure-1', L_SHAPE, kind.id)],
+          [{ speciesId: kind.id, stars: 3, groupSize: kind.size }],
+        ),
+      );
+      await herd.whenLoaded();
+      let worst = Number.POSITIVE_INFINITY;
+      let worstAtRest = Number.POSITIVE_INFINITY;
+      let previous = parent.children.map((child) => child.position.clone());
+      for (let frame = 0; frame < FRAMES; frame += 1) {
+        herd.update(FRAME_MS, CLOSE_SCALE, ALL_VISIBLE);
+        const bodies = parent.children.map((child) =>
+          createSteerBody(child.position.x, child.position.z, child.rotation.y, kind.lengthM),
+        );
+        const still = parent.children.map(
+          (child, index) => child.position.distanceTo(previous[index] ?? child.position) < 1e-9,
+        );
+        bodies.forEach((first, index) => {
+          bodies.slice(index + 1).forEach((second, offset) => {
+            const gap = capsuleGap(first, second);
+            worst = Math.min(worst, gap);
+            if (still[index] === true && still[index + 1 + offset] === true) {
+              worstAtRest = Math.min(worstAtRest, gap);
+            }
+          });
+        });
+        previous = parent.children.map((child) => child.position.clone());
+      }
+      expect(worst).toBeGreaterThan(-OVERLAP_TOLERANCE_M);
+      expect(worstAtRest).toBeGreaterThan(-OVERLAP_TOLERANCE_M);
+    },
+  );
+});
+
+// Long simulated times: slow under coverage.
+describe('lying together and greeting, whatever the length', { timeout: 120_000 }, () => {
+  const KINDS = [
+    { name: 'capybara', id: CAPYBARA, lengthM: 1.18 },
+    { name: 'peccary', id: PECCARY, lengthM: 1.07 },
+    { name: 'tapir', id: TAPIR, lengthM: 2.03 },
+  ] as const;
+  const OVERLAP_TOLERANCE_M = 0.02;
+  const FRAMES = (2 * 60 * 60 * 1000) / FRAME_MS;
+  const BIG: readonly GridPoint[] = [
+    { x: 3, y: 3 },
+    { x: 33, y: 3 },
+    { x: 33, y: 25 },
+    { x: 3, y: 25 },
+  ];
+
+  it.each(KINDS)(
+    '$name: sleeps in a pile in contact without overlapping, and greets head to head',
+    async (kind) => {
+      const { herd, parent } = setup();
+      herd.syncAll(
+        worldOf(
+          [outlineEnclosure('enclosure-1', BIG, kind.id)],
+          [{ speciesId: kind.id, stars: 1, groupSize: 5 }],
+        ),
+      );
+      await herd.whenLoaded();
+      let previous: readonly Activity[] = [];
+      let joined = 0;
+      let inContact = 0;
+      let worstPile = Number.POSITIVE_INFINITY;
+      let worstGreeting = Number.POSITIVE_INFINITY;
+      let greetingFrames = 0;
+      for (let frame = 0; frame < FRAMES; frame += 1) {
+        herd.update(FRAME_MS, CLOSE_SCALE, ALL_VISIBLE);
+        const now = herd.activities();
+        const bodies = parent.children.map((child) =>
+          createSteerBody(child.position.x, child.position.z, child.rotation.y, kind.lengthM),
+        );
+        now.forEach((activity, index) => {
+          const first = bodies[index];
+          if (first === undefined) {
+            return;
+          }
+          let nearestSleeper = Number.POSITIVE_INFINITY;
+          bodies.forEach((second, other) => {
+            if (other === index) {
+              return;
+            }
+            const gap = capsuleGap(first, second);
+            if (activity === 'sleep' && now[other] === 'sleep') {
+              worstPile = Math.min(worstPile, gap);
+              nearestSleeper = Math.min(
+                nearestSleeper,
+                Math.hypot(first.x - second.x, first.z - second.z),
+              );
+            }
+            if (activity === 'salute' && now[other] === 'salute') {
+              greetingFrames += 1;
+              worstGreeting = Math.min(worstGreeting, gap);
+            }
+          });
+          if (
+            activity === 'sleep' &&
+            previous[index] !== 'sleep' &&
+            previous[index] !== undefined
+          ) {
+            // Centres of the other sleepers at this very image.
+            if (Number.isFinite(nearestSleeper)) {
+              joined += 1;
+              inContact += nearestSleeper <= kind.lengthM + 0.6 ? 1 : 0;
+            }
+          }
+        });
+        previous = now;
+      }
+      expect(joined).toBeGreaterThan(3);
+      expect(inContact / joined).toBeGreaterThan(0.3);
+      expect(worstPile).toBeGreaterThan(-OVERLAP_TOLERANCE_M);
+      expect(greetingFrames).toBeGreaterThan(0);
+      expect(worstGreeting).toBeGreaterThan(-OVERLAP_TOLERANCE_M);
+    },
+  );
+});
+
+// Long simulated times: slow under coverage.
+describe('the otter swims for real at the water', { timeout: 120_000 }, () => {
+  it('moves slowly round the water point while its swim clip plays, inside the enclosure', async () => {
+    const area = createEnclosureArea(L_SHAPE, GRID);
+    if (area === null) {
+      throw new Error('expected an area');
+    }
+    const enclosure = outlineEnclosure('enclosure-1', L_SHAPE, OTTER);
+    const water = placeInterestPoints(area, enclosure.id, true, 3).water;
+    if (water === null) {
+      throw new Error('expected a water point');
+    }
+    const { herd, parent } = setup();
+    herd.syncAll(worldOf([enclosure], [{ speciesId: OTTER, stars: 3, groupSize: 1 }]));
+    await herd.whenLoaded();
+    const MAX_SWIM_RADIUS_M = 3;
+    const MIN_SWIM_SPEED_MPS = 0.05;
+    const MAX_SWIM_SPEED_MPS = 0.4;
+    let swimming = 0;
+    let still = 0;
+    let previous = parent.children.map((child) => child.position.clone());
+    for (let frame = 0; frame < 60_000; frame += 1) {
+      herd.update(FRAME_MS, CLOSE_SCALE, ALL_VISIBLE);
+      const [child] = parent.children;
+      const [clip] = herd.animations();
+      const before = previous[0];
+      if (child && before && clip === 'signature') {
+        swimming += 1;
+        const speed = child.position.distanceTo(before) / (FRAME_MS / 1000);
+        still += speed < MIN_SWIM_SPEED_MPS ? 1 : 0;
+        expect(speed).toBeLessThanOrEqual(MAX_SWIM_SPEED_MPS);
+        expect(containsPoint(area, child.position.x, child.position.z)).toBe(true);
+        expect(Math.hypot(child.position.x - water.x, child.position.z - water.z)).toBeLessThan(
+          MAX_SWIM_RADIUS_M,
+        );
+      }
+      previous = parent.children.map((node) => node.position.clone());
+    }
+    expect(swimming).toBeGreaterThan(300);
+    // Swimming means getting along: hardly a frame with the swim clip and no movement.
+    expect(still / swimming).toBeLessThan(0.1);
   });
 });

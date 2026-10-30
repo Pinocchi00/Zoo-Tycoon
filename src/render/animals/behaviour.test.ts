@@ -584,6 +584,35 @@ describe('regrouping that finds no way', () => {
   });
 });
 
+describe('one swimmer at a time', () => {
+  it('does not go to the water while a neighbour is in it, and goes when it is free', () => {
+    const where = context({ signatureAtWater: true });
+    const count = (view: SocialView): number => {
+      let walks = 0;
+      for (let seed = 1; seed <= 10; seed += 1) {
+        const rng = createRng(seed);
+        const runs = play(createBehaviour(rng, false), rng, where, HOUR_MS, view);
+        walks += runs.filter((run) => run.activity === 'waterWalk').length;
+      }
+      return walks;
+    };
+    expect(count(NO_SOCIAL)).toBeGreaterThan(10);
+    expect(count(social({ waterBusy: true }))).toBe(0);
+  });
+
+  it('still plays a signature on the spot when the water is no matter to the species', () => {
+    const rng = createRng(3);
+    const runs = play(
+      createBehaviour(rng, false),
+      rng,
+      context(),
+      2 * HOUR_MS,
+      social({ waterBusy: true }),
+    );
+    expect(runs.some((run) => run.activity === 'signature')).toBe(true);
+  });
+});
+
 describe('sleeping in a pile', () => {
   it('goes next to a sleeper when there is one, in most cases, then sleeps there', () => {
     const counts = new Map<string, number>();

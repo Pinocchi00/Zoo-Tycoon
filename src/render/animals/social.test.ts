@@ -8,11 +8,16 @@ import {
   SLEEPER_RANGE_M,
   bearing,
   createSocialReport,
+  followGapM,
+  regroupRadiusM,
+  saluteRangeM,
+  sleepContactM,
   observeGroup,
   pointBehind,
   type Member,
 } from './social';
-import { createSteerBody } from './steering';
+import { clearanceFor } from './enclosure-area';
+import { capsuleGap, createSteerBody } from './steering';
 
 function member(x: number, z: number, activity: Activity, speed = 0): Member {
   const behaviour: AnimalBehaviour = createBehaviour(createRng(1), false);
@@ -33,6 +38,7 @@ describe('observeGroup', () => {
       sleeperNear: false,
       scattered: false,
       neighbourClose: false,
+      waterBusy: false,
     });
     expect([report.walker, report.sleeper, report.nearest]).toEqual([-1, -1, -1]);
   });
@@ -102,6 +108,56 @@ describe('observeGroup', () => {
     expect(report.view.neighbourClose).toBe(false);
     observeGroup(self, [self, member(1, 0, 'walk', 0.5)], report);
     expect(report.view.neighbourClose).toBe(false);
+  });
+});
+
+describe('distances follow the length of the animal', () => {
+  const LENGTHS = [1.07, 1.18, 1.27, 1.64, 2.03];
+
+  it('keeps a follower at least its length behind the walker, centre to centre', () => {
+    for (const length of LENGTHS) {
+      expect(followGapM(length)).toBeGreaterThanOrEqual(length);
+      const walker = createSteerBody(3, -2, 0.7, length);
+      const out = { x: 0, z: 0 };
+      pointBehind(walker, followGapM(length), out);
+      expect(Math.hypot(out.x - walker.x, out.z - walker.z)).toBeCloseTo(followGapM(length));
+    }
+  });
+
+  it('lies down in contact: more than a length from the sleeper, so no overlap whichever way it faces', () => {
+    for (const length of LENGTHS) {
+      expect(sleepContactM(length)).toBeGreaterThan(length);
+      expect(sleepContactM(length)).toBeLessThan(length + 0.3);
+      const first = createSteerBody(0, 0, 0, length);
+      for (let turn = 0; turn < 8; turn += 1) {
+        const second = createSteerBody(sleepContactM(length), 0, (turn * Math.PI) / 4, length);
+        expect(capsuleGap(first, second)).toBeGreaterThanOrEqual(0);
+      }
+    }
+  });
+
+  it('greets and regroups from further away when longer', () => {
+    for (let index = 1; index < LENGTHS.length; index += 1) {
+      const shorter = LENGTHS[index - 1] ?? 0;
+      const longer = LENGTHS[index] ?? 0;
+      expect(saluteRangeM(longer)).toBeGreaterThanOrEqual(saluteRangeM(shorter));
+      expect(regroupRadiusM(longer)).toBeGreaterThanOrEqual(regroupRadiusM(shorter));
+      expect(clearanceFor(longer)).toBeGreaterThan(longer);
+    }
+    expect(saluteRangeM(0)).toBe(SALUTE_RANGE_M);
+  });
+
+  it('sees the water as busy when a neighbour walks to it, or swims in it', () => {
+    const self = member(0, 0, 'rest');
+    const report = createSocialReport();
+    observeGroup(self, [self, member(5, 0, 'waterWalk')], report);
+    expect(report.view.waterBusy).toBe(true);
+    observeGroup(self, [self, member(5, 0, 'signature')], report);
+    expect(report.view.waterBusy).toBe(false);
+    observeGroup(self, [self, member(5, 0, 'signature')], report, true);
+    expect(report.view.waterBusy).toBe(true);
+    observeGroup(self, [self, member(5, 0, 'walk', 0.4)], report, true);
+    expect(report.view.waterBusy).toBe(false);
   });
 });
 

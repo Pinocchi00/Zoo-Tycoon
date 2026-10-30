@@ -16,6 +16,7 @@ function fakeModel(): AnimalModel & { updates: number[]; disposed: number } {
     gaze: { hasNeighbour: false, yaw: 0 },
     setAttention: () => undefined,
     setWalkScale: () => undefined,
+    setSignatureScale: () => undefined,
     updates,
     disposed: 0,
     play: () => undefined,

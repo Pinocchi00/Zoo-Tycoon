@@ -10,18 +10,41 @@ export const SLEEPER_RANGE_M = 14;
 /** Beyond this distance from the others, an animal of a group of three or more is scattered. */
 export const SCATTER_DISTANCE_M = 6.5;
 const SCATTER_MIN_GROUP = 3;
-/** Neighbours this close greet each other. */
+/** Neighbours this close (plus half the length of the animal) greet each other. */
 export const SALUTE_RANGE_M = 3;
 /** The head may look at a neighbour this near. */
 export const GAZE_RANGE_M = 9;
 /** A walker slower than this does not count as walking. */
 const WALKING_SPEED_MPS = 0.05;
-/** A follower stops this far behind the walker it follows. */
-export const FOLLOW_GAP_M = 1.4;
-/** Lying next to a sleeper: close enough to touch, too far to overlap (more than the clearance). */
-export const SLEEP_CONTACT_M = 1.1;
-/** A regrouping animal stops this far from the middle of the others. */
-export const REGROUP_RADIUS_M = 1.6;
+/** Free space a follower leaves between itself and the walker it follows, beyond its length. */
+const FOLLOW_SLACK_M = 0.3;
+/** Free space between two sleepers in contact: they touch, nearly, but never overlap. */
+const SLEEP_CONTACT_SLACK_M = 0.15;
+/** A regrouping animal stops at least this far from the middle of the others. */
+const REGROUP_RADIUS_MIN_M = 1.6;
+
+/** A follower stops behind the walker, centre to centre, at least as far as its own length. */
+export function followGapM(lengthM: number): number {
+  return lengthM + FOLLOW_SLACK_M;
+}
+
+/**
+ * Lying down next to a sleeper: centre to centre, one length plus a little. Whichever way the two
+ * face, their bodies then touch at most and never overlap.
+ */
+export function sleepContactM(lengthM: number): number {
+  return lengthM + SLEEP_CONTACT_SLACK_M;
+}
+
+/** A regrouping animal stops this far from the middle of the others: more for a longer animal. */
+export function regroupRadiusM(lengthM: number): number {
+  return Math.max(REGROUP_RADIUS_MIN_M, lengthM * 1.2 + 0.5);
+}
+
+/** Longer animals greet from a little further. */
+export function saluteRangeM(lengthM: number): number {
+  return SALUTE_RANGE_M + lengthM / 2;
+}
 
 /** What the social decisions need to know about a group member. */
 export interface Member {
@@ -42,7 +65,13 @@ export interface SocialReport {
 
 export function createSocialReport(): SocialReport {
   return {
-    view: { walkerNear: false, sleeperNear: false, scattered: false, neighbourClose: false },
+    view: {
+      walkerNear: false,
+      sleeperNear: false,
+      scattered: false,
+      neighbourClose: false,
+      waterBusy: false,
+    },
     walker: -1,
     sleeper: -1,
     nearest: -1,
@@ -55,14 +84,24 @@ export function bearing(fromX: number, fromZ: number, toX: number, toZ: number):
   return Math.atan2(toX - fromX, toZ - fromZ);
 }
 
-/** Fills `report` with what `self` sees among `members` (which may include `self`). */
-export function observeGroup(self: Member, members: readonly Member[], report: SocialReport): void {
+/**
+ * Fills `report` with what `self` sees among `members` (which may include `self`).
+ * `signatureAtWater`: the signature of the species is played at the water, so that a member
+ * doing it is in the water.
+ */
+export function observeGroup(
+  self: Member,
+  members: readonly Member[],
+  report: SocialReport,
+  signatureAtWater = false,
+): void {
   let walkerSquared = FOLLOW_RANGE_M * FOLLOW_RANGE_M;
   let sleeperSquared = SLEEPER_RANGE_M * SLEEPER_RANGE_M;
   let nearestSquared = GAZE_RANGE_M * GAZE_RANGE_M;
   report.walker = -1;
   report.sleeper = -1;
   report.nearest = -1;
+  let waterBusy = false;
   let others = 0;
   let sumX = 0;
   let sumZ = 0;
@@ -86,6 +125,9 @@ export function observeGroup(self: Member, members: readonly Member[], report: S
       walkerSquared = squared;
       report.walker = index;
     }
+    if (activity === 'waterWalk' || (signatureAtWater && activity === 'signature')) {
+      waterBusy = true;
+    }
     if (activity === 'sleep' && squared < sleeperSquared) {
       sleeperSquared = squared;
       report.sleeper = index;
@@ -99,10 +141,10 @@ export function observeGroup(self: Member, members: readonly Member[], report: S
   view.walkerNear = report.walker >= 0;
   view.sleeperNear = report.sleeper >= 0;
   view.scattered = others + 1 >= SCATTER_MIN_GROUP && toCentre > SCATTER_DISTANCE_M;
+  const saluteRange = saluteRangeM(self.body.lengthM);
+  view.waterBusy = waterBusy;
   view.neighbourClose =
-    near !== undefined &&
-    nearestSquared <= SALUTE_RANGE_M * SALUTE_RANGE_M &&
-    canSalute(near.behaviour);
+    near !== undefined && nearestSquared <= saluteRange * saluteRange && canSalute(near.behaviour);
 }
 
 /** A point `gapM` behind a walker, on its path; written into `out`. */

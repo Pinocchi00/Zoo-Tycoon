@@ -41,6 +41,8 @@ export interface SocialView {
   scattered: boolean;
   /** A resting neighbour is close enough for a greeting. */
   neighbourClose: boolean;
+  /** A neighbour is already in the water (walking there, or swimming): there is room for one. */
+  waterBusy: boolean;
 }
 
 export const NO_SOCIAL: Readonly<SocialView> = {
@@ -48,6 +50,7 @@ export const NO_SOCIAL: Readonly<SocialView> = {
   sleeperNear: false,
   scattered: false,
   neighbourClose: false,
+  waterBusy: false,
 };
 
 /** A group that has just arrived hesitates, sniffs the air, then explores a little. */
@@ -348,7 +351,8 @@ function chooseRoutine(
   eatEntry.weight = EAT_WEIGHT;
   // Never twice in a row: a sleeper wakes up and does something else first.
   sleepEntry.weight = behaviour.activity === 'sleep' ? 0 : SLEEP_WEIGHT;
-  signatureEntry.weight = SIGNATURE_WEIGHT;
+  // The water takes one swimmer at a time: the others wait or do something else.
+  signatureEntry.weight = context.signatureAtWater && social.waterBusy ? 0 : SIGNATURE_WEIGHT;
   enrichmentEntry.weight = hasEnrichment(context)
     ? ENRICHMENT_WEIGHT_PER_STAR * (context.stars - 1)
     : 0;

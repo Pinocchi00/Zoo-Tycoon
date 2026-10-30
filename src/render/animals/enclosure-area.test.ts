@@ -4,6 +4,9 @@ import { createRng, outlineCells, type GridPoint } from '@/sim';
 import {
   APPROACH_RADIUS_M,
   CROWD_CLEARANCE_M,
+  WATER_EDGE_M,
+  approachRadiusFor,
+  clearanceFor,
   INTERIOR_MARGIN_M,
   PATH_MARGIN_M,
   approachPoint,
@@ -310,6 +313,48 @@ describe('placeInterestPoints', () => {
     for (const [index, first] of all.entries()) {
       for (const second of all.slice(index + 1)) {
         expect(Math.hypot(first.x - second.x, first.z - second.z)).toBeGreaterThan(1);
+      }
+    }
+  });
+});
+
+describe('room for long animals', () => {
+  it('asks for more room between centres the longer the animal is', () => {
+    expect(clearanceFor(0)).toBe(CROWD_CLEARANCE_M);
+    expect(clearanceFor(1.18)).toBeGreaterThan(1.18);
+    expect(clearanceFor(2.03)).toBeGreaterThan(2.03);
+    expect(clearanceFor(2.03)).toBeGreaterThan(clearanceFor(1.18));
+  });
+
+  it('stands further from an interest point the longer the animal is', () => {
+    expect(approachRadiusFor(0)).toBe(APPROACH_RADIUS_M);
+    expect(approachRadiusFor(0.5)).toBe(APPROACH_RADIUS_M);
+    expect(approachRadiusFor(2.03)).toBeGreaterThan(approachRadiusFor(1.18));
+  });
+
+  it('picks destinations as far from the others as the clearance given', () => {
+    const area = areaOf(SQUARE);
+    const rng = createRng(2);
+    const start = { x: -8, z: 2 };
+    const out = { x: 0, z: 0 };
+    const other = { x: -6, z: -1 };
+    for (let index = 0; index < 200; index += 1) {
+      if (pickDestination(area, rng, start, 1.5, 8, out, [start, out, other], 2.5)) {
+        expect(Math.hypot(out.x - other.x, out.z - other.z)).toBeGreaterThanOrEqual(2.5);
+      }
+    }
+  });
+
+  it('puts the water away from the fence, where there is room to swim round it', () => {
+    const area = areaOf(SQUARE);
+    const nearest = { x: 0, z: 0 };
+    for (let id = 1; id <= 30; id += 1) {
+      const water = placeInterestPoints(area, `enclosure-${String(id)}`, true, 1).water;
+      expect(water).not.toBeNull();
+      if (water) {
+        expect(distanceToEdge(area, water.x, water.z, nearest)).toBeGreaterThanOrEqual(
+          WATER_EDGE_M,
+        );
       }
     }
   });

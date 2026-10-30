@@ -20,6 +20,9 @@ import {
   pickClip,
   walkClipScale,
   WALK_REFERENCE_SPEED_MPS,
+  SWIM_REFERENCE_SPEED_MPS,
+  animalLength,
+  swimClipScale,
   type AnimalLook,
   type AnimalSource,
 } from './animal-model';
@@ -422,6 +425,41 @@ describe('walk clip speed', () => {
     expect(advance(1)).toBeCloseTo(0.1);
     expect(advance(0.5)).toBeCloseTo(0.05);
     expect(advance(1.6)).toBeCloseTo(0.16);
+  });
+});
+
+describe('swim clip speed', () => {
+  it('follows the speed of the swimmer, within limits', () => {
+    expect(swimClipScale(SWIM_REFERENCE_SPEED_MPS)).toBeCloseTo(1);
+    expect(swimClipScale(0)).toBeGreaterThan(0);
+    expect(swimClipScale(SWIM_REFERENCE_SPEED_MPS / 2)).toBeLessThan(1);
+    expect(swimClipScale(100)).toBe(swimClipScale(200));
+  });
+
+  it('plays the signature clip at the scale it is given', () => {
+    const source = fullSource('swim');
+    const created = createAnimalModel(source, LOOK);
+    if (!created.ok) {
+      throw new Error('expected a model');
+    }
+    created.value.play('signature');
+    created.value.update(FADE_MS * 2);
+    const advance = (scale: number): number => {
+      created.value.setSignatureScale(scale);
+      const before = source.scene.scale.x;
+      created.value.update(100);
+      return (((source.scene.scale.x - before) % 1) + 1) % 1;
+    };
+    expect(advance(1)).toBeCloseTo(0.1);
+    expect(advance(0.5)).toBeCloseTo(0.05);
+  });
+
+  it('measures the length of a model, nose to tail', () => {
+    const long = new Mesh(new BoxGeometry(0.5, 0.7, 2.03));
+    const root = new Group();
+    root.add(long);
+    expect(animalLength(root)).toBeCloseTo(2.03);
+    expect(animalLength(new Group())).toBe(0);
   });
 });
 
