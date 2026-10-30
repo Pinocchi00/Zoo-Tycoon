@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { checkModels } from './check-models';
 import { makeGlb, makeModelJson, VALID_DESCRIPTION } from './fixtures';
@@ -65,8 +65,38 @@ describe('checkModels', () => {
   });
 
   it('refuses a model without idle (proof of the brief)', () => {
-    expect(check(makeGlb(makeModelJson({ animations: ['walk'] })))).toEqual([
-      'mandatory animation "idle" is missing',
+    expect(check(makeGlb(makeModelJson({ animations: ['walk', 'sleep', 'eat', 'swim'] })))).toEqual(
+      ['mandatory animation "idle" is missing'],
+    );
+  });
+
+  it('refuses a model without sleep or eat, or without the signature of its description', () => {
+    expect(check(makeGlb(makeModelJson({ animations: ['idle', 'walk', 'eat', 'swim'] })))).toEqual([
+      'mandatory animation "sleep" is missing',
+    ]);
+    expect(
+      check(makeGlb(makeModelJson({ animations: ['idle', 'walk', 'sleep', 'swim'] }))),
+    ).toEqual(['mandatory animation "eat" is missing']);
+    expect(check(makeGlb(makeModelJson({ animations: ['idle', 'walk', 'sleep', 'eat'] })))).toEqual(
+      ['signature animation "swim" of the species description is missing'],
+    );
+  });
+
+  it('reads the expected signature from the description', () => {
+    const trunk = JSON.stringify({
+      ...VALID_DESCRIPTION,
+      signature: 'trunk',
+      animations: {
+        ...VALID_DESCRIPTION.animations,
+        trunk: { durationS: 3, swingDeg: 20, curlDeg: 30, headNodDeg: 5 },
+      },
+    });
+    const withTrunk = makeGlb(
+      makeModelJson({ animations: ['idle', 'walk', 'sleep', 'eat', 'trunk'] }),
+    );
+    expect(check(withTrunk, trunk)).toEqual([]);
+    expect(check(makeGlb(makeModelJson()), trunk)).toEqual([
+      'signature animation "trunk" of the species description is missing',
     ]);
   });
 
@@ -101,6 +131,16 @@ describe('species descriptions', () => {
     expect(parsed.success ? 'valid' : parsed.error.message).toBe('valid');
   });
 
+  it('refuses a signature whose settings are missing', () => {
+    const noSettings = { ...VALID_DESCRIPTION, signature: 'stretch' };
+    expect(speciesDescriptionSchema.safeParse(noSettings).success).toBe(false);
+    const unknown = { ...VALID_DESCRIPTION, signature: 'fly' };
+    expect(speciesDescriptionSchema.safeParse(unknown).success).toBe(false);
+    const { idle, walk, eat, swim } = VALID_DESCRIPTION.animations;
+    const withoutSleep = { ...VALID_DESCRIPTION, animations: { idle, walk, eat, swim } };
+    expect(speciesDescriptionSchema.safeParse(withoutSleep).success).toBe(false);
+  });
+
   it('refuses a typo in a field name', () => {
     const typo = { ...VALID_DESCRIPTION, lenghtM: 1.1 };
     expect(speciesDescriptionSchema.safeParse(typo).success).toBe(false);
@@ -111,6 +151,20 @@ describe('species descriptions', () => {
       readFileSync(new URL('../../assets/models/capybara.glb', import.meta.url)),
     );
     const text = readFileSync(new URL('../blender/species/capybara.json', import.meta.url), 'utf8');
+    expect(check(model, text)).toEqual([]);
+  });
+
+  const speciesDir = new URL('../blender/species/', import.meta.url);
+  const modelsDir = new URL('../../assets/models/', import.meta.url);
+  const ids = readdirSync(speciesDir)
+    .filter((file) => file.endsWith('.json'))
+    .map((file) => file.slice(0, -'.json'.length));
+
+  it.each(ids)('the committed %s description and model pass the asset rules', (id) => {
+    const text = readFileSync(new URL(`${id}.json`, speciesDir), 'utf8');
+    const parsed = speciesDescriptionSchema.safeParse(JSON.parse(text));
+    expect(parsed.success ? 'valid' : parsed.error.message).toBe('valid');
+    const model = new Uint8Array(readFileSync(new URL(`${id}.glb`, modelsDir)));
     expect(check(model, text)).toEqual([]);
   });
 });

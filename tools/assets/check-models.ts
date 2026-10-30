@@ -1,7 +1,7 @@
 // Pairs each exported model with its species description and lists every problem.
 // Pure: the command line (validate.ts) does the file reading.
 import { readGlbJson, gltfSchema, type GlbError } from './glb';
-import { checkModel, describeIssue } from './model-rules';
+import { checkModel, describeIssue, type ModelExpectations } from './model-rules';
 import { speciesDescriptionSchema } from './species';
 
 export interface NamedFile<T> {
@@ -32,7 +32,7 @@ function describeGlbError(error: GlbError): string {
   }
 }
 
-function readLengthM(text: string): { lengthM: number } | string {
+function readExpectations(text: string): ModelExpectations | string {
   let json: unknown;
   try {
     json = JSON.parse(text);
@@ -41,12 +41,12 @@ function readLengthM(text: string): { lengthM: number } | string {
   }
   const parsed = speciesDescriptionSchema.safeParse(json);
   return parsed.success
-    ? { lengthM: parsed.data.lengthM }
+    ? { lengthM: parsed.data.lengthM, signature: parsed.data.signature }
     : `species description is invalid: ${parsed.error.message}`;
 }
 
 function checkOne(model: Uint8Array, description: string): readonly string[] {
-  const expectations = readLengthM(description);
+  const expectations = readExpectations(description);
   if (typeof expectations === 'string') {
     return [expectations];
   }

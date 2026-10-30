@@ -1,0 +1,640 @@
+{
+  "id": "jaguar",
+  "family": "big_cat",
+  "lengthM": 1.5,
+  "signatures": [
+    "dark rosettes with a dot in the centre",
+    "massive broad head",
+    "long drooping tail"
+  ],
+  "signature": "stretch",
+  "bones": [
+    {
+      "name": "root",
+      "head": [0, 0, -0.1],
+      "tail": [0, 0, 0.1]
+    },
+    {
+      "name": "spine",
+      "parent": "root",
+      "head": [0, 0.64, -0.6],
+      "tail": [0, 0.64, 0.4]
+    },
+    {
+      "name": "chest",
+      "parent": "spine",
+      "head": [0, 0.62, -0.1],
+      "tail": [0, 0.62, 0.2]
+    },
+    {
+      "name": "head",
+      "parent": "spine",
+      "head": [0, 0.7, 0.4],
+      "tail": [0, 0.7, 0.8]
+    },
+    {
+      "name": "eyes",
+      "parent": "head",
+      "head": [0, 0.72, 0.62],
+      "tail": [0, 0.8, 0.62]
+    },
+    {
+      "name": "ear_l",
+      "parent": "head",
+      "head": [0.12, 0.85, 0.47],
+      "tail": [0.12, 0.93, 0.47]
+    },
+    {
+      "name": "ear_r",
+      "parent": "head",
+      "head": [-0.12, 0.85, 0.47],
+      "tail": [-0.12, 0.93, 0.47]
+    },
+    {
+      "name": "leg_fl",
+      "parent": "spine",
+      "head": [0.14, 0.57, 0.25],
+      "tail": [0.14, 0, 0.25]
+    },
+    {
+      "name": "leg_fr",
+      "parent": "spine",
+      "head": [-0.14, 0.57, 0.25],
+      "tail": [-0.14, 0, 0.25]
+    },
+    {
+      "name": "leg_bl",
+      "parent": "spine",
+      "head": [0.15, 0.57, -0.44],
+      "tail": [0.15, 0, -0.44]
+    },
+    {
+      "name": "leg_br",
+      "parent": "spine",
+      "head": [-0.15, 0.57, -0.44],
+      "tail": [-0.15, 0, -0.44]
+    },
+    {
+      "name": "tail",
+      "parent": "spine",
+      "head": [0, 0.64, -0.6],
+      "tail": [0, 0.64, -0.78]
+    }
+  ],
+  "parts": [
+    {
+      "name": "body",
+      "kind": "body",
+      "bone": "chest",
+      "color": "fur_jaguar",
+      "center": [0.0, 0.6, -0.14],
+      "radii": [0.22, 0.23, 0.54],
+      "segments": 20,
+      "rings": 12,
+      "speckle": {
+        "color": "jaguar_rosette",
+        "share": 0.07,
+        "seed": 21
+      }
+    },
+    {
+      "name": "chest_mass",
+      "kind": "body",
+      "bone": "chest",
+      "color": "fur_jaguar",
+      "center": [0, 0.58, 0.2],
+      "radii": [0.22, 0.26, 0.2],
+      "exponent": 0.9,
+      "segments": 14,
+      "rings": 8,
+      "speckle": {
+        "color": "jaguar_rosette",
+        "share": 0.07,
+        "seed": 22
+      }
+    },
+    {
+      "name": "belly",
+      "kind": "body",
+      "bone": "chest",
+      "color": "fur_jaguar_light",
+      "center": [0, 0.4, -0.1],
+      "radii": [0.15, 0.08, 0.38],
+      "exponent": 0.8,
+      "segments": 12,
+      "rings": 6
+    },
+    {
+      "name": "head",
+      "kind": "head",
+      "bone": "head",
+      "color": "fur_jaguar",
+      "center": [0, 0.7, 0.52],
+      "radii": [0.18, 0.17, 0.2],
+      "exponent": 0.8,
+      "pitchDeg": -5,
+      "segments": 16,
+      "rings": 10,
+      "speckle": {
+        "color": "jaguar_rosette",
+        "share": 0.07,
+        "seed": 23
+      }
+    },
+    {
+      "name": "muzzle",
+      "kind": "muzzle",
+      "bone": "head",
+      "color": "fur_jaguar_light",
+      "center": [0, 0.65, 0.69],
+      "radii": [0.105, 0.085, 0.09],
+      "exponent": 0.6,
+      "segments": 12,
+      "rings": 7
+    },
+    {
+      "name": "nose_tip",
+      "kind": "nose",
+      "bone": "head",
+      "color": "nose_dark",
+      "center": [0, 0.665, 0.777],
+      "radii": [0.04, 0.03, 0.02],
+      "segments": 8,
+      "rings": 5
+    },
+    {
+      "name": "eye_l",
+      "kind": "eye",
+      "bone": "eyes",
+      "color": "eye_black",
+      "center": [0.15, 0.73, 0.62],
+      "radii": [0.02, 0.023, 0.023],
+      "segments": 8,
+      "rings": 6,
+      "mirror": true
+    },
+    {
+      "name": "shine_l",
+      "kind": "eye",
+      "bone": "eyes",
+      "color": "eye_shine",
+      "center": [0.166, 0.74, 0.63],
+      "radii": [0.006, 0.006999999999999999, 0.006999999999999999],
+      "segments": 6,
+      "rings": 4,
+      "mirror": true
+    },
+    {
+      "name": "ear_l",
+      "kind": "ear",
+      "bone": "ear_l",
+      "color": "fur_jaguar_dark",
+      "center": [0.12, 0.89, 0.47],
+      "radii": [0.052, 0.052, 0.022],
+      "rollDeg": -10,
+      "segments": 10,
+      "rings": 6,
+      "mirror": true
+    },
+    {
+      "name": "inner_ear_l",
+      "kind": "patch",
+      "bone": "ear_l",
+      "color": "inner_ear",
+      "center": [0.12, 0.885, 0.485],
+      "radii": [0.032, 0.032, 0.01],
+      "rollDeg": -10,
+      "segments": 8,
+      "rings": 4,
+      "mirror": true
+    },
+    {
+      "name": "leg_fl",
+      "kind": "leg",
+      "bone": "leg_fl",
+      "color": "fur_jaguar",
+      "start": [0.14, 0.57, 0.25],
+      "end": [0.15, 0.07, 0.28],
+      "startRadius": 0.1,
+      "endRadius": 0.075,
+      "segments": 10,
+      "speckle": {
+        "color": "jaguar_rosette",
+        "share": 0.1,
+        "seed": 31
+      },
+      "mirror": true
+    },
+    {
+      "name": "leg_bl",
+      "kind": "leg",
+      "bone": "leg_bl",
+      "color": "fur_jaguar",
+      "start": [0.15, 0.57, -0.44],
+      "end": [0.16, 0.07, -0.42],
+      "startRadius": 0.12,
+      "endRadius": 0.08,
+      "segments": 10,
+      "speckle": {
+        "color": "jaguar_rosette",
+        "share": 0.1,
+        "seed": 32
+      },
+      "mirror": true
+    },
+    {
+      "name": "foot_fl",
+      "kind": "foot",
+      "bone": "leg_fl",
+      "color": "fur_jaguar_dark",
+      "center": [0.15, 0.04, 0.31],
+      "radii": [0.088, 0.04, 0.11],
+      "segments": 10,
+      "rings": 6,
+      "mirror": true
+    },
+    {
+      "name": "foot_bl",
+      "kind": "foot",
+      "bone": "leg_bl",
+      "color": "fur_jaguar_dark",
+      "center": [0.16, 0.04, -0.39],
+      "radii": [0.092, 0.04, 0.115],
+      "segments": 10,
+      "rings": 6,
+      "mirror": true
+    },
+    {
+      "name": "tail_a",
+      "kind": "tail",
+      "bone": "tail",
+      "color": "fur_jaguar",
+      "start": [0, 0.64, -0.6],
+      "end": [0, 0.6, -0.76],
+      "startRadius": 0.055,
+      "endRadius": 0.045,
+      "segments": 8
+    },
+    {
+      "name": "tail_b",
+      "kind": "tail",
+      "bone": "tail",
+      "color": "fur_jaguar",
+      "start": [0, 0.6, -0.76],
+      "end": [0, 0.34, -0.8],
+      "startRadius": 0.045,
+      "endRadius": 0.04,
+      "segments": 8,
+      "speckle": {
+        "color": "jaguar_rosette",
+        "share": 0.25,
+        "seed": 33
+      }
+    },
+    {
+      "name": "tail_c",
+      "kind": "tail",
+      "bone": "tail",
+      "color": "fur_jaguar",
+      "start": [0, 0.34, -0.8],
+      "end": [0, 0.14, -0.74],
+      "startRadius": 0.04,
+      "endRadius": 0.04,
+      "segments": 8
+    },
+    {
+      "name": "tail_tip",
+      "kind": "tail",
+      "bone": "tail",
+      "color": "jaguar_rosette",
+      "start": [0, 0.14, -0.74],
+      "end": [0, 0.06, -0.66],
+      "startRadius": 0.04,
+      "endRadius": 0.045,
+      "segments": 8
+    },
+    {
+      "name": "rosette_1_l",
+      "kind": "patch",
+      "bone": "chest",
+      "color": "jaguar_rosette",
+      "center": [0.1634, 0.7, -0.4],
+      "radii": [0.014, 0.05, 0.045],
+      "segments": 6,
+      "rings": 4,
+      "mirror": true
+    },
+    {
+      "name": "rosette_mid_1_l",
+      "kind": "patch",
+      "bone": "chest",
+      "color": "fur_jaguar",
+      "center": [0.1684, 0.7, -0.4],
+      "radii": [0.014, 0.03, 0.026],
+      "segments": 5,
+      "rings": 3,
+      "mirror": true
+    },
+    {
+      "name": "rosette_2_l",
+      "kind": "patch",
+      "bone": "chest",
+      "color": "jaguar_rosette",
+      "center": [0.1914, 0.7, -0.22],
+      "radii": [0.014, 0.05, 0.045],
+      "segments": 6,
+      "rings": 4,
+      "mirror": true
+    },
+    {
+      "name": "rosette_mid_2_l",
+      "kind": "patch",
+      "bone": "chest",
+      "color": "fur_jaguar",
+      "center": [0.1964, 0.7, -0.22],
+      "radii": [0.014, 0.03, 0.026],
+      "segments": 5,
+      "rings": 3,
+      "mirror": true
+    },
+    {
+      "name": "rosette_3_l",
+      "kind": "patch",
+      "bone": "chest",
+      "color": "jaguar_rosette",
+      "center": [0.1899, 0.7, -0.04],
+      "radii": [0.014, 0.05, 0.045],
+      "segments": 6,
+      "rings": 4,
+      "mirror": true
+    },
+    {
+      "name": "rosette_mid_3_l",
+      "kind": "patch",
+      "bone": "chest",
+      "color": "fur_jaguar",
+      "center": [0.1949, 0.7, -0.04],
+      "radii": [0.014, 0.03, 0.026],
+      "segments": 5,
+      "rings": 3,
+      "mirror": true
+    },
+    {
+      "name": "rosette_4_l",
+      "kind": "patch",
+      "bone": "chest",
+      "color": "jaguar_rosette",
+      "center": [0.158, 0.7, 0.14],
+      "radii": [0.014, 0.05, 0.045],
+      "segments": 6,
+      "rings": 4,
+      "mirror": true
+    },
+    {
+      "name": "rosette_mid_4_l",
+      "kind": "patch",
+      "bone": "chest",
+      "color": "fur_jaguar",
+      "center": [0.163, 0.7, 0.14],
+      "radii": [0.014, 0.03, 0.026],
+      "segments": 5,
+      "rings": 3,
+      "mirror": true
+    },
+    {
+      "name": "rosette_5_l",
+      "kind": "patch",
+      "bone": "chest",
+      "color": "jaguar_rosette",
+      "center": [0.1658, 0.58, -0.48],
+      "radii": [0.014, 0.05, 0.045],
+      "segments": 6,
+      "rings": 4,
+      "mirror": true
+    },
+    {
+      "name": "rosette_mid_5_l",
+      "kind": "patch",
+      "bone": "chest",
+      "color": "fur_jaguar",
+      "center": [0.1708, 0.58, -0.48],
+      "radii": [0.014, 0.03, 0.026],
+      "segments": 5,
+      "rings": 3,
+      "mirror": true
+    },
+    {
+      "name": "rosette_6_l",
+      "kind": "patch",
+      "bone": "chest",
+      "color": "jaguar_rosette",
+      "center": [0.2039, 0.58, -0.31],
+      "radii": [0.014, 0.05, 0.045],
+      "segments": 6,
+      "rings": 4,
+      "mirror": true
+    },
+    {
+      "name": "rosette_mid_6_l",
+      "kind": "patch",
+      "bone": "chest",
+      "color": "fur_jaguar",
+      "center": [0.2089, 0.58, -0.31],
+      "radii": [0.014, 0.03, 0.026],
+      "segments": 5,
+      "rings": 3,
+      "mirror": true
+    },
+    {
+      "name": "rosette_7_l",
+      "kind": "patch",
+      "bone": "chest",
+      "color": "jaguar_rosette",
+      "center": [0.2151, 0.58, -0.13],
+      "radii": [0.014, 0.05, 0.045],
+      "segments": 6,
+      "rings": 4,
+      "mirror": true
+    },
+    {
+      "name": "rosette_mid_7_l",
+      "kind": "patch",
+      "bone": "chest",
+      "color": "fur_jaguar",
+      "center": [0.2201, 0.58, -0.13],
+      "radii": [0.014, 0.03, 0.026],
+      "segments": 5,
+      "rings": 3,
+      "mirror": true
+    },
+    {
+      "name": "rosette_8_l",
+      "kind": "patch",
+      "bone": "chest",
+      "color": "jaguar_rosette",
+      "center": [0.201, 0.58, 0.05],
+      "radii": [0.014, 0.05, 0.045],
+      "segments": 6,
+      "rings": 4,
+      "mirror": true
+    },
+    {
+      "name": "rosette_mid_8_l",
+      "kind": "patch",
+      "bone": "chest",
+      "color": "fur_jaguar",
+      "center": [0.206, 0.58, 0.05],
+      "radii": [0.014, 0.03, 0.026],
+      "segments": 5,
+      "rings": 3,
+      "mirror": true
+    },
+    {
+      "name": "rosette_9_l",
+      "kind": "patch",
+      "bone": "chest",
+      "color": "jaguar_rosette",
+      "center": [0.1589, 0.58, 0.22],
+      "radii": [0.014, 0.05, 0.045],
+      "segments": 6,
+      "rings": 4,
+      "mirror": true
+    },
+    {
+      "name": "rosette_mid_9_l",
+      "kind": "patch",
+      "bone": "chest",
+      "color": "fur_jaguar",
+      "center": [0.1639, 0.58, 0.22],
+      "radii": [0.014, 0.03, 0.026],
+      "segments": 5,
+      "rings": 3,
+      "mirror": true
+    },
+    {
+      "name": "rosette_10_l",
+      "kind": "patch",
+      "bone": "chest",
+      "color": "jaguar_rosette",
+      "center": [0.1347, 0.46, -0.4],
+      "radii": [0.014, 0.05, 0.045],
+      "segments": 6,
+      "rings": 4,
+      "mirror": true
+    },
+    {
+      "name": "rosette_mid_10_l",
+      "kind": "patch",
+      "bone": "chest",
+      "color": "fur_jaguar",
+      "center": [0.1397, 0.46, -0.4],
+      "radii": [0.014, 0.03, 0.026],
+      "segments": 5,
+      "rings": 3,
+      "mirror": true
+    },
+    {
+      "name": "rosette_11_l",
+      "kind": "patch",
+      "bone": "chest",
+      "color": "jaguar_rosette",
+      "center": [0.1675, 0.46, -0.22],
+      "radii": [0.014, 0.05, 0.045],
+      "segments": 6,
+      "rings": 4,
+      "mirror": true
+    },
+    {
+      "name": "rosette_mid_11_l",
+      "kind": "patch",
+      "bone": "chest",
+      "color": "fur_jaguar",
+      "center": [0.1725, 0.46, -0.22],
+      "radii": [0.014, 0.03, 0.026],
+      "segments": 5,
+      "rings": 3,
+      "mirror": true
+    },
+    {
+      "name": "rosette_12_l",
+      "kind": "patch",
+      "bone": "chest",
+      "color": "jaguar_rosette",
+      "center": [0.1657, 0.46, -0.04],
+      "radii": [0.014, 0.05, 0.045],
+      "segments": 6,
+      "rings": 4,
+      "mirror": true
+    },
+    {
+      "name": "rosette_mid_12_l",
+      "kind": "patch",
+      "bone": "chest",
+      "color": "fur_jaguar",
+      "center": [0.1707, 0.46, -0.04],
+      "radii": [0.014, 0.03, 0.026],
+      "segments": 5,
+      "rings": 3,
+      "mirror": true
+    },
+    {
+      "name": "rosette_13_l",
+      "kind": "patch",
+      "bone": "chest",
+      "color": "jaguar_rosette",
+      "center": [0.1281, 0.46, 0.14],
+      "radii": [0.014, 0.05, 0.045],
+      "segments": 6,
+      "rings": 4,
+      "mirror": true
+    },
+    {
+      "name": "rosette_mid_13_l",
+      "kind": "patch",
+      "bone": "chest",
+      "color": "fur_jaguar",
+      "center": [0.1331, 0.46, 0.14],
+      "radii": [0.014, 0.03, 0.026],
+      "segments": 5,
+      "rings": 3,
+      "mirror": true
+    }
+  ],
+  "animations": {
+    "idle": {
+      "durationS": 4.5,
+      "breathsPerLoop": 2,
+      "breathScale": 0.03,
+      "blinkAtS": 2.6,
+      "earTwitchAtS": 1.4,
+      "earTwitchDeg": 22,
+      "headNodDeg": 2
+    },
+    "walk": {
+      "durationS": 1.0,
+      "legSwingDeg": 26,
+      "bodyBobM": 0.014,
+      "headNodDeg": 3
+    },
+    "sleep": {
+      "durationS": 6,
+      "breathsPerLoop": 2,
+      "breathScale": 0.02,
+      "bodyDropM": 0.25,
+      "headDropDeg": 22,
+      "tailLiftDeg": 70
+    },
+    "eat": {
+      "durationS": 3,
+      "headDipDeg": 50,
+      "chewCount": 4,
+      "chewDeg": 5
+    },
+    "stretch": {
+      "durationS": 4,
+      "rumpLiftM": 0.16,
+      "foreLegReachDeg": 25,
+      "headDownDeg": 20
+    }
+  }
+}

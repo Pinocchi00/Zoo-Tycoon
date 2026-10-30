@@ -49,7 +49,9 @@ export function makeModelJson(options: FixtureOptions = {}): Record<string, unkn
     materials: (options.materials ?? ['palette']).map((name) => ({ name })),
     textures: Array.from({ length: images }, () => ({ source: 0 })),
     images: Array.from({ length: images }, () => ({ name: 'palette' })),
-    animations: (options.animations ?? ['idle', 'walk']).map((name) => ({ name })),
+    animations: (options.animations ?? ['idle', 'walk', 'sleep', 'eat', 'swim']).map((name) => ({
+      name,
+    })),
   };
 }
 
@@ -58,6 +60,7 @@ export const VALID_DESCRIPTION = {
   family: 'rodent',
   lengthM: 1.1,
   signatures: ['a', 'b', 'c'],
+  signature: 'swim',
   bones: [{ name: 'root', head: [0, 0, 0], tail: [0, 0, 1] }],
   parts: [
     {
@@ -82,5 +85,14 @@ export const VALID_DESCRIPTION = {
       headNodDeg: 2,
     },
     walk: { durationS: 1, legSwingDeg: 24, bodyBobM: 0.01, headNodDeg: 3 },
+    sleep: {
+      durationS: 6,
+      breathsPerLoop: 2,
+      breathScale: 0.02,
+      bodyDropM: 0.1,
+      headDropDeg: 20,
+    },
+    eat: { durationS: 3, headDipDeg: 40, chewCount: 4, chewDeg: 5 },
+    swim: { durationS: 2, paddleDeg: 30, rollDeg: 4, undulationDeg: 4, tailSwayDeg: 10 },
   },
 };

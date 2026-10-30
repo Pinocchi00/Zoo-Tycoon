@@ -9,7 +9,7 @@ import {
   type ModelIssue,
 } from './model-rules';
 
-const EXPECTED = { lengthM: 1.1 };
+const EXPECTED = { lengthM: 1.1, signature: 'swim' };
 
 function issuesFor(json: unknown): readonly ModelIssue[] {
   return checkModel(gltfSchema.parse(json), EXPECTED);
@@ -37,10 +37,43 @@ describe('checkModel', () => {
   });
 
   it('refuses a model without idle, and one without walk', () => {
-    expect(issuesFor(makeModelJson({ animations: ['walk'] }))).toEqual([
+    expect(issuesFor(makeModelJson({ animations: ['walk', 'sleep', 'eat', 'swim'] }))).toEqual([
       { kind: 'missingAnimation', name: 'idle' },
     ]);
-    expect(kinds({ animations: [] })).toEqual(['missingAnimation', 'missingAnimation']);
+    expect(issuesFor(makeModelJson({ animations: ['idle', 'sleep', 'eat', 'swim'] }))).toEqual([
+      { kind: 'missingAnimation', name: 'walk' },
+    ]);
+    expect(kinds({ animations: [] })).toEqual([
+      'missingAnimation',
+      'missingAnimation',
+      'missingAnimation',
+      'missingAnimation',
+      'missingSignatureAnimation',
+    ]);
+  });
+
+  it('refuses a model without sleep, and one without eat', () => {
+    expect(issuesFor(makeModelJson({ animations: ['idle', 'walk', 'eat', 'swim'] }))).toEqual([
+      { kind: 'missingAnimation', name: 'sleep' },
+    ]);
+    expect(issuesFor(makeModelJson({ animations: ['idle', 'walk', 'sleep', 'swim'] }))).toEqual([
+      { kind: 'missingAnimation', name: 'eat' },
+    ]);
+  });
+
+  it('refuses a model without its signature animation', () => {
+    expect(issuesFor(makeModelJson({ animations: ['idle', 'walk', 'sleep', 'eat'] }))).toEqual([
+      { kind: 'missingSignatureAnimation', name: 'swim' },
+    ]);
+    // Another species' signature does not count.
+    expect(
+      issuesFor(makeModelJson({ animations: ['idle', 'walk', 'sleep', 'eat', 'stretch'] })),
+    ).toEqual([{ kind: 'missingSignatureAnimation', name: 'swim' }]);
+  });
+
+  it('accepts a model that has the signature its description names', () => {
+    const json = makeModelJson({ animations: ['idle', 'walk', 'sleep', 'eat', 'trunk'] });
+    expect(checkModel(gltfSchema.parse(json), { lengthM: 1.1, signature: 'trunk' })).toEqual([]);
   });
 
   it('refuses unknown materials and extra textures', () => {
@@ -156,6 +189,7 @@ describe('checkModel', () => {
       { kind: 'unsupportedPrimitiveMode', mode: 1 },
       { kind: 'triangleBudget', count: 9000, min: MIN_TRIANGLES, max: MAX_TRIANGLES },
       { kind: 'missingAnimation', name: 'idle' },
+      { kind: 'missingSignatureAnimation', name: 'swim' },
       { kind: 'paletteImageCount', images: 2, textures: 2 },
       { kind: 'unknownMaterial', name: 'shiny' },
       { kind: 'primitiveWithoutMaterial' },
@@ -167,5 +201,6 @@ describe('checkModel', () => {
       expect(describeIssue(issue).length).toBeGreaterThan(10);
     }
     expect(describeIssue(issues[7] ?? { kind: 'noMesh' })).toContain('"idle"');
+    expect(describeIssue(issues[8] ?? { kind: 'noMesh' })).toContain('"swim"');
   });
 });

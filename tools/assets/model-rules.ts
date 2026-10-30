@@ -5,7 +5,7 @@ import type { Gltf, GltfNode, GltfPrimitive } from './glb';
 /** "Animal (près)" budget of the GDD. */
 export const MIN_TRIANGLES = 1500;
 export const MAX_TRIANGLES = 4000;
-export const REQUIRED_ANIMATIONS = ['idle', 'walk'] as const;
+export const REQUIRED_ANIMATIONS = ['idle', 'walk', 'sleep', 'eat'] as const;
 /** The shared palette material is the only one allowed. */
 export const ALLOWED_MATERIALS = ['palette'] as const;
 export const PALETTE_IMAGE_COUNT = 1;
@@ -33,6 +33,7 @@ export type ModelIssue =
       readonly max: number;
     }
   | { readonly kind: 'missingAnimation'; readonly name: string }
+  | { readonly kind: 'missingSignatureAnimation'; readonly name: string }
   | { readonly kind: 'paletteImageCount'; readonly images: number; readonly textures: number }
   | { readonly kind: 'unknownMaterial'; readonly name: string }
   | { readonly kind: 'primitiveWithoutMaterial' }
@@ -42,6 +43,8 @@ export type ModelIssue =
 
 export interface ModelExpectations {
   readonly lengthM: number;
+  /** The signature animation named by the species description. */
+  readonly signature: string;
 }
 
 type Vec3 = readonly [number, number, number];
@@ -214,12 +217,15 @@ function checkTriangles(inspection: Inspection): void {
   }
 }
 
-function checkAnimations(gltf: Gltf, issues: ModelIssue[]): void {
+function checkAnimations(gltf: Gltf, expectations: ModelExpectations, issues: ModelIssue[]): void {
   const names = new Set(gltf.animations.map((animation) => animation.name));
   for (const name of REQUIRED_ANIMATIONS) {
     if (!names.has(name)) {
       issues.push({ kind: 'missingAnimation', name });
     }
+  }
+  if (!names.has(expectations.signature)) {
+    issues.push({ kind: 'missingSignatureAnimation', name: expectations.signature });
   }
 }
 
@@ -322,7 +328,7 @@ export function checkModel(gltf: Gltf, expectations: ModelExpectations): readonl
     checkPalette(inspection, gltf);
     checkLength(inspection, gltf, expectations);
   }
-  checkAnimations(gltf, inspection.issues);
+  checkAnimations(gltf, expectations, inspection.issues);
   return inspection.issues;
 }
 
@@ -344,6 +350,8 @@ export function describeIssue(issue: ModelIssue): string {
       return `${String(issue.count)} triangles, outside the budget of ${String(issue.min)} to ${String(issue.max)}`;
     case 'missingAnimation':
       return `mandatory animation "${issue.name}" is missing`;
+    case 'missingSignatureAnimation':
+      return `signature animation "${issue.name}" of the species description is missing`;
     case 'paletteImageCount':
       return `expected exactly one palette texture, found ${String(issue.images)} image(s) and ${String(issue.textures)} texture(s)`;
     case 'unknownMaterial':
