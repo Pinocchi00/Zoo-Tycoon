@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { createRng, type RngState } from '@/sim';
 import {
+  MAX_PURPOSEFUL_TRAVEL_MS,
   MAX_TRAVEL_MS,
   NO_SOCIAL,
+  travelLimitMs,
   REGROUP_RETRY_MS,
   advanceBehaviour,
   animationOf,
@@ -547,6 +549,41 @@ function activityOf(behaviour: AnimalBehaviour): Activity {
   return behaviour.activity;
 }
 
+describe('how long a walk may take', () => {
+  it('gives the long, purposeful walks twice as long as the others', () => {
+    expect(travelLimitMs('walk')).toBe(MAX_TRAVEL_MS);
+    expect(travelLimitMs('enrichmentWalk')).toBe(MAX_TRAVEL_MS);
+    expect(travelLimitMs('sleeperWalk')).toBe(MAX_PURPOSEFUL_TRAVEL_MS);
+    expect(travelLimitMs('regroupWalk')).toBe(MAX_PURPOSEFUL_TRAVEL_MS);
+    expect(MAX_PURPOSEFUL_TRAVEL_MS).toBe(2 * MAX_TRAVEL_MS);
+  });
+
+  it('does not give up a walk to a sleeper after the time of an ordinary walk', () => {
+    const where = context();
+    for (let seed = 1; seed < 200; seed += 1) {
+      const rng = createRng(seed);
+      const behaviour = createBehaviour(rng, false);
+      let arrived = false;
+      for (let step = 0; step < HOUR_MS / STEP_MS; step += 1) {
+        advanceBehaviour(behaviour, STEP_MS, arrived, rng, where, social({ sleeperNear: true }));
+        if (activityOf(behaviour) === 'sleeperWalk' && behaviour.needsDestination) {
+          behaviour.needsDestination = false;
+          // Past the limit of an ordinary walk, still on its way.
+          advanceBehaviour(behaviour, MAX_TRAVEL_MS + 1000, false, rng, where, NO_SOCIAL);
+          expect(activityOf(behaviour)).toBe('sleeperWalk');
+          // Arriving then, it lies down.
+          advanceBehaviour(behaviour, STEP_MS, true, rng, where, NO_SOCIAL);
+          expect(activityOf(behaviour)).toBe('sleep');
+          return;
+        }
+        behaviour.needsDestination = false;
+        arrived = isTravelling(behaviour.activity) && behaviour.travelledMs >= TRAVEL_MS;
+      }
+    }
+    throw new Error('no animal walked to a sleeper');
+  });
+});
+
 describe('regrouping that finds no way', () => {
   it('waits before it is tried again, then is tried again', () => {
     const scattered = social({ scattered: true });
@@ -669,7 +706,7 @@ describe('sleeping in a pile', () => {
         advanceBehaviour(behaviour, STEP_MS, arrived, rng, where, social({ sleeperNear: true }));
         if (behaviour.activity === 'sleeperWalk' && behaviour.needsDestination) {
           behaviour.needsDestination = false;
-          advanceBehaviour(behaviour, MAX_TRAVEL_MS, false, rng, where, NO_SOCIAL);
+          advanceBehaviour(behaviour, MAX_PURPOSEFUL_TRAVEL_MS, false, rng, where, NO_SOCIAL);
           expect(behaviour.activity).toBe('rest');
           return;
         }

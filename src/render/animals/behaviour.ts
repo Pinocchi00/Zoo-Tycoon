@@ -95,6 +95,18 @@ export interface AnimalBehaviour {
 export const ENRICHMENT_MIN_STARS = 2;
 /** A walk that has not arrived after this long is given up. */
 export const MAX_TRAVEL_MS = 30_000;
+/**
+ * Going to a sleeping neighbour or back to the group can mean a long way at a stroll (a dozen
+ * metres at 0.25 m/s): those walks get twice as long.
+ */
+export const MAX_PURPOSEFUL_TRAVEL_MS = 60_000;
+
+/** How long a walk of this kind may take before it is given up. */
+export function travelLimitMs(activity: Activity): number {
+  return activity === 'sleeperWalk' || activity === 'regroupWalk'
+    ? MAX_PURPOSEFUL_TRAVEL_MS
+    : MAX_TRAVEL_MS;
+}
 
 const WALK_WEIGHT = 30;
 const REST_WEIGHT = 25;
@@ -552,7 +564,7 @@ export function advanceBehaviour(
       return;
     }
     behaviour.travelledMs += elapsedMs;
-    if (arrived || behaviour.travelledMs >= MAX_TRAVEL_MS) {
+    if (arrived || behaviour.travelledMs >= travelLimitMs(behaviour.activity)) {
       finishTravel(behaviour, arrived, rng, context, social);
     } else if (behaviour.activity === 'walk' && !behaviour.shortTrip) {
       interruptWalk(behaviour, elapsedMs, rng);
