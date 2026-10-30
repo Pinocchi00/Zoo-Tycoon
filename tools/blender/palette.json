@@ -41,6 +41,86 @@
     {
       "name": "eye_shine",
       "hex": "#f3eee4"
+    },
+    {
+      "name": "fur_peccary",
+      "hex": "#4a423b"
+    },
+    {
+      "name": "fur_peccary_speckle",
+      "hex": "#5e5549"
+    },
+    {
+      "name": "fur_peccary_dark",
+      "hex": "#2d2825"
+    },
+    {
+      "name": "peccary_collar",
+      "hex": "#e2d6bb"
+    },
+    {
+      "name": "peccary_snout",
+      "hex": "#6a5648"
+    },
+    {
+      "name": "fur_tapir",
+      "hex": "#5b4535"
+    },
+    {
+      "name": "fur_tapir_speckle",
+      "hex": "#503c2e"
+    },
+    {
+      "name": "fur_tapir_dark",
+      "hex": "#3f2f25"
+    },
+    {
+      "name": "tapir_ear_tip",
+      "hex": "#d3c5b0"
+    },
+    {
+      "name": "tapir_belly",
+      "hex": "#6f5846"
+    },
+    {
+      "name": "fur_otter",
+      "hex": "#6a4630"
+    },
+    {
+      "name": "fur_otter_speckle",
+      "hex": "#5d3e2a"
+    },
+    {
+      "name": "fur_otter_dark",
+      "hex": "#4a3022"
+    },
+    {
+      "name": "fur_otter_light",
+      "hex": "#8a6347"
+    },
+    {
+      "name": "otter_throat",
+      "hex": "#f1e8d3"
+    },
+    {
+      "name": "fur_jaguar",
+      "hex": "#cf9640"
+    },
+    {
+      "name": "fur_jaguar_speckle",
+      "hex": "#c08838"
+    },
+    {
+      "name": "fur_jaguar_dark",
+      "hex": "#a8742a"
+    },
+    {
+      "name": "fur_jaguar_light",
+      "hex": "#ecd29a"
+    },
+    {
+      "name": "jaguar_rosette",
+      "hex": "#3b2a1a"
     }
   ]
 }

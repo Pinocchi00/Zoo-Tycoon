@@ -1,0 +1,294 @@
+{
+  "id": "giant_otter",
+  "family": "otter",
+  "lengthM": 1.2,
+  "signatures": ["white throat patch", "very long low body", "thick flat tail"],
+  "signature": "swim",
+  "bones": [
+    {
+      "name": "root",
+      "head": [0, 0, -0.1],
+      "tail": [0, 0, 0.1]
+    },
+    {
+      "name": "spine",
+      "parent": "root",
+      "head": [0, 0.27, -0.5],
+      "tail": [0, 0.27, 0.3]
+    },
+    {
+      "name": "chest",
+      "parent": "spine",
+      "head": [0, 0.27, -0.15],
+      "tail": [0, 0.27, 0.1]
+    },
+    {
+      "name": "head",
+      "parent": "spine",
+      "head": [0, 0.31, 0.3],
+      "tail": [0, 0.31, 0.6]
+    },
+    {
+      "name": "eyes",
+      "parent": "head",
+      "head": [0, 0.33, 0.46],
+      "tail": [0, 0.41, 0.46]
+    },
+    {
+      "name": "ear_l",
+      "parent": "head",
+      "head": [0.075, 0.37, 0.33],
+      "tail": [0.075, 0.42, 0.33]
+    },
+    {
+      "name": "ear_r",
+      "parent": "head",
+      "head": [-0.075, 0.37, 0.33],
+      "tail": [-0.075, 0.42, 0.33]
+    },
+    {
+      "name": "leg_fl",
+      "parent": "spine",
+      "head": [0.1, 0.2, 0.2],
+      "tail": [0.1, 0, 0.2]
+    },
+    {
+      "name": "leg_fr",
+      "parent": "spine",
+      "head": [-0.1, 0.2, 0.2],
+      "tail": [-0.1, 0, 0.2]
+    },
+    {
+      "name": "leg_bl",
+      "parent": "spine",
+      "head": [0.11, 0.2, -0.3],
+      "tail": [0.11, 0, -0.3]
+    },
+    {
+      "name": "leg_br",
+      "parent": "spine",
+      "head": [-0.11, 0.2, -0.3],
+      "tail": [-0.11, 0, -0.3]
+    },
+    {
+      "name": "tail",
+      "parent": "spine",
+      "head": [0, 0.26, -0.46],
+      "tail": [0, 0.26, -0.62]
+    }
+  ],
+  "parts": [
+    {
+      "name": "body",
+      "kind": "body",
+      "bone": "chest",
+      "color": "fur_otter",
+      "center": [0, 0.27, -0.1],
+      "radii": [0.14, 0.14, 0.42],
+      "exponent": 0.85,
+      "segments": 20,
+      "rings": 12,
+      "speckle": {
+        "color": "fur_otter_speckle",
+        "share": 0.25,
+        "seed": 2
+      }
+    },
+    {
+      "name": "belly",
+      "kind": "body",
+      "bone": "chest",
+      "color": "fur_otter_light",
+      "center": [0, 0.2, -0.1],
+      "radii": [0.1, 0.05, 0.34],
+      "exponent": 0.8,
+      "segments": 12,
+      "rings": 6
+    },
+    {
+      "name": "head",
+      "kind": "head",
+      "bone": "head",
+      "color": "fur_otter",
+      "center": [0, 0.31, 0.4],
+      "radii": [0.115, 0.1, 0.15],
+      "exponent": 0.6,
+      "segments": 16,
+      "rings": 10,
+      "speckle": {
+        "color": "fur_otter_speckle",
+        "share": 0.25,
+        "seed": 12
+      }
+    },
+    {
+      "name": "muzzle",
+      "kind": "muzzle",
+      "bone": "head",
+      "color": "fur_otter_light",
+      "center": [0, 0.285, 0.52],
+      "radii": [0.09, 0.065, 0.07],
+      "exponent": 0.5,
+      "segments": 12,
+      "rings": 7
+    },
+    {
+      "name": "nose_tip",
+      "kind": "nose",
+      "bone": "head",
+      "color": "nose_dark",
+      "center": [0, 0.31, 0.585],
+      "radii": [0.04, 0.026, 0.02],
+      "segments": 8,
+      "rings": 5
+    },
+    {
+      "name": "throat",
+      "kind": "patch",
+      "bone": "head",
+      "color": "otter_throat",
+      "center": [0, 0.245, 0.42],
+      "radii": [0.085, 0.06, 0.13],
+      "segments": 12,
+      "rings": 6
+    },
+    {
+      "name": "eye_l",
+      "kind": "eye",
+      "bone": "eyes",
+      "color": "eye_black",
+      "center": [0.1, 0.34, 0.46],
+      "radii": [0.015, 0.017249999999999998, 0.017249999999999998],
+      "segments": 8,
+      "rings": 6,
+      "mirror": true
+    },
+    {
+      "name": "shine_l",
+      "kind": "eye",
+      "bone": "eyes",
+      "color": "eye_shine",
+      "center": [0.112, 0.3475, 0.4675],
+      "radii": [0.0045, 0.0052499999999999995, 0.0052499999999999995],
+      "segments": 6,
+      "rings": 4,
+      "mirror": true
+    },
+    {
+      "name": "ear_l",
+      "kind": "ear",
+      "bone": "ear_l",
+      "color": "fur_otter_dark",
+      "center": [0.075, 0.38, 0.33],
+      "radii": [0.026, 0.024, 0.016],
+      "segments": 8,
+      "rings": 5,
+      "mirror": true
+    },
+    {
+      "name": "leg_fl",
+      "kind": "leg",
+      "bone": "leg_fl",
+      "color": "fur_otter",
+      "start": [0.1, 0.2, 0.2],
+      "end": [0.11, 0.04, 0.22],
+      "startRadius": 0.06,
+      "endRadius": 0.05,
+      "segments": 8,
+      "mirror": true
+    },
+    {
+      "name": "leg_bl",
+      "kind": "leg",
+      "bone": "leg_bl",
+      "color": "fur_otter",
+      "start": [0.11, 0.2, -0.3],
+      "end": [0.12, 0.04, -0.28],
+      "startRadius": 0.07,
+      "endRadius": 0.055,
+      "segments": 8,
+      "mirror": true
+    },
+    {
+      "name": "foot_fl",
+      "kind": "foot",
+      "bone": "leg_fl",
+      "color": "fur_otter_dark",
+      "center": [0.11, 0.022, 0.24],
+      "radii": [0.06, 0.022, 0.09],
+      "segments": 8,
+      "rings": 5,
+      "mirror": true
+    },
+    {
+      "name": "foot_bl",
+      "kind": "foot",
+      "bone": "leg_bl",
+      "color": "fur_otter_dark",
+      "center": [0.12, 0.022, -0.25],
+      "radii": [0.065, 0.022, 0.095],
+      "segments": 8,
+      "rings": 5,
+      "mirror": true
+    },
+    {
+      "name": "tail",
+      "kind": "tail",
+      "bone": "tail",
+      "color": "fur_otter",
+      "start": [0, 0.25, -0.42],
+      "end": [0, 0.17, -0.66],
+      "startRadius": 0.085,
+      "endRadius": 0.03,
+      "segments": 10
+    },
+    {
+      "name": "tail_fin",
+      "kind": "patch",
+      "bone": "tail",
+      "color": "fur_otter_dark",
+      "center": [0, 0.21, -0.54],
+      "radii": [0.085, 0.03, 0.13],
+      "pitchDeg": 18,
+      "segments": 10,
+      "rings": 5
+    }
+  ],
+  "animations": {
+    "idle": {
+      "durationS": 3.5,
+      "breathsPerLoop": 2,
+      "breathScale": 0.035,
+      "blinkAtS": 2.0,
+      "earTwitchAtS": 1.0,
+      "earTwitchDeg": 25,
+      "headNodDeg": 3
+    },
+    "walk": {
+      "durationS": 0.7,
+      "legSwingDeg": 32,
+      "bodyBobM": 0.01,
+      "headNodDeg": 3
+    },
+    "sleep": {
+      "durationS": 5,
+      "breathsPerLoop": 2,
+      "breathScale": 0.03,
+      "bodyDropM": 0.1,
+      "headDropDeg": 15
+    },
+    "eat": {
+      "durationS": 2.5,
+      "headDipDeg": 40,
+      "chewCount": 5,
+      "chewDeg": 6
+    },
+    "swim": {
+      "durationS": 1.8,
+      "paddleDeg": 40,
+      "rollDeg": 6,
+      "undulationDeg": 7,
+      "tailSwayDeg": 18
+    }
+  }
+}

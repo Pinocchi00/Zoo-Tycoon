@@ -48,31 +48,105 @@ const limbPartSchema = z.strictObject({
   segments,
 });
 
-export const speciesDescriptionSchema = z.strictObject({
-  id: name,
-  family: name,
-  /** Real nose-to-rump length, in metres: the model must match it. */
-  lengthM: positive,
-  signatures: z.array(z.string().min(1)).length(3),
-  bones: z.array(boneSchema).min(1),
-  parts: z.array(z.discriminatedUnion('kind', [blobPartSchema, limbPartSchema])).min(1),
-  animations: z.strictObject({
-    idle: z.strictObject({
-      durationS: positive,
-      breathsPerLoop: z.number().int().positive(),
-      breathScale: z.number().min(0).max(0.2),
-      blinkAtS: z.number().nonnegative(),
-      earTwitchAtS: z.number().nonnegative(),
-      earTwitchDeg: z.number(),
-      headNodDeg: z.number(),
-    }),
-    walk: z.strictObject({
-      durationS: positive,
-      legSwingDeg: z.number(),
-      bodyBobM: z.number().nonnegative(),
-      headNodDeg: z.number(),
-    }),
+const nonNegative = z.number().nonnegative();
+
+/** Names of the signature animations: each species declares exactly one. */
+export const SIGNATURE_ANIMATIONS = ['swim', 'stretch', 'trunk', 'root'] as const;
+const signatureSchema = z.enum(SIGNATURE_ANIMATIONS);
+
+const animationsSchema = z.strictObject({
+  idle: z.strictObject({
+    durationS: positive,
+    breathsPerLoop: z.number().int().positive(),
+    breathScale: z.number().min(0).max(0.2),
+    blinkAtS: nonNegative,
+    earTwitchAtS: nonNegative,
+    earTwitchDeg: z.number(),
+    headNodDeg: z.number(),
   }),
+  walk: z.strictObject({
+    durationS: positive,
+    legSwingDeg: z.number(),
+    bodyBobM: nonNegative,
+    headNodDeg: z.number(),
+  }),
+  sleep: z.strictObject({
+    durationS: positive,
+    breathsPerLoop: z.number().int().positive(),
+    breathScale: z.number().min(0).max(0.2),
+    /** How far the body sinks towards the ground, in metres. */
+    bodyDropM: nonNegative,
+    /** How far the head rests below its standing pose. */
+    headDropDeg: nonNegative,
+    /** Raises the tail (when there is one) so that it does not sink into the ground. */
+    tailLiftDeg: nonNegative.optional(),
+  }),
+  eat: z.strictObject({
+    durationS: positive,
+    /** How far the head lowers towards the ground. */
+    headDipDeg: nonNegative,
+    chewCount: z.number().int().positive(),
+    chewDeg: nonNegative,
+  }),
+  swim: z
+    .strictObject({
+      durationS: positive,
+      paddleDeg: nonNegative,
+      rollDeg: nonNegative,
+      undulationDeg: nonNegative,
+      /** Used only when the skeleton has a tail bone. */
+      tailSwayDeg: nonNegative,
+    })
+    .optional(),
+  stretch: z
+    .strictObject({
+      durationS: positive,
+      /** How high the rump rises, in metres. */
+      rumpLiftM: positive,
+      foreLegReachDeg: nonNegative,
+      headDownDeg: nonNegative,
+    })
+    .optional(),
+  trunk: z
+    .strictObject({
+      durationS: positive,
+      swingDeg: nonNegative,
+      curlDeg: nonNegative,
+      headNodDeg: nonNegative,
+    })
+    .optional(),
+  root: z
+    .strictObject({
+      durationS: positive,
+      headDownDeg: nonNegative,
+      sweepDeg: nonNegative,
+      pokeDeg: nonNegative,
+      pokeCount: z.number().int().positive(),
+    })
+    .optional(),
 });
+
+export const speciesDescriptionSchema = z
+  .strictObject({
+    id: name,
+    family: name,
+    /** Real nose-to-rump length, in metres: the model must match it. */
+    lengthM: positive,
+    signatures: z.array(z.string().min(1)).length(3),
+    /** The one animation that makes this species recognisable; its settings sit in `animations`. */
+    signature: signatureSchema,
+    bones: z.array(boneSchema).min(1),
+    parts: z.array(z.discriminatedUnion('kind', [blobPartSchema, limbPartSchema])).min(1),
+    animations: animationsSchema,
+  })
+  .superRefine((description, context) => {
+    if (description.animations[description.signature] === undefined) {
+      context.addIssue({
+        code: 'custom',
+        path: ['animations', description.signature],
+        message: `the signature animation "${description.signature}" needs its settings in animations`,
+      });
+    }
+  });
 
 export type SpeciesDescription = z.infer<typeof speciesDescriptionSchema>;

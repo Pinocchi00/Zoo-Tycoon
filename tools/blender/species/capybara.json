@@ -3,6 +3,7 @@
   "family": "rodent",
   "lengthM": 1.1,
   "signatures": ["square muzzle", "barrel body", "calm in the water"],
+  "signature": "swim",
   "bones": [
     {
       "name": "root",
@@ -266,6 +267,26 @@
       "legSwingDeg": 24,
       "bodyBobM": 0.012,
       "headNodDeg": 3
+    },
+    "sleep": {
+      "durationS": 6,
+      "breathsPerLoop": 2,
+      "breathScale": 0.02,
+      "bodyDropM": 0.12,
+      "headDropDeg": 18
+    },
+    "eat": {
+      "durationS": 3,
+      "headDipDeg": 50,
+      "chewCount": 4,
+      "chewDeg": 5
+    },
+    "swim": {
+      "durationS": 2.4,
+      "paddleDeg": 35,
+      "rollDeg": 4,
+      "undulationDeg": 3,
+      "tailSwayDeg": 0
     }
   }
 }

@@ -40,17 +40,24 @@ Puis vérifie que les modèles respectent les règles :
 npm run assets:check
 ```
 
-`ok capybara` : le modèle est accepté. `REFUSED` : la raison est écrite juste en dessous (trop de triangles, animation `idle` manquante, mauvaise taille…).
+`ok capybara` : le modèle est accepté. `REFUSED` : la raison est écrite juste en dessous (trop de triangles, animation (`idle`, `walk`, `sleep`, `eat` ou la signature) manquante, mauvaise taille…).
+
+Pour contrôler à l'œil que chaque espèce se reconnaît en ombre noire, génère la planche de silhouettes (les modèles de `assets/models/` vus de profil, 48 pixels chacun, côte à côte) dans `docs/silhouettes.png` :
+
+```powershell
+npm run models:silhouettes
+```
 
 ## 4. Où sont les choses
 
 | Fichier | Rôle |
 | --- | --- |
-| `tools/blender/species/capybara.json` | La description du capybara : taille réelle, os, pièces (position, taille, couleur), réglages des animations. C'est ici qu'on ajuste un animal. |
+| `tools/blender/species/<espèce>.json` | La description d'un animal : taille réelle, animation signature, os, pièces (position, taille, couleur), réglages des animations. C'est ici qu'on ajuste un animal. |
 | `tools/blender/palette.json` | Les couleurs partagées par tous les animaux (une seule petite texture). |
 | `tools/blender/parts.py` | La bibliothèque de pièces : corps, tête, museau, oreilles, yeux, pattes, pieds, queue, taches. |
 | `tools/blender/rig.py` | Le squelette : chaque pièce suit un seul os. |
-| `tools/blender/animations.py` | Les animations obligatoires : `idle` (respiration, clignement, oreille) et `walk`. |
+| `tools/blender/animations.py` | Les animations : `idle`, `walk`, `sleep` et `eat` pour tous, plus la signature de l'espèce (`swim`, `stretch`, `trunk` ou `root`). |
+| `tools/blender/silhouettes.py` | La planche de silhouettes (`npm run models:silhouettes`). |
 | `tools/blender/build.py` | Assemble le tout et exporte le `.glb`. |
 | `tools/assets/` | La vérification automatique des modèles. |
 

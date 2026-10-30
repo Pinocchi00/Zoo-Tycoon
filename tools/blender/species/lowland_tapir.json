@@ -1,0 +1,328 @@
+{
+  "id": "lowland_tapir",
+  "family": "tapir",
+  "lengthM": 2.0,
+  "signatures": ["small mobile trunk", "plain dark brown coat", "round heavy rump"],
+  "signature": "trunk",
+  "bones": [
+    {
+      "name": "root",
+      "head": [0, 0, -0.1],
+      "tail": [0, 0, 0.1]
+    },
+    {
+      "name": "spine",
+      "parent": "root",
+      "head": [0, 0.78, -0.7],
+      "tail": [0, 0.78, 0.3]
+    },
+    {
+      "name": "chest",
+      "parent": "spine",
+      "head": [0, 0.74, -0.2],
+      "tail": [0, 0.74, 0.2]
+    },
+    {
+      "name": "head",
+      "parent": "spine",
+      "head": [0, 0.78, 0.3],
+      "tail": [0, 0.78, 0.8]
+    },
+    {
+      "name": "eyes",
+      "parent": "head",
+      "head": [0, 0.71, 0.52],
+      "tail": [0, 0.79, 0.52]
+    },
+    {
+      "name": "ear_l",
+      "parent": "head",
+      "head": [0.11, 0.8, 0.42],
+      "tail": [0.11, 0.93, 0.42]
+    },
+    {
+      "name": "ear_r",
+      "parent": "head",
+      "head": [-0.11, 0.8, 0.42],
+      "tail": [-0.11, 0.93, 0.42]
+    },
+    {
+      "name": "leg_fl",
+      "parent": "spine",
+      "head": [0.19, 0.66, 0.25],
+      "tail": [0.19, 0, 0.25]
+    },
+    {
+      "name": "leg_fr",
+      "parent": "spine",
+      "head": [-0.19, 0.66, 0.25],
+      "tail": [-0.19, 0, 0.25]
+    },
+    {
+      "name": "leg_bl",
+      "parent": "spine",
+      "head": [0.21, 0.66, -0.58],
+      "tail": [0.21, 0, -0.58]
+    },
+    {
+      "name": "leg_br",
+      "parent": "spine",
+      "head": [-0.21, 0.66, -0.58],
+      "tail": [-0.21, 0, -0.58]
+    },
+    {
+      "name": "trunk",
+      "parent": "head",
+      "head": [0, 0.56, 0.9],
+      "tail": [0, 0.56, 1.1]
+    },
+    {
+      "name": "tail",
+      "parent": "spine",
+      "head": [0, 0.92, -0.82],
+      "tail": [0, 0.92, -0.95]
+    }
+  ],
+  "parts": [
+    {
+      "name": "body",
+      "kind": "body",
+      "bone": "chest",
+      "color": "fur_tapir",
+      "center": [0, 0.76, -0.2],
+      "radii": [0.32, 0.32, 0.62],
+      "exponent": 0.8,
+      "pitchDeg": -6,
+      "segments": 20,
+      "rings": 12,
+      "speckle": {
+        "color": "fur_tapir_speckle",
+        "share": 0.22,
+        "seed": 3
+      }
+    },
+    {
+      "name": "rump",
+      "kind": "body",
+      "bone": "chest",
+      "color": "fur_tapir",
+      "center": [0, 0.84, -0.56],
+      "radii": [0.33, 0.38, 0.3],
+      "exponent": 0.85,
+      "segments": 16,
+      "rings": 10,
+      "speckle": {
+        "color": "fur_tapir_speckle",
+        "share": 0.22,
+        "seed": 4
+      }
+    },
+    {
+      "name": "belly",
+      "kind": "body",
+      "bone": "chest",
+      "color": "tapir_belly",
+      "center": [0, 0.5, -0.15],
+      "radii": [0.22, 0.1, 0.45],
+      "exponent": 0.8,
+      "segments": 12,
+      "rings": 7
+    },
+    {
+      "name": "neck",
+      "kind": "body",
+      "bone": "chest",
+      "color": "fur_tapir",
+      "center": [0, 0.72, 0.38],
+      "radii": [0.21, 0.23, 0.2],
+      "exponent": 0.85,
+      "segments": 14,
+      "rings": 8,
+      "speckle": {
+        "color": "fur_tapir_speckle",
+        "share": 0.22,
+        "seed": 6
+      }
+    },
+    {
+      "name": "head",
+      "kind": "head",
+      "bone": "head",
+      "color": "fur_tapir",
+      "center": [0, 0.66, 0.62],
+      "radii": [0.13, 0.17, 0.32],
+      "exponent": 0.7,
+      "pitchDeg": -28,
+      "segments": 16,
+      "rings": 10,
+      "speckle": {
+        "color": "fur_tapir_speckle",
+        "share": 0.22,
+        "seed": 8
+      }
+    },
+    {
+      "name": "trunk_a",
+      "kind": "nose",
+      "bone": "trunk",
+      "color": "fur_tapir_dark",
+      "center": [0, 0.54, 0.98],
+      "radii": [0.06, 0.055, 0.11],
+      "exponent": 0.8,
+      "pitchDeg": -40,
+      "segments": 12,
+      "rings": 7
+    },
+    {
+      "name": "trunk_b",
+      "kind": "nose",
+      "bone": "trunk",
+      "color": "fur_tapir_dark",
+      "center": [0, 0.44, 1.06],
+      "radii": [0.045, 0.045, 0.08],
+      "exponent": 0.8,
+      "pitchDeg": -60,
+      "segments": 10,
+      "rings": 6
+    },
+    {
+      "name": "eye_l",
+      "kind": "eye",
+      "bone": "eyes",
+      "color": "eye_black",
+      "center": [0.12, 0.72, 0.52],
+      "radii": [0.02, 0.023, 0.023],
+      "segments": 8,
+      "rings": 6,
+      "mirror": true
+    },
+    {
+      "name": "shine_l",
+      "kind": "eye",
+      "bone": "eyes",
+      "color": "eye_shine",
+      "center": [0.136, 0.73, 0.53],
+      "radii": [0.006, 0.006999999999999999, 0.006999999999999999],
+      "segments": 6,
+      "rings": 4,
+      "mirror": true
+    },
+    {
+      "name": "ear_l",
+      "kind": "ear",
+      "bone": "ear_l",
+      "color": "fur_tapir_dark",
+      "center": [0.115, 0.88, 0.42],
+      "radii": [0.048, 0.065, 0.026],
+      "rollDeg": -10,
+      "segments": 10,
+      "rings": 6,
+      "mirror": true
+    },
+    {
+      "name": "ear_tip_l",
+      "kind": "patch",
+      "bone": "ear_l",
+      "color": "tapir_ear_tip",
+      "center": [0.117, 0.935, 0.42],
+      "radii": [0.038, 0.03, 0.026],
+      "rollDeg": -10,
+      "segments": 8,
+      "rings": 5,
+      "mirror": true
+    },
+    {
+      "name": "leg_fl",
+      "kind": "leg",
+      "bone": "leg_fl",
+      "color": "fur_tapir",
+      "start": [0.19, 0.66, 0.25],
+      "end": [0.2, 0.06, 0.27],
+      "startRadius": 0.098,
+      "endRadius": 0.065,
+      "segments": 10,
+      "mirror": true
+    },
+    {
+      "name": "leg_bl",
+      "kind": "leg",
+      "bone": "leg_bl",
+      "color": "fur_tapir",
+      "start": [0.21, 0.66, -0.58],
+      "end": [0.22, 0.06, -0.56],
+      "startRadius": 0.112,
+      "endRadius": 0.07,
+      "segments": 10,
+      "mirror": true
+    },
+    {
+      "name": "foot_fl",
+      "kind": "foot",
+      "bone": "leg_fl",
+      "color": "fur_tapir_dark",
+      "center": [0.2, 0.04, 0.29],
+      "radii": [0.075, 0.04, 0.09],
+      "segments": 10,
+      "rings": 6,
+      "mirror": true
+    },
+    {
+      "name": "foot_bl",
+      "kind": "foot",
+      "bone": "leg_bl",
+      "color": "fur_tapir_dark",
+      "center": [0.22, 0.04, -0.54],
+      "radii": [0.08, 0.04, 0.095],
+      "segments": 10,
+      "rings": 6,
+      "mirror": true
+    },
+    {
+      "name": "tail",
+      "kind": "tail",
+      "bone": "tail",
+      "color": "fur_tapir_dark",
+      "start": [0, 0.92, -0.83],
+      "end": [0, 0.86, -0.9],
+      "startRadius": 0.04,
+      "endRadius": 0.025,
+      "segments": 8
+    }
+  ],
+  "animations": {
+    "idle": {
+      "durationS": 5,
+      "breathsPerLoop": 2,
+      "breathScale": 0.025,
+      "blinkAtS": 3.0,
+      "earTwitchAtS": 1.5,
+      "earTwitchDeg": 18,
+      "headNodDeg": 2
+    },
+    "walk": {
+      "durationS": 1.4,
+      "legSwingDeg": 20,
+      "bodyBobM": 0.015,
+      "headNodDeg": 4
+    },
+    "sleep": {
+      "durationS": 7,
+      "breathsPerLoop": 2,
+      "breathScale": 0.015,
+      "bodyDropM": 0.22,
+      "headDropDeg": 8
+    },
+    "eat": {
+      "durationS": 3.5,
+      "headDipDeg": 34,
+      "chewCount": 4,
+      "chewDeg": 4
+    },
+    "trunk": {
+      "durationS": 3.6,
+      "swingDeg": 20,
+      "curlDeg": 30,
+      "headNodDeg": 4
+    }
+  }
+}

@@ -1,0 +1,348 @@
+{
+  "id": "collared_peccary",
+  "family": "peccary",
+  "lengthM": 1.0,
+  "signatures": ["pale collar", "long pointed snout", "bristly crest along the back"],
+  "signature": "root",
+  "bones": [
+    {
+      "name": "root",
+      "head": [0, 0, -0.1],
+      "tail": [0, 0, 0.1]
+    },
+    {
+      "name": "spine",
+      "parent": "root",
+      "head": [0, 0.4, -0.38],
+      "tail": [0, 0.4, 0.2]
+    },
+    {
+      "name": "chest",
+      "parent": "spine",
+      "head": [0, 0.4, -0.1],
+      "tail": [0, 0.4, 0.1]
+    },
+    {
+      "name": "head",
+      "parent": "spine",
+      "head": [0, 0.44, 0.2],
+      "tail": [0, 0.44, 0.56]
+    },
+    {
+      "name": "eyes",
+      "parent": "head",
+      "head": [0, 0.45, 0.33],
+      "tail": [0, 0.53, 0.33]
+    },
+    {
+      "name": "ear_l",
+      "parent": "head",
+      "head": [0.07, 0.5, 0.22],
+      "tail": [0.07, 0.58, 0.22]
+    },
+    {
+      "name": "ear_r",
+      "parent": "head",
+      "head": [-0.07, 0.5, 0.22],
+      "tail": [-0.07, 0.58, 0.22]
+    },
+    {
+      "name": "leg_fl",
+      "parent": "spine",
+      "head": [0.095, 0.36, 0.12],
+      "tail": [0.095, 0, 0.12]
+    },
+    {
+      "name": "leg_fr",
+      "parent": "spine",
+      "head": [-0.095, 0.36, 0.12],
+      "tail": [-0.095, 0, 0.12]
+    },
+    {
+      "name": "leg_bl",
+      "parent": "spine",
+      "head": [0.095, 0.36, -0.3],
+      "tail": [0.095, 0, -0.3]
+    },
+    {
+      "name": "leg_br",
+      "parent": "spine",
+      "head": [-0.095, 0.36, -0.3],
+      "tail": [-0.095, 0, -0.3]
+    },
+    {
+      "name": "tail",
+      "parent": "spine",
+      "head": [0, 0.46, -0.36],
+      "tail": [0, 0.46, -0.44]
+    }
+  ],
+  "parts": [
+    {
+      "name": "body",
+      "kind": "body",
+      "bone": "chest",
+      "color": "fur_peccary",
+      "center": [0.0, 0.4, -0.1],
+      "radii": [0.19, 0.19, 0.3],
+      "exponent": 0.85,
+      "pitchDeg": 8,
+      "segments": 20,
+      "rings": 12,
+      "speckle": {
+        "color": "fur_peccary_speckle",
+        "share": 0.3,
+        "seed": 5
+      }
+    },
+    {
+      "name": "collar",
+      "kind": "patch",
+      "bone": "chest",
+      "color": "peccary_collar",
+      "center": [0, 0.43, 0.12],
+      "radii": [0.172, 0.172, 0.04],
+      "pitchDeg": 8,
+      "segments": 16,
+      "rings": 6
+    },
+    {
+      "name": "head",
+      "kind": "head",
+      "bone": "head",
+      "color": "fur_peccary",
+      "center": [0, 0.43, 0.3],
+      "radii": [0.115, 0.125, 0.17],
+      "exponent": 0.7,
+      "pitchDeg": -22,
+      "segments": 16,
+      "rings": 10,
+      "speckle": {
+        "color": "fur_peccary_speckle",
+        "share": 0.3,
+        "seed": 9
+      }
+    },
+    {
+      "name": "snout",
+      "kind": "muzzle",
+      "bone": "head",
+      "color": "peccary_snout",
+      "center": [0, 0.365, 0.5],
+      "radii": [0.065, 0.06, 0.13],
+      "exponent": 0.6,
+      "pitchDeg": -25,
+      "segments": 12,
+      "rings": 8
+    },
+    {
+      "name": "nose_tip",
+      "kind": "nose",
+      "bone": "head",
+      "color": "nose_dark",
+      "center": [0, 0.335, 0.62],
+      "radii": [0.055, 0.05, 0.022],
+      "pitchDeg": -25,
+      "segments": 10,
+      "rings": 6
+    },
+    {
+      "name": "crest_0",
+      "kind": "patch",
+      "bone": "chest",
+      "color": "fur_peccary_dark",
+      "center": [0, 0.5657, 0.14],
+      "radii": [0.016, 0.055, 0.026],
+      "segments": 6,
+      "rings": 4
+    },
+    {
+      "name": "crest_1",
+      "kind": "patch",
+      "bone": "chest",
+      "color": "fur_peccary_dark",
+      "center": [0, 0.5984, 0.07],
+      "radii": [0.016, 0.07, 0.026],
+      "segments": 6,
+      "rings": 4
+    },
+    {
+      "name": "crest_2",
+      "kind": "patch",
+      "bone": "chest",
+      "color": "fur_peccary_dark",
+      "center": [0, 0.6112, 0.0],
+      "radii": [0.016, 0.07, 0.026],
+      "segments": 6,
+      "rings": 4
+    },
+    {
+      "name": "crest_3",
+      "kind": "patch",
+      "bone": "chest",
+      "color": "fur_peccary_dark",
+      "center": [0, 0.6113, -0.07],
+      "radii": [0.016, 0.07, 0.026],
+      "segments": 6,
+      "rings": 4
+    },
+    {
+      "name": "crest_4",
+      "kind": "patch",
+      "bone": "chest",
+      "color": "fur_peccary_dark",
+      "center": [0, 0.6007, -0.14],
+      "radii": [0.016, 0.055, 0.026],
+      "segments": 6,
+      "rings": 4
+    },
+    {
+      "name": "crest_5",
+      "kind": "patch",
+      "bone": "chest",
+      "color": "fur_peccary_dark",
+      "center": [0, 0.5793, -0.21],
+      "radii": [0.016, 0.055, 0.026],
+      "segments": 6,
+      "rings": 4
+    },
+    {
+      "name": "crest_6",
+      "kind": "patch",
+      "bone": "chest",
+      "color": "fur_peccary_dark",
+      "center": [0, 0.5447, -0.28],
+      "radii": [0.016, 0.055, 0.026],
+      "segments": 6,
+      "rings": 4
+    },
+    {
+      "name": "eye_l",
+      "kind": "eye",
+      "bone": "eyes",
+      "color": "eye_black",
+      "center": [0.1, 0.46, 0.33],
+      "radii": [0.016, 0.0184, 0.0184],
+      "segments": 8,
+      "rings": 6,
+      "mirror": true
+    },
+    {
+      "name": "shine_l",
+      "kind": "eye",
+      "bone": "eyes",
+      "color": "eye_shine",
+      "center": [0.1128, 0.468, 0.338],
+      "radii": [0.0048, 0.0056, 0.0056],
+      "segments": 6,
+      "rings": 4,
+      "mirror": true
+    },
+    {
+      "name": "ear_l",
+      "kind": "ear",
+      "bone": "ear_l",
+      "color": "fur_peccary_dark",
+      "center": [0.07, 0.54, 0.22],
+      "radii": [0.032, 0.05, 0.02],
+      "rollDeg": -15,
+      "segments": 8,
+      "rings": 5,
+      "mirror": true
+    },
+    {
+      "name": "leg_fl",
+      "kind": "leg",
+      "bone": "leg_fl",
+      "color": "fur_peccary",
+      "start": [0.095, 0.36, 0.12],
+      "end": [0.1, 0.04, 0.13],
+      "startRadius": 0.052,
+      "endRadius": 0.032,
+      "segments": 8,
+      "mirror": true
+    },
+    {
+      "name": "leg_bl",
+      "kind": "leg",
+      "bone": "leg_bl",
+      "color": "fur_peccary",
+      "start": [0.095, 0.36, -0.3],
+      "end": [0.1, 0.04, -0.29],
+      "startRadius": 0.058,
+      "endRadius": 0.034,
+      "segments": 8,
+      "mirror": true
+    },
+    {
+      "name": "foot_fl",
+      "kind": "foot",
+      "bone": "leg_fl",
+      "color": "fur_peccary_dark",
+      "center": [0.1, 0.025, 0.14],
+      "radii": [0.04, 0.028, 0.05],
+      "segments": 8,
+      "rings": 5,
+      "mirror": true
+    },
+    {
+      "name": "foot_bl",
+      "kind": "foot",
+      "bone": "leg_bl",
+      "color": "fur_peccary_dark",
+      "center": [0.1, 0.025, -0.27],
+      "radii": [0.042, 0.028, 0.052],
+      "segments": 8,
+      "rings": 5,
+      "mirror": true
+    },
+    {
+      "name": "tail",
+      "kind": "tail",
+      "bone": "tail",
+      "color": "fur_peccary_dark",
+      "start": [0, 0.46, -0.36],
+      "end": [0, 0.44, -0.42],
+      "startRadius": 0.022,
+      "endRadius": 0.012,
+      "segments": 6
+    }
+  ],
+  "animations": {
+    "idle": {
+      "durationS": 4,
+      "breathsPerLoop": 2,
+      "breathScale": 0.03,
+      "blinkAtS": 2.2,
+      "earTwitchAtS": 1.0,
+      "earTwitchDeg": 25,
+      "headNodDeg": 2
+    },
+    "walk": {
+      "durationS": 0.8,
+      "legSwingDeg": 28,
+      "bodyBobM": 0.012,
+      "headNodDeg": 3
+    },
+    "sleep": {
+      "durationS": 6,
+      "breathsPerLoop": 2,
+      "breathScale": 0.02,
+      "bodyDropM": 0.15,
+      "headDropDeg": 18
+    },
+    "eat": {
+      "durationS": 3,
+      "headDipDeg": 45,
+      "chewCount": 4,
+      "chewDeg": 5
+    },
+    "root": {
+      "durationS": 3.2,
+      "headDownDeg": 40,
+      "sweepDeg": 22,
+      "pokeDeg": 10,
+      "pokeCount": 4
+    }
+  }
+}
