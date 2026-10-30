@@ -1,4 +1,5 @@
 import type { AnimalId, SpeciesId } from '../shared/brand';
+import { createEconomyState, type EconomyState } from './economy/economy-state';
 import { createGachaState, type GachaState } from './gacha/gacha-state';
 import { createBuildHistory, type BuildHistory } from './park/park-change';
 import {
@@ -12,7 +13,7 @@ import { createRng, type RngState } from './rng';
 import { createVisitorsState, type VisitorsState } from './visitors/visitor-state';
 
 /** Bumped whenever the shape of GameState changes; the save layer migrates older versions. */
-export const STATE_VERSION = 4;
+export const STATE_VERSION = 5;
 
 export interface GameClock {
   /** Game time elapsed since the park opened, in whole milliseconds. */
@@ -59,6 +60,8 @@ export interface GameState {
   nextIds: NextIds;
   /** Groups in the park, arrivals and the suggestion feed. */
   visitors: VisitorsState;
+  /** Entry price, park level, mail, counter and upkeep. */
+  economy: EconomyState;
   /** Lives only while the game runs: never saved, empty again after loading. */
   session: SessionState;
 }
@@ -88,6 +91,7 @@ export function toSavedState(state: GameState): SavedGameState {
     buildings: state.buildings,
     nextIds: state.nextIds,
     visitors: state.visitors,
+    economy: state.economy,
   };
 }
 
@@ -109,6 +113,7 @@ export function createGameState(seed: number): GameState {
     buildings: [],
     nextIds: createNextIds(),
     visitors: createVisitorsState(),
+    economy: createEconomyState(),
     session: createSessionState(),
   };
 }

@@ -1,12 +1,13 @@
 import type { VisitorRulesInput } from '../schemas/visitors';
 
 /**
- * Starting values of task 1.5, to be balanced by task 1.6. A need at the seek threshold takes
- * 6 to 10 minutes to build up; the star and view bonuses are those of the GDD formula.
+ * Values of task 1.5; k (one group per minute per √A) set by task 1.6 with `npm run sim`. A need at
+ * the seek threshold takes 6 to 10 minutes to build up; the star and view bonuses are those of the
+ * GDD formula.
  */
 export const visitorRules = {
   arrivals: {
-    milliVisitorsPerSqrtAttractiveness: 2000,
+    milliVisitorsPerSqrtAttractiveness: 1000,
     maxPerMinute: 30,
     maxPresent: 250,
     walkableCellsPerVisitor: 2,

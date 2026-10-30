@@ -1,7 +1,7 @@
 import type { SaveStorage } from '@/platform';
 import { serialize, type SaveError } from '@/save';
 import { logger } from '@/shared';
-import { createGameState, emit, type EventQueue, type GameState } from '@/sim';
+import { emit, type EventQueue, type GameState } from '@/sim';
 
 /**
  * Played time between two automatic saves. Provisional: the GDD only asks for automatic saves.
@@ -15,7 +15,7 @@ export type ParkSaveStorage = SaveStorage<GameState, SaveError>;
 export async function loadOrCreatePark(
   saves: ParkSaveStorage,
   events: EventQueue,
-  newParkSeed: () => number,
+  newPark: () => GameState,
 ): Promise<GameState> {
   const loaded = await saves.read();
   if (loaded.ok) {
@@ -28,7 +28,7 @@ export async function loadOrCreatePark(
     // The damaged copies stay on disk: SaveStorage removes them only after newer valid writes.
     logger.warn('No save could be loaded: starting a new park.', loaded.error);
   }
-  return createGameState(newParkSeed());
+  return newPark();
 }
 
 export interface Autosaver {

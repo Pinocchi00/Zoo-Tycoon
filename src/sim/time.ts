@@ -1,5 +1,6 @@
 import type { SimContext } from './context';
-import type { EventQueue } from './events';
+import { emit, type EventQueue } from './events';
+import { economySystem } from './economy/economy-system';
 import type { GameState } from './state';
 import { visitorSystem } from './visitors/visitor-system';
 
@@ -19,7 +20,7 @@ export type System = (
 ) => void;
 
 /** Run in this order at every step. */
-const SYSTEMS: readonly System[] = [visitorSystem];
+const SYSTEMS: readonly System[] = [visitorSystem, economySystem];
 
 function assertDuration(name: string, durationMs: number): void {
   if (!Number.isSafeInteger(durationMs) || durationMs < 0) {
@@ -32,6 +33,22 @@ function step(state: GameState, stepMs: number, context: SimContext, events: Eve
     system(state, stepMs, context, events);
   }
   state.clock.timeMs += stepMs;
+}
+
+interface OfflineSnapshot {
+  readonly visitorGroups: number;
+  readonly visitorCoins: number;
+  readonly upkeepCoins: number;
+  readonly parkLevel: number;
+}
+
+function offlineSnapshot(state: GameState): OfflineSnapshot {
+  return {
+    visitorGroups: state.visitors.nextNumber,
+    visitorCoins: state.economy.totals.visitorCoins,
+    upkeepCoins: state.economy.totals.upkeepCoins,
+    parkLevel: state.economy.parkLevel,
+  };
 }
 
 /**
@@ -56,10 +73,11 @@ export function advance(
 }
 
 /**
- * Simulates time spent away from the game with one-minute steps, capped at 12 hours.
- * The last partial minute goes through `advance` so that no time is lost.
- * Nobody looks at the park meanwhile, so every visitor runs at full rate (no focus).
- * Returns the duration actually simulated.
+ * Simulates time spent away from the game with one-minute steps, capped at 12 hours: beyond that,
+ * the park simply rests (D-018, point 6). The last partial minute goes through `advance` so that
+ * no time is lost. Nobody looks at the park meanwhile, so every visitor runs at full rate (no
+ * focus). Emits `offlineReport` for the park's journal (nothing when no time passed) and returns
+ * the duration simulated.
  */
 export function catchUp(
   state: GameState,
@@ -71,6 +89,7 @@ export function catchUp(
   const simulatedMs = Math.min(offlineMs, MAX_OFFLINE_MS);
   const coarseSteps = Math.floor(simulatedMs / OFFLINE_STEP_MS);
   const focus = context.focus;
+  const before = offlineSnapshot(state);
   context.focus = null;
   try {
     for (let index = 0; index < coarseSteps; index += 1) {
@@ -80,5 +99,18 @@ export function catchUp(
   } finally {
     context.focus = focus;
   }
+  if (simulatedMs === 0) {
+    return 0;
+  }
+  const after = offlineSnapshot(state);
+  emit(events, {
+    type: 'offlineReport',
+    awayMs: offlineMs,
+    simulatedMs,
+    visitorGroups: after.visitorGroups - before.visitorGroups,
+    visitorCoins: after.visitorCoins - before.visitorCoins,
+    upkeepCoins: after.upkeepCoins - before.upkeepCoins,
+    levelsGained: after.parkLevel - before.parkLevel,
+  });
   return simulatedMs;
 }

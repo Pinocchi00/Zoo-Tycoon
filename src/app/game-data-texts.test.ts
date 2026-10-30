@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { GAME_CONTENT } from '@/data';
 import { en } from '@/i18n/en';
 import { fr } from '@/i18n/fr';
-import { BUILD_ERRORS } from '@/sim';
+import { BUILD_ERRORS, ECONOMY_ERRORS } from '@/sim';
 
 /** Every string stored under a `…Key` property, wherever it sits in the content. */
 function collectTextKeys(value: unknown, found: string[] = []): string[] {
@@ -33,6 +33,13 @@ describe('game data texts', () => {
 
   it('has a text for every reason a construction can be refused', () => {
     const missing = BUILD_ERRORS.map((code) => `build.error.${code}`).filter(
+      (key) => !(key in fr) || !(key in en),
+    );
+    expect(missing).toEqual([]);
+  });
+
+  it('has a text for every reason an economy command can be refused', () => {
+    const missing = ECONOMY_ERRORS.map((code) => `economy.error.${code}`).filter(
       (key) => !(key in fr) || !(key in en),
     );
     expect(missing).toEqual([]);

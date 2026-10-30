@@ -93,8 +93,10 @@ describe('catchUp', () => {
 
   it('does nothing for zero offline time', () => {
     const state = freshState();
-    expect(catchUp(state, 0, CONTEXT, createEventQueue())).toBe(0);
+    const events = createEventQueue();
+    expect(catchUp(state, 0, CONTEXT, events)).toBe(0);
     expect(state.clock).toEqual({ timeMs: 0, accumulatorMs: 0 });
+    expect(events.pending).toEqual([]);
   });
 
   it('runs every visitor at full rate meanwhile, then gives the focus back', () => {

@@ -1,5 +1,6 @@
 import type { GameData } from '../../data/load';
 import { BASIS_POINTS_TOTAL } from '../../data/schemas/common';
+import { priceAttendanceBp, satisfactionAttendanceBp } from '../economy/attendance';
 import type { EnclosureState } from '../park/park-state';
 import type { GameState } from '../state';
 import { isEnclosureReachable, type PathCache } from './path-cache';
@@ -50,18 +51,39 @@ export function totalAttractivenessMilli(
   return total;
 }
 
-/** V = min(k × √A, capacity) of the GDD, in thousandths of a visitor group per minute. */
+/**
+ * V = min(k × √A, capacity) of the GDD, in thousandths of a visitor group per minute, with the
+ * entry price and the park's satisfaction raising or lowering it a little.
+ */
 export function arrivalRateMilliPerMinute(
   state: GameState,
   data: GameData,
   cache: PathCache,
+): number {
+  return arrivalRateAtPrice(state, data, cache, state.economy.entryPriceCoins);
+}
+
+/** The arrival rate the park would have with this entry price, everything else unchanged. */
+export function arrivalRateAtPrice(
+  state: GameState,
+  data: GameData,
+  cache: PathCache,
+  entryPriceCoins: number,
 ): number {
   const total = totalAttractivenessMilli(state, data, cache);
   if (total === 0) {
     return 0;
   }
   const { milliVisitorsPerSqrtAttractiveness, maxPerMinute } = data.visitorRules.arrivals;
-  const rate = Math.floor(milliVisitorsPerSqrtAttractiveness * Math.sqrt(total / MILLI));
+  const base = Math.floor(milliVisitorsPerSqrtAttractiveness * Math.sqrt(total / MILLI));
+  const priceBp = priceAttendanceBp(entryPriceCoins, data.economyRules);
+  const satisfactionBp = satisfactionAttendanceBp(
+    state.visitors.parkSatisfactionBp,
+    data.economyRules,
+  );
+  const rate = Math.floor(
+    (base * priceBp * satisfactionBp) / (BASIS_POINTS_TOTAL * BASIS_POINTS_TOTAL),
+  );
   return Math.min(rate, maxPerMinute * MILLI);
 }
 

@@ -3,6 +3,7 @@ import { BASIS_POINTS_TOTAL } from '../../data/schemas/common';
 import type { BuildingId, EnclosureId, ItemId, SpeciesId } from '../../shared/brand';
 import { err, ok, type Result } from '../../shared/result';
 import { emit, type EventQueue } from '../events';
+import { isBuildingUnlocked } from '../economy/park-level';
 import type { GameState } from '../state';
 import type { BuildError } from './build-errors';
 import { isCellInside, transformOutline } from './outline';
@@ -296,6 +297,9 @@ function proposePlaceBuilding(
   const kind = data.buildings.get(command.itemId);
   if (kind === undefined) {
     return err('unknownBuilding');
+  }
+  if (!isBuildingUnlocked(state, data, command.itemId)) {
+    return err('buildingLocked');
   }
   if (!isQuarterTurns(command.quarterTurns)) {
     return err('invalidPosition');

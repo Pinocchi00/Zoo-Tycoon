@@ -9,6 +9,7 @@ import {
   type PathSurface,
   type Terrain,
 } from './schemas/build';
+import { economyRulesSchema, type EconomyRules } from './schemas/economy';
 import { gachaRulesSchema, bannerSchema, type Banner, type GachaRules } from './schemas/gacha';
 import {
   buildingSchema,
@@ -46,6 +47,7 @@ export interface RawGameData {
   readonly decor: readonly unknown[];
   readonly visitorArchetypes: readonly unknown[];
   readonly visitorRules: unknown;
+  readonly economyRules: unknown;
 }
 
 /** Validated game content. Maps keep the order of the data files, so draws stay deterministic. */
@@ -63,6 +65,7 @@ export interface GameData {
   readonly decor: ReadonlyMap<ItemId, Decor>;
   readonly visitorArchetypes: ReadonlyMap<ArchetypeId, VisitorArchetype>;
   readonly visitorRules: VisitorRules;
+  readonly economyRules: EconomyRules;
 }
 
 /** One problem in one data entry, e.g. `species[0] (capybara)`, `group.maxSize`. */
@@ -115,6 +118,7 @@ export function loadGameData(raw: RawGameData): Result<GameData, readonly DataEr
     errors,
   );
   const visitorRules = parseOne(visitorRulesSchema, raw.visitorRules, 'visitorRules', errors);
+  const economyRules = parseOne(economyRulesSchema, raw.economyRules, 'economyRules', errors);
 
   checkBanners(banners, errors);
   checkSharedItemIds({ habitatElements, buildings, decor, pathSurfaces }, errors);
@@ -130,6 +134,9 @@ export function loadGameData(raw: RawGameData): Result<GameData, readonly DataEr
   if (pathSurfaces.size === 0) {
     errors.push({ source: 'pathSurfaces', path: '', message: 'at least one path surface' });
   }
+  if (economyRules !== null) {
+    checkBuildingUnlocks(economyRules, buildings, errors);
+  }
   species.forEach((entry, id) => {
     checkSpeciesReferences(entry, `species (${id})`, biomes, habitatElements, errors);
   });
@@ -140,6 +147,7 @@ export function loadGameData(raw: RawGameData): Result<GameData, readonly DataEr
     terrain === null ||
     buildRules === null ||
     visitorRules === null ||
+    economyRules === null ||
     errors.length > 0
   ) {
     return err(errors);
@@ -158,6 +166,7 @@ export function loadGameData(raw: RawGameData): Result<GameData, readonly DataEr
     decor,
     visitorArchetypes,
     visitorRules,
+    economyRules,
   });
 }
 
@@ -238,6 +247,30 @@ function checkSharedItemIds(
         errors.push({ source: name, path: 'id', message });
       }
       owners.set(id, name);
+    }
+  }
+}
+
+/** Every building is unlocked by exactly one park level, and levels only unlock known buildings. */
+function checkBuildingUnlocks(
+  rules: EconomyRules,
+  buildings: ReadonlyMap<ItemId, Building>,
+  errors: DataError[],
+): void {
+  const unlocked = new Set<ItemId>();
+  rules.parkLevels.forEach((level, index) => {
+    level.unlocksBuildings.forEach((id, position) => {
+      unlocked.add(id);
+      if (!buildings.has(id)) {
+        const path = `parkLevels.${String(index)}.unlocksBuildings.${String(position)}`;
+        errors.push({ source: 'economyRules', path, message: `unknown building "${id}"` });
+      }
+    });
+  });
+  for (const id of buildings.keys()) {
+    if (!unlocked.has(id)) {
+      const message = `building "${id}" is never unlocked by a park level`;
+      errors.push({ source: 'economyRules', path: 'parkLevels', message });
     }
   }
 }

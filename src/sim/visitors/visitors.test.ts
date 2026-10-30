@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { GameData } from '../../data/load';
-import { createEventQueue } from '../events';
+import { createEventQueue, type GameEvent } from '../events';
 import { build, CAPYBARA, FIRST_ENCLOSURE, GRAVEL, parkState, slice } from '../park/test-support';
 import { advance, catchUp, STEP_MS } from '../time';
 import {
@@ -58,7 +58,10 @@ describe('arrivals', () => {
     expect(enclosureAttractivenessMilli(enclosure, state, slice)).toBe(expected);
     syncPathCache(context.paths, state, slice);
     expect(arrivalRateMilliPerMinute(state, slice, context.paths)).toBe(
-      Math.floor(2000 * Math.sqrt(expected / MILLI)),
+      Math.floor(
+        slice.visitorRules.arrivals.milliVisitorsPerSqrtAttractiveness *
+          Math.sqrt(expected / MILLI),
+      ),
     );
   });
 
@@ -136,11 +139,23 @@ describe('needs and services', () => {
     const coinsBefore = served.currencies.coins;
     play(bare, visitorContext(), 30 * MINUTE_MS);
     const events = play(served, visitorContext(), 30 * MINUTE_MS);
-    const spent = events.flatMap((event) =>
-      event.type === 'visitorUsedService' ? [event.coinsSpent] : [],
+    const coinsMoved = (event: GameEvent): number => {
+      if (event.type === 'visitorUsedService') {
+        return event.coinsSpent;
+      }
+      if (event.type === 'visitorArrived') {
+        return event.entryCoins;
+      }
+      return event.type === 'upkeepPaid' ? -event.amount : 0;
+    };
+    const kioskCoins = events.reduce(
+      (sum, event) => sum + (event.type === 'visitorUsedService' ? event.coinsSpent : 0),
+      0,
     );
-    expect(served.currencies.coins - coinsBefore).toBe(spent.reduce((sum, coins) => sum + coins));
-    expect(served.currencies.coins).toBeGreaterThan(coinsBefore);
+    expect(kioskCoins).toBeGreaterThan(0);
+    expect(served.currencies.coins - coinsBefore).toBe(
+      events.reduce((sum, event) => sum + coinsMoved(event), 0),
+    );
     expect(suggestionFeed(served, slice)).toEqual([]);
     expect(served.visitors.parkSatisfactionBp ?? 0).toBeGreaterThan(
       bare.visitors.parkSatisfactionBp ?? 0,
@@ -263,15 +278,16 @@ describe('finding the way', () => {
 });
 
 describe('time steps', () => {
-  it('gives the same crowd for 1000 × 16 ms as for 1 × 16 000 ms', () => {
+  // Long enough for a group to come in at the arrival rate of task 1.6.
+  it('gives the same crowd for 1000 × 48 ms as for 1 × 48 000 ms', () => {
     const small = visitorPark();
     const large = visitorPark();
     const context = visitorContext();
     const events = createEventQueue();
     for (let frame = 0; frame < 1000; frame += 1) {
-      advance(small, 16, context, events);
+      advance(small, 48, context, events);
     }
-    advance(large, 16_000, context, events);
+    advance(large, 48_000, context, events);
     expect(JSON.stringify(large)).toBe(JSON.stringify(small));
     expect(large.visitors.list.length).toBeGreaterThan(0);
   });

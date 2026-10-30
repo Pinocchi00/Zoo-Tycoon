@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { GAME_CONTENT } from './content';
 import { banners as gameBanners } from './content/banners';
+import { economyRules } from './content/economy';
 import { gachaRules } from './content/gacha-rules';
 import { species as gameSpecies } from './content/species';
 import { capybara } from './content/species/capybara';
@@ -37,10 +38,20 @@ const VALID_BUILDING = {
   nameKey: 'app.title',
   footprint: { width: 2, depth: 1 },
   coinCost: 50,
+  upkeepCoinsPerHour: 2,
   requiresPath: true,
   serves: ['rest'],
   visitorUse: { seconds: 20, priceCoins: 0 },
 };
+
+/** The shipped economy, with level 1 unlocking exactly these buildings. */
+function economyUnlocking(buildingIds: readonly string[]): unknown {
+  const levels = economyRules.parkLevels.map((level, index) => ({
+    ...level,
+    unlocksBuildings: index === 0 ? buildingIds : [],
+  }));
+  return { ...economyRules, parkLevels: levels };
+}
 
 const VALID_ARCHETYPE = {
   id: 'couple',
@@ -102,6 +113,7 @@ describe('game content', () => {
         { id: 'lantern', nameKey: 'app.title', footprint: { width: 1, depth: 1 }, coinCost: 0 },
       ],
       visitorArchetypes: [VALID_ARCHETYPE],
+      economyRules: economyUnlocking(['bench']),
     });
     expect(result.ok).toBe(true);
   });

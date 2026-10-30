@@ -28,6 +28,18 @@ describe('createGameState', () => {
         suggestions: { foodDrink: 0, rest: 0, comfort: 0 },
         suggestionsHalvedAtMs: 0,
       },
+      economy: {
+        entryPriceCoins: 0,
+        parkStars: 0,
+        parkLevel: 1,
+        lastMailDay: null,
+        counterDay: null,
+        counterBought: 0,
+        upkeepOwed: 0,
+        periodRevenue: 0,
+        settledAtMs: 0,
+        totals: { visitorCoins: 0, upkeepCoins: 0 },
+      },
       session: { buildHistory: { undo: [], redo: [] } },
     });
   });
