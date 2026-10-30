@@ -11,6 +11,7 @@ import {
 import {
   ARRIVE_RADIUS_M,
   SEPARATION_RADIUS_M,
+  capsuleGap,
   createSteerBody,
   steerStep,
   type SteerBody,
@@ -204,10 +205,86 @@ describe('steerStep', () => {
     expect(Math.hypot(first.x - second.x, first.z - second.z)).toBeGreaterThan(0.7);
   });
 
+  it('reaches a target right next to the fence instead of circling round it', () => {
+    const area = areaOf(ROOM);
+    // Resting places are kept 0.5 m from the fence: the animals must be able to get there.
+    for (const target of [
+      { x: -9.5, z: 0 },
+      { x: 1.5, z: 4.5 },
+      { x: -9.5, z: -4.5 },
+    ]) {
+      const body = createSteerBody(-4, 0, 0, 2.03);
+      const world = worldOf(area, [body]);
+      let steps = 0;
+      while (!body.arrived && steps < 900) {
+        steerStep(body, LIMITS, world, true, target.x, target.z, STEP_S);
+        steps += 1;
+      }
+      expect(body.arrived, `target ${String(target.x)},${String(target.z)}`).toBe(true);
+      expect(steps * STEP_S).toBeLessThan(40);
+    }
+  });
+
+  it('reaches a target close to a neighbour at rest, without overlapping it', () => {
+    const area = areaOf(ROOM);
+    const neighbour = createSteerBody(-4, 0, Math.PI / 2, 2.03);
+    const body = createSteerBody(-8, 2.5, 0, 2.03);
+    const world = worldOf(area, [body, neighbour]);
+    // A place a body's width from the neighbour, well inside the range where it pushes.
+    const target = { x: -4, z: 1.2 };
+    let steps = 0;
+    while (!body.arrived && steps < 900) {
+      steerStep(body, LIMITS, world, true, target.x, target.z, STEP_S);
+      expect(capsuleGap(body, neighbour)).toBeGreaterThan(-0.02);
+      steps += 1;
+    }
+    expect(body.arrived).toBe(true);
+  });
+
+  it('never drives a long body into a neighbour in its way: it brakes and waits', () => {
+    const area = areaOf(ROOM);
+    const neighbour = createSteerBody(-4, 0, 0, 2.03);
+    const body = createSteerBody(-8.5, 0, Math.PI / 2, 2.03);
+    const world = worldOf(area, [body, neighbour]);
+    for (let step = 0; step < 600; step += 1) {
+      steerStep(body, LIMITS, world, true, 0, 0, STEP_S);
+      expect(capsuleGap(body, neighbour)).toBeGreaterThan(-0.02);
+    }
+    expect(containsPoint(area, body.x, body.z)).toBe(true);
+  });
+
+  it('pivots on the spot more gently than it turns while walking', () => {
+    const area = areaOf(ROOM);
+    const body = createSteerBody(CENTRE.x, CENTRE.z, 0, 2.03);
+    const world = worldOf(area, [body]);
+    let previousYaw = body.yaw;
+    for (let step = 0; step < 10; step += 1) {
+      steerStep(body, LIMITS, world, true, CENTRE.x, CENTRE.z - 4, STEP_S);
+      const turned = Math.abs(body.yaw - previousYaw);
+      expect(Math.min(turned, 2 * Math.PI - turned)).toBeLessThanOrEqual(
+        LIMITS.maxTurnRate * 0.6 * STEP_S + EPSILON,
+      );
+      previousYaw = body.yaw;
+    }
+  });
+
+  it('measures the free space between two capsules, nose to tail', () => {
+    const first = createSteerBody(0, 0, 0, 2);
+    const aside = createSteerBody(1, 0, 0, 2);
+    const ahead = createSteerBody(0, 3, 0, 2);
+    const same = createSteerBody(0, 0, 1, 2);
+    // Side by side the width counts: 1 m between the axes, minus two radii.
+    expect(capsuleGap(first, aside)).toBeCloseTo(1 - 2 * first.radius);
+    // Head to tail the lengths count: 3 m between the centres, minus two half-lengths.
+    expect(capsuleGap(first, ahead)).toBeCloseTo(3 - 2);
+    expect(capsuleGap(first, same)).toBeLessThan(0);
+    expect(capsuleGap(first, createSteerBody(0, 0, 0, 0))).toBeLessThan(0);
+  });
+
   it('does nothing while idle and stopped', () => {
     const area = areaOf(ROOM);
     const body = createSteerBody(CENTRE.x, CENTRE.z, 1);
     steerStep(body, LIMITS, worldOf(area, [body]), false, 0, 0, STEP_S);
-    expect(body).toEqual({ x: CENTRE.x, z: CENTRE.z, yaw: 1, speed: 0, arrived: false });
+    expect(body).toMatchObject({ x: CENTRE.x, z: CENTRE.z, yaw: 1, speed: 0, arrived: false });
   });
 });

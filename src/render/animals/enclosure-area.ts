@@ -227,10 +227,26 @@ export function createEnclosureArea(
   return interior.length === 0 ? null : { cornersX, cornersZ, interior };
 }
 
-/** Animals pick resting places at least this far from each other, walkers and destinations included. */
+/**
+ * Smallest distance between the centres of two animals when they pick resting places, walkers
+ * and destinations included; a longer animal asks for more (its length, see `clearanceFor`).
+ */
 export const CROWD_CLEARANCE_M = 1;
+/** Free space left between two long animals at rest, beyond their lengths. */
+const CLEARANCE_SLACK_M = 0.3;
+
+/** Distance between centres from which two animals of this length cannot touch, whatever way they face. */
+export function clearanceFor(lengthM: number): number {
+  return Math.max(CROWD_CLEARANCE_M, lengthM + CLEARANCE_SLACK_M);
+}
 /** Distance from an interest point at which animals gather around it, leaving its middle free. */
 export const APPROACH_RADIUS_M = 0.9;
+const APPROACH_LENGTH_SHARE = 0.8;
+
+/** Longer animals stand further from the point, so that they do not crowd round it. */
+export function approachRadiusFor(lengthM: number): number {
+  return Math.max(APPROACH_RADIUS_M, lengthM * APPROACH_LENGTH_SHARE);
+}
 const APPROACH_ROTATIONS = 8;
 
 /**
@@ -259,6 +275,7 @@ function isWalkable(
   spot: Point2,
   out: Point2,
   crowd: readonly Point2[],
+  clearanceM: number,
   minTripM: number,
   maxTripM: number,
 ): boolean {
@@ -266,7 +283,7 @@ function isWalkable(
   return (
     distance >= minTripM &&
     distance <= maxTripM &&
-    isClearOfCrowd(crowd, spot.x, spot.z, from, out, CROWD_CLEARANCE_M) &&
+    isClearOfCrowd(crowd, spot.x, spot.z, from, out, clearanceM) &&
     segmentStaysInside(area, from.x, from.z, spot.x, spot.z, PATH_MARGIN_M)
   );
 }
@@ -286,6 +303,7 @@ export function pickDestination(
   maxTripM: number,
   out: Point2,
   crowd: readonly Point2[],
+  clearanceM: number = CROWD_CLEARANCE_M,
 ): boolean {
   const count = area.interior.length;
   for (let attempt = 0; attempt < SAMPLE_ATTEMPTS; attempt += 1) {
@@ -293,7 +311,7 @@ export function pickDestination(
     if (spot === undefined) {
       return false;
     }
-    if (isWalkable(area, from, spot, out, crowd, minTripM, maxTripM)) {
+    if (isWalkable(area, from, spot, out, crowd, clearanceM, minTripM, maxTripM)) {
       out.x = spot.x;
       out.z = spot.z;
       return true;
@@ -304,7 +322,16 @@ export function pickDestination(
     const spot = area.interior[(first + step) % count];
     if (
       spot !== undefined &&
-      isWalkable(area, from, spot, out, crowd, FALLBACK_MIN_TRIP_M, Number.POSITIVE_INFINITY)
+      isWalkable(
+        area,
+        from,
+        spot,
+        out,
+        crowd,
+        clearanceM,
+        FALLBACK_MIN_TRIP_M,
+        Number.POSITIVE_INFINITY,
+      )
     ) {
       out.x = spot.x;
       out.z = spot.z;
@@ -329,13 +356,14 @@ export function approachPoint(
   from: Point2,
   crowd: readonly Point2[],
   out: Point2,
+  clearanceM: number = CROWD_CLEARANCE_M,
 ): boolean {
   for (let turn = 0; turn < APPROACH_ROTATIONS; turn += 1) {
     const angle = angleRad + (turn * Math.PI * 2) / APPROACH_ROTATIONS;
     const x = spot.x + Math.sin(angle) * radiusM;
     const z = spot.z + Math.cos(angle) * radiusM;
     if (
-      isClearOfCrowd(crowd, x, z, from, out, CROWD_CLEARANCE_M) &&
+      isClearOfCrowd(crowd, x, z, from, out, clearanceM) &&
       segmentStaysInside(area, from.x, from.z, x, z, PATH_MARGIN_M) &&
       distanceToEdge(area, x, z, SCRATCH) >= PATH_MARGIN_M
     ) {
@@ -364,8 +392,19 @@ export function hashText(text: string): number {
   return hash;
 }
 
-function pickSpot(area: EnclosureArea, rng: RngState, taken: readonly Point2[]): Point2 {
+/** Water is placed at least this far from the fence when the enclosure allows, to swim round it. */
+export const WATER_EDGE_M = 2.2;
+
+/** A spot spaced from the `taken` ones, and at least `edgeM` from the fence if one is found. */
+function pickSpot(
+  area: EnclosureArea,
+  rng: RngState,
+  taken: readonly Point2[],
+  edgeM: number,
+): Point2 {
   let candidate: Point2 = { x: 0, z: 0 };
+  let spaced: Point2 | null = null;
+  const nearest: Point2 = { x: 0, z: 0 };
   for (let attempt = 0; attempt < POI_ATTEMPTS; attempt += 1) {
     const spot = area.interior[randomInt(rng, 0, area.interior.length - 1)];
     if (spot === undefined) {
@@ -373,10 +412,13 @@ function pickSpot(area: EnclosureArea, rng: RngState, taken: readonly Point2[]):
     }
     candidate = { x: spot.x, z: spot.z };
     if (taken.every((other) => Math.hypot(other.x - spot.x, other.z - spot.z) >= POI_SPACING_M)) {
-      return candidate;
+      if (edgeM <= 0 || distanceToEdge(area, spot.x, spot.z, nearest) >= edgeM) {
+        return candidate;
+      }
+      spaced ??= candidate;
     }
   }
-  return candidate;
+  return spaced ?? candidate;
 }
 
 /**
@@ -396,13 +438,13 @@ export function placeInterestPoints(
   const taken: Point2[] = [];
   let water: Point2 | null = null;
   if (hasWater) {
-    water = pickSpot(area, rng, taken);
+    water = pickSpot(area, rng, taken, WATER_EDGE_M);
     taken.push(water);
   }
   const enrichment: Point2[] = [];
   const count = Math.max(0, Math.min(stars - 1, MAX_ENRICHMENT_POINTS));
   for (let index = 0; index < count; index += 1) {
-    const spot = pickSpot(area, rng, taken);
+    const spot = pickSpot(area, rng, taken, 0);
     taken.push(spot);
     enrichment.push(spot);
   }

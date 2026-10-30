@@ -91,6 +91,14 @@ export const WALK_REFERENCE_SPEED_MPS = 0.6;
 const WALK_SCALE_MIN = 0.35;
 const WALK_SCALE_MAX = 1.6;
 
+/** Speed at which the swim clip plays at its natural rate (a slow, relaxed swim). */
+export const SWIM_REFERENCE_SPEED_MPS = 0.3;
+
+/** Playback speed of the swim clip for a swimmer going at `speedMps`. */
+export function swimClipScale(speedMps: number): number {
+  return Math.max(WALK_SCALE_MIN, Math.min(WALK_SCALE_MAX, speedMps / SWIM_REFERENCE_SPEED_MPS));
+}
+
 /** Playback speed of the walk clip for an animal moving at `speedMps`. */
 export function walkClipScale(speedMps: number): number {
   return Math.max(WALK_SCALE_MIN, Math.min(WALK_SCALE_MAX, speedMps / WALK_REFERENCE_SPEED_MPS));
@@ -123,6 +131,8 @@ export interface AnimalModel {
   setAttention: (attention: number) => void;
   /** Speed of the walk clip, see `walkClipScale`. */
   setWalkScale: (scale: number) => void;
+  /** Speed of the signature clip: a swim follows the real speed of the swimmer. */
+  setSignatureScale: (scale: number) => void;
   /** Fades to `animation`, from a random point of its loop; nothing if it is already playing. */
   play: (animation: AnimalAnimation) => void;
   setTimeScale: (scale: number) => void;
@@ -182,6 +192,12 @@ export function cloneAnimalSource(source: AnimalSource): AnimalSource {
 /** Frees the GPU resources of a source; its clones must not be used afterwards. */
 export function disposeAnimalSource(source: AnimalSource): void {
   disposeModel(source.scene);
+}
+
+/** Longest horizontal side of the box of a model, in metres: nose to tail. */
+export function animalLength(root: Object3D): number {
+  const size = new Box3().setFromObject(root).getSize(new Vector3());
+  return Math.max(size.x, size.z);
 }
 
 export interface AnimalModelOptions {
@@ -272,8 +288,7 @@ export function createAnimalModel(
     needs: needs[name],
   }));
   prepareMeshes(root);
-  const size = new Box3().setFromObject(root).getSize(new Vector3());
-  const lengthM = Math.max(size.x, size.z);
+  const lengthM = animalLength(root);
   mixer.timeScale = look.timeScale;
   actions.idle.time = look.startPhase * idleDurationS;
   actions.idle.play();
@@ -290,6 +305,9 @@ export function createAnimalModel(
     },
     setWalkScale: (scale) => {
       actions.walk.timeScale = scale;
+    },
+    setSignatureScale: (scale) => {
+      actions.signature.timeScale = scale;
     },
     play: (animation) => {
       if (animation === current) {

@@ -19,8 +19,10 @@ import {
 } from '@/sim';
 import {
   cloneAnimalSource,
+  animalLength,
   createAnimalModel,
   disposeAnimalSource,
+  swimClipScale,
   walkClipScale,
   type AnimalAnimation,
   type AnimalModel,
@@ -42,11 +44,15 @@ import {
   type BehaviourContext,
 } from './behaviour';
 import {
-  CROWD_CLEARANCE_M,
   APPROACH_RADIUS_M,
+  CROWD_CLEARANCE_M,
+  approachRadiusFor,
   PATH_MARGIN_M,
   approachPoint,
+  clearanceFor,
+  containsPoint,
   createEnclosureArea,
+  distanceToEdge,
   isClearOfCrowd,
   segmentStaysInside,
   pickDestination,
@@ -58,11 +64,11 @@ import {
 import {
   bearing,
   createSocialReport,
-  FOLLOW_GAP_M,
+  followGapM,
   observeGroup,
   pointBehind,
-  REGROUP_RADIUS_M,
-  SLEEP_CONTACT_M,
+  regroupRadiusM,
+  sleepContactM,
   type SocialReport,
 } from './social';
 import {
@@ -105,12 +111,29 @@ const MAX_TURN_RATE_RAD_S = 1.6;
 const MIN_TRIP_M = 1.5;
 const MAX_TRIP_M = 8;
 const EXPLORE_MAX_TRIP_M = 3.5;
-const START_SPACING_M = 1.5;
-const START_ATTEMPTS = 10;
+const START_ATTEMPTS = 40;
+/** A relaxed swim: a share of the top speed, in a small circuit round the water. */
+const SWIM_PACE = 0.35;
+/** The target of a swimmer lies this far ahead on the circuit (radians round the water). */
+const SWIM_LOOKAHEAD_RAD = 1.3;
+/** A walk that gets no nearer to its target for this long is given up. */
+export const MAX_NO_PROGRESS_MS = 5000;
+/** Nearer than the best distance so far by this much counts as progress. */
+const PROGRESS_M = 0.25;
+/** An animal faster than this moves, one turning faster than this turns: its clip must be a walk. */
+const MOVING_SPEED_MPS = 0.03;
+const TURNING_RATE_RAD_S = 0.2;
+/** A walk clip goes on this long after the animal stopped, so that it does not flicker. */
+const WALK_HOLD_MS = 500;
+/** Metres of stride an animal pivoting on the spot is credited with, to pace its walk clip. */
+const PIVOT_STRIDE_M = 0.4;
+
 const TWO_PI = Math.PI * 2;
 /** Two animals greeting each other turn more slowly than they walk round. */
 const SALUTE_TURN_SHARE = 0.6;
 const SCRATCH_POINT: Point2 = { x: 0, z: 0 };
+/** A sleeper may lie this close to a third animal's resting place, short of the contact distance. */
+const SLEEP_CLEARANCE_MARGIN_M = 0.02;
 /** Successive animals of a group take well-spread places around an interest point. */
 const GOLDEN_ANGLE_RAD = 2.399_963;
 const MAX_SEED = 0x1_0000_0000;
@@ -149,6 +172,8 @@ export interface AnimalHerd {
   update: (elapsedMs: number, pixelsPerMetre: number, visible: Readonly<FocusArea>) => void;
   /** What each animal does now, group by group (allocates: for tests and development). */
   activities: () => Activity[];
+  /** The clip each animal is playing now, group by group (allocates: for tests and development). */
+  animations: () => AnimalAnimation[];
   /** Settles when every animal now in the park has loaded or failed. */
   whenLoaded: () => Promise<void>;
   dispose: () => void;
@@ -183,6 +208,13 @@ interface Individual {
   readonly approachAngle: number;
   /** Time the animation has not been advanced by yet. */
   mixerMs: number;
+  /** Nearest the animal has been to its target on this walk, and how long since it improved. */
+  bestDistance: number;
+  noProgressMs: number;
+  /** How long the animal has been standing still (to keep the walk clip a moment). */
+  stillMs: number;
+  /** Which way round the water the animal swims: 1 or -1. */
+  swimDirection: number;
 }
 
 interface EnclosureGroup {
@@ -196,6 +228,18 @@ interface EnclosureGroup {
   readonly bodies: SteerBody[];
   /** Every body and every target of the group, for choosing places clear of the others. */
   readonly crowd: Point2[];
+  /** Nose to tail, known once the model is downloaded; the animals appear then. */
+  lengthM: number | null;
+  /** Least distance between the centres of two animals at rest. */
+  clearanceM: number;
+  /** Distance from an interest point at which the animals stand round it. */
+  approachRadiusM: number;
+  /** How many animals the group is to have, and whether the ones to come arrive just now. */
+  wanted: number;
+  arrival: boolean;
+  /** Settles once the length is known and the animals are there. */
+  loaded: Promise<void>;
+  loading: boolean;
   readonly steer: SteerWorld;
   pois: InterestPoints;
 }
@@ -246,19 +290,25 @@ export function createAnimalHerd(options: HerdOptions): AnimalHerd {
     }
   };
 
+  /** A resting place clear of the others by the clearance of the group; the best found if none is. */
   const pickStart = (group: EnclosureGroup, out: Point2): void => {
     const spots = group.area.interior;
+    let bestRoom = -1;
     for (let attempt = 0; attempt < START_ATTEMPTS; attempt += 1) {
       const spot = spots[randomInt(rng, 0, spots.length - 1)];
       if (spot === undefined) {
         return;
       }
-      out.x = spot.x;
-      out.z = spot.z;
-      const crowded = group.bodies.some(
-        (other) => Math.hypot(other.x - spot.x, other.z - spot.z) < START_SPACING_M,
-      );
-      if (!crowded) {
+      let room = Number.POSITIVE_INFINITY;
+      for (const other of group.bodies) {
+        room = Math.min(room, Math.hypot(other.x - spot.x, other.z - spot.z));
+      }
+      if (room > bestRoom) {
+        bestRoom = room;
+        out.x = spot.x;
+        out.z = spot.z;
+      }
+      if (room >= group.clearanceM) {
         return;
       }
     }
@@ -279,7 +329,7 @@ export function createAnimalHerd(options: HerdOptions): AnimalHerd {
       maxAccel: MAX_ACCEL_MPS2,
       maxTurnRate: MAX_TURN_RATE_RAD_S,
     };
-    const body = createSteerBody(start.x, start.z, yaw);
+    const body = createSteerBody(start.x, start.z, yaw, group.lengthM ?? 0);
     const behaviour = createBehaviour(rng, withArrival);
     const entry = sourceFor(group.modelId);
     const loading: Promise<Result<AnimalModel, AnimalModelProblem>> = entry.promise.then(
@@ -318,6 +368,10 @@ export function createAnimalHerd(options: HerdOptions): AnimalHerd {
       target,
       shown: 'idle',
       mixerMs: 0,
+      bestDistance: Number.POSITIVE_INFINITY,
+      noProgressMs: 0,
+      stillMs: 0,
+      swimDirection: created % 2 === 0 ? 1 : -1,
       phase: created % PHASE_COUNT,
       approachAngle: group.individuals.length * GOLDEN_ANGLE_RAD,
     });
@@ -370,7 +424,27 @@ export function createAnimalHerd(options: HerdOptions): AnimalHerd {
       bodies,
       crowd: [],
       steer: { area, others: bodies, scratch: { x: 0, z: 0 } },
+      lengthM: null,
+      clearanceM: CROWD_CLEARANCE_M,
+      approachRadiusM: APPROACH_RADIUS_M,
+      wanted: 0,
+      arrival: false,
+      loaded: Promise.resolve(),
+      loading: false,
     };
+  };
+
+  /** Adds or removes animals until the group has the size it is to have. */
+  const fill = (group: EnclosureGroup): void => {
+    if (group.lengthM === null) {
+      return;
+    }
+    while (group.individuals.length < group.wanted) {
+      addIndividual(group, group.arrival);
+    }
+    while (group.individuals.length > group.wanted) {
+      removeLastIndividual(group);
+    }
   };
 
   const rebuild = (enclosure: EnclosureState, world: HerdWorld, withArrival: boolean): void => {
@@ -380,10 +454,34 @@ export function createAnimalHerd(options: HerdOptions): AnimalHerd {
       return;
     }
     groups.push(group);
-    const size = progressOf(world, enclosure.speciesId)?.groupSize ?? 0;
-    for (let index = 0; index < size; index += 1) {
-      addIndividual(group, withArrival);
+    group.wanted = progressOf(world, enclosure.speciesId)?.groupSize ?? 0;
+    group.arrival = withArrival;
+    load(group);
+  };
+
+  /**
+   * The animals come once the model is there, since its length decides how much room each
+   * needs; a group that is to have nobody downloads nothing.
+   */
+  const load = (group: EnclosureGroup): void => {
+    if (group.loading || group.wanted === 0) {
+      return;
     }
+    group.loading = true;
+    group.loaded = sourceFor(group.modelId).promise.then(
+      (source) => {
+        if (disposed || !groups.includes(group)) {
+          return;
+        }
+        group.lengthM = animalLength(source.scene);
+        group.clearanceM = clearanceFor(group.lengthM);
+        group.approachRadiusM = approachRadiusFor(group.lengthM);
+        fill(group);
+      },
+      (error: unknown) => {
+        reportProblem(group.modelId, { kind: 'loadFailed', error });
+      },
+    );
   };
 
   const rebuildById = (id: EnclosureId, world: HerdWorld, withArrival: boolean): void => {
@@ -411,12 +509,10 @@ export function createAnimalHerd(options: HerdOptions): AnimalHerd {
       group.pois = placeInterestPoints(group.area, group.id, group.look.hasWater, progress.stars);
       group.context.enrichmentSpots = group.pois.enrichment.length;
     }
-    while (group.individuals.length < progress.groupSize) {
-      addIndividual(group, true);
-    }
-    while (group.individuals.length > progress.groupSize) {
-      removeLastIndividual(group);
-    }
+    group.wanted = progress.groupSize;
+    group.arrival = true;
+    load(group);
+    fill(group);
   };
 
   /** Where a walk of the kind the behaviour asked for ends; false when there is no way. */
@@ -426,7 +522,16 @@ export function createAnimalHerd(options: HerdOptions): AnimalHerd {
     switch (behaviour.destination) {
       case 'free': {
         const maxTrip = behaviour.shortTrip ? EXPLORE_MAX_TRIP_M : MAX_TRIP_M;
-        return pickDestination(area, rng, body, MIN_TRIP_M, maxTrip, target, crowd);
+        return pickDestination(
+          area,
+          rng,
+          body,
+          MIN_TRIP_M,
+          maxTrip,
+          target,
+          crowd,
+          group.clearanceM,
+        );
       }
       case 'water':
       case 'enrichment': {
@@ -442,10 +547,11 @@ export function createAnimalHerd(options: HerdOptions): AnimalHerd {
             area,
             spot,
             individual.approachAngle,
-            APPROACH_RADIUS_M,
+            group.approachRadiusM,
             body,
             crowd,
             target,
+            group.clearanceM,
           )
         );
       }
@@ -465,10 +571,12 @@ export function createAnimalHerd(options: HerdOptions): AnimalHerd {
             area,
             sleeper.body,
             individual.approachAngle,
-            SLEEP_CONTACT_M,
+            sleepContactM(group.lengthM ?? 0),
             body,
             crowd,
             target,
+            // Lying down in contact: only the other animals are kept at the usual distance.
+            sleepContactM(group.lengthM ?? 0) - SLEEP_CLEARANCE_MARGIN_M,
           )
         );
       }
@@ -477,10 +585,11 @@ export function createAnimalHerd(options: HerdOptions): AnimalHerd {
           area,
           social.centre,
           individual.approachAngle,
-          REGROUP_RADIUS_M,
+          regroupRadiusM(group.lengthM ?? 0),
           body,
           crowd,
           target,
+          group.clearanceM,
         );
     }
   };
@@ -492,10 +601,10 @@ export function createAnimalHerd(options: HerdOptions): AnimalHerd {
     walker: Individual,
   ): boolean => {
     const { body, target } = individual;
-    pointBehind(walker.body, FOLLOW_GAP_M, SCRATCH_POINT);
+    pointBehind(walker.body, followGapM(group.lengthM ?? 0), SCRATCH_POINT);
     const { x, z } = SCRATCH_POINT;
     if (
-      !isClearOfCrowd(group.crowd, x, z, body, target, CROWD_CLEARANCE_M) ||
+      !isClearOfCrowd(group.crowd, x, z, body, target, group.clearanceM) ||
       !segmentStaysInside(group.area, body.x, body.z, x, z, PATH_MARGIN_M)
     ) {
       return false;
@@ -506,10 +615,12 @@ export function createAnimalHerd(options: HerdOptions): AnimalHerd {
   };
 
   const giveDestination = (group: EnclosureGroup, individual: Individual): void => {
-    const { behaviour, body } = individual;
+    const { behaviour, body, target } = individual;
     behaviour.needsDestination = false;
     if (chooseTarget(group, individual)) {
       body.arrived = false;
+      individual.bestDistance = Math.hypot(target.x - body.x, target.z - body.z);
+      individual.noProgressMs = 0;
       // A stroll or a decided pace, for the whole walk.
       individual.limits.maxSpeed = individual.topSpeed * rollPace(rng);
     } else {
@@ -531,6 +642,54 @@ export function createAnimalHerd(options: HerdOptions): AnimalHerd {
     }
   };
 
+  /** A walk that gets no nearer for too long (circling a target it cannot reach) is given up. */
+  const watchProgress = (individual: Individual, elapsedMs: number): void => {
+    const { behaviour, body, target } = individual;
+    if (!isTravelling(behaviour.activity) || behaviour.needsDestination) {
+      individual.noProgressMs = 0;
+      return;
+    }
+    const distance = Math.hypot(target.x - body.x, target.z - body.z);
+    if (distance < individual.bestDistance - PROGRESS_M) {
+      individual.bestDistance = distance;
+      individual.noProgressMs = 0;
+      return;
+    }
+    individual.noProgressMs += elapsedMs;
+    if (individual.noProgressMs >= MAX_NO_PROGRESS_MS) {
+      failTravel(behaviour, rng);
+      individual.noProgressMs = 0;
+    }
+  };
+
+  /**
+   * The swimmer's next target: a point ahead on a circle round the water, in the direction it
+   * swims, turning back if the circle runs into the fence. False when it can go neither way.
+   */
+  const circuitTarget = (group: EnclosureGroup, individual: Individual): boolean => {
+    const water = group.pois.water;
+    if (water === null) {
+      return false;
+    }
+    const { body, target } = individual;
+    const around = bearing(water.x, water.z, body.x, body.z);
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const angle = around + individual.swimDirection * SWIM_LOOKAHEAD_RAD;
+      const x = water.x + Math.sin(angle) * group.approachRadiusM;
+      const z = water.z + Math.cos(angle) * group.approachRadiusM;
+      if (
+        containsPoint(group.area, x, z) &&
+        distanceToEdge(group.area, x, z, SCRATCH_POINT) >= PATH_MARGIN_M
+      ) {
+        target.x = x;
+        target.z = z;
+        return true;
+      }
+      individual.swimDirection = -individual.swimDirection;
+    }
+    return false;
+  };
+
   /** Moves one animal; true when its animation changed, so that the model must be updated now. */
   const tick = (
     group: EnclosureGroup,
@@ -540,17 +699,28 @@ export function createAnimalHerd(options: HerdOptions): AnimalHerd {
   ): boolean => {
     const { behaviour, body, social } = individual;
     const dtS = elapsedMs / MS_PER_SECOND;
-    observeGroup(individual, group.individuals, social);
+    const yawBefore = body.yaw;
+    observeGroup(individual, group.individuals, social, group.context.signatureAtWater);
     advanceBehaviour(behaviour, elapsedMs, body.arrived, rng, group.context, social.view);
     if (behaviour.needsDestination) {
       giveDestination(group, individual);
     }
+    watchProgress(individual, elapsedMs);
     const travelling = isTravelling(behaviour.activity);
+    // At the water, a swimmer swims: a slow circuit round the point, not a swim clip on the spot.
+    const swimming =
+      behaviour.activity === 'signature' &&
+      group.context.signatureAtWater &&
+      group.pois.water !== null;
+    const circling = swimming && circuitTarget(group, individual);
+    if (circling) {
+      individual.limits.maxSpeed = individual.topSpeed * SWIM_PACE;
+    }
     steerStep(
       body,
       individual.limits,
       group.steer,
-      travelling,
+      travelling || circling,
       individual.target.x,
       individual.target.z,
       dtS,
@@ -567,6 +737,7 @@ export function createAnimalHerd(options: HerdOptions): AnimalHerd {
           individual.limits.maxTurnRate * SALUTE_TURN_SHARE,
           bearing(body.x, body.z, partner.body.x, partner.body.z),
           dtS,
+          group.steer.others,
         );
       }
     } else {
@@ -579,20 +750,40 @@ export function createAnimalHerd(options: HerdOptions): AnimalHerd {
         aimBehind(group, individual, walker);
       }
     }
-    if (!travelling && !behaviour.resumeWalk) {
+    if (!travelling && !circling && !behaviour.resumeWalk) {
       // A resting animal claims the place where it stands, not the one it was heading for.
       individual.target.x = body.x;
       individual.target.z = body.z;
     }
     model.root.position.set(body.x, 0, body.z);
     model.root.rotation.y = body.yaw;
-    const changed = individual.shown !== behaviour.animation;
-    if (changed) {
-      model.play(behaviour.animation);
-      individual.shown = behaviour.animation;
+    // The clip fits the movement: whatever the animal is doing, if it moves or turns, it walks
+    // (or swims); and a walk clip does not go on long once it stands still.
+    const yawRate = Math.abs(wrapAngle(body.yaw - yawBefore)) / dtS;
+    const moving = body.speed > MOVING_SPEED_MPS || yawRate > TURNING_RATE_RAD_S;
+    let clip = behaviour.animation;
+    if (moving) {
+      individual.stillMs = 0;
+      if (clip !== 'walk' && !(clip === 'signature' && swimming)) {
+        clip = 'walk';
+      }
+    } else if (clip === 'walk') {
+      individual.stillMs += elapsedMs;
+      if (individual.stillMs >= WALK_HOLD_MS) {
+        clip = 'idle';
+      }
+    } else {
+      individual.stillMs = 0;
     }
-    if (individual.shown === 'walk') {
-      model.setWalkScale(walkClipScale(body.speed));
+    const changed = individual.shown !== clip;
+    if (changed) {
+      model.play(clip);
+      individual.shown = clip;
+    }
+    if (clip === 'walk') {
+      model.setWalkScale(walkClipScale(Math.max(body.speed, yawRate * PIVOT_STRIDE_M)));
+    } else if (clip === 'signature' && swimming) {
+      model.setSignatureScale(swimClipScale(body.speed));
     }
     model.setAttention(attentionOf(behaviour.activity));
     model.gaze.hasNeighbour = neighbour !== undefined;
@@ -680,7 +871,9 @@ export function createAnimalHerd(options: HerdOptions): AnimalHerd {
     },
     activities: () =>
       groups.flatMap((group) => group.individuals.map((one) => one.behaviour.activity)),
+    animations: () => groups.flatMap((group) => group.individuals.map((one) => one.shown)),
     whenLoaded: async () => {
+      await Promise.all(groups.map((group) => group.loaded));
       const pending = groups.flatMap((group) => group.individuals.map((one) => one.slot.ready));
       await Promise.all(pending);
     },
