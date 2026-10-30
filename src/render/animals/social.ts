@@ -22,6 +22,9 @@ const FOLLOW_SLACK_M = 0.3;
 const SLEEP_CONTACT_SLACK_M = 0.15;
 /** A regrouping animal stops at least this far from the middle of the others. */
 const REGROUP_RADIUS_MIN_M = 1.6;
+/** ... and, for a long animal, this share of its length plus this much room. */
+const REGROUP_LENGTH_SHARE = 1.2;
+const REGROUP_SLACK_M = 0.5;
 
 /** A follower stops behind the walker, centre to centre, at least as far as its own length. */
 export function followGapM(lengthM: number): number {
@@ -38,7 +41,7 @@ export function sleepContactM(lengthM: number): number {
 
 /** A regrouping animal stops this far from the middle of the others: more for a longer animal. */
 export function regroupRadiusM(lengthM: number): number {
-  return Math.max(REGROUP_RADIUS_MIN_M, lengthM * 1.2 + 0.5);
+  return Math.max(REGROUP_RADIUS_MIN_M, lengthM * REGROUP_LENGTH_SHARE + REGROUP_SLACK_M);
 }
 
 /** Longer animals greet from a little further. */

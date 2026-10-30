@@ -234,9 +234,13 @@ interface EnclosureGroup {
   clearanceM: number;
   /** Distance from an interest point at which the animals stand round it. */
   approachRadiusM: number;
-  /** How many animals the group is to have, and whether the ones to come arrive just now. */
+  /**
+   * How many animals the group is to have, and how many of them were there already: the others
+   * are newcomers, who go through the arrival sequence, even when they come before the model
+   * has finished downloading.
+   */
   wanted: number;
-  arrival: boolean;
+  settled: number;
   /** Settles once the length is known and the animals are there. */
   loaded: Promise<void>;
   loading: boolean;
@@ -428,7 +432,7 @@ export function createAnimalHerd(options: HerdOptions): AnimalHerd {
       clearanceM: CROWD_CLEARANCE_M,
       approachRadiusM: APPROACH_RADIUS_M,
       wanted: 0,
-      arrival: false,
+      settled: 0,
       loaded: Promise.resolve(),
       loading: false,
     };
@@ -440,7 +444,7 @@ export function createAnimalHerd(options: HerdOptions): AnimalHerd {
       return;
     }
     while (group.individuals.length < group.wanted) {
-      addIndividual(group, group.arrival);
+      addIndividual(group, group.individuals.length >= group.settled);
     }
     while (group.individuals.length > group.wanted) {
       removeLastIndividual(group);
@@ -455,7 +459,7 @@ export function createAnimalHerd(options: HerdOptions): AnimalHerd {
     }
     groups.push(group);
     group.wanted = progressOf(world, enclosure.speciesId)?.groupSize ?? 0;
-    group.arrival = withArrival;
+    group.settled = withArrival ? 0 : group.wanted;
     load(group);
   };
 
@@ -510,7 +514,7 @@ export function createAnimalHerd(options: HerdOptions): AnimalHerd {
       group.context.enrichmentSpots = group.pois.enrichment.length;
     }
     group.wanted = progress.groupSize;
-    group.arrival = true;
+    group.settled = Math.min(group.settled, group.wanted);
     load(group);
     fill(group);
   };
@@ -615,11 +619,11 @@ export function createAnimalHerd(options: HerdOptions): AnimalHerd {
   };
 
   const giveDestination = (group: EnclosureGroup, individual: Individual): void => {
-    const { behaviour, body, target } = individual;
+    const { behaviour, body } = individual;
     behaviour.needsDestination = false;
     if (chooseTarget(group, individual)) {
       body.arrived = false;
-      individual.bestDistance = Math.hypot(target.x - body.x, target.z - body.z);
+      individual.bestDistance = distanceToGoal(group, individual);
       individual.noProgressMs = 0;
       // A stroll or a decided pace, for the whole walk.
       individual.limits.maxSpeed = individual.topSpeed * rollPace(rng);
@@ -642,14 +646,31 @@ export function createAnimalHerd(options: HerdOptions): AnimalHerd {
     }
   };
 
-  /** A walk that gets no nearer for too long (circling a target it cannot reach) is given up. */
-  const watchProgress = (individual: Individual, elapsedMs: number): void => {
+  /**
+   * How far the animal is from where it is going. A follower's target moves with the walker it
+   * follows, so for it the walker itself is the goal.
+   */
+  const distanceToGoal = (group: EnclosureGroup, individual: Individual): number => {
     const { behaviour, body, target } = individual;
+    const leader =
+      behaviour.activity === 'followWalk' ? group.individuals[individual.followIndex] : undefined;
+    return leader === undefined
+      ? Math.hypot(target.x - body.x, target.z - body.z)
+      : Math.hypot(leader.body.x - body.x, leader.body.z - body.z);
+  };
+
+  /** A walk that gets no nearer for too long (circling a target it cannot reach) is given up. */
+  const watchProgress = (
+    group: EnclosureGroup,
+    individual: Individual,
+    elapsedMs: number,
+  ): void => {
+    const { behaviour } = individual;
     if (!isTravelling(behaviour.activity) || behaviour.needsDestination) {
       individual.noProgressMs = 0;
       return;
     }
-    const distance = Math.hypot(target.x - body.x, target.z - body.z);
+    const distance = distanceToGoal(group, individual);
     if (distance < individual.bestDistance - PROGRESS_M) {
       individual.bestDistance = distance;
       individual.noProgressMs = 0;
@@ -679,7 +700,8 @@ export function createAnimalHerd(options: HerdOptions): AnimalHerd {
       const z = water.z + Math.cos(angle) * group.approachRadiusM;
       if (
         containsPoint(group.area, x, z) &&
-        distanceToEdge(group.area, x, z, SCRATCH_POINT) >= PATH_MARGIN_M
+        distanceToEdge(group.area, x, z, SCRATCH_POINT) >= PATH_MARGIN_M &&
+        segmentStaysInside(group.area, body.x, body.z, x, z, PATH_MARGIN_M)
       ) {
         target.x = x;
         target.z = z;
@@ -705,7 +727,7 @@ export function createAnimalHerd(options: HerdOptions): AnimalHerd {
     if (behaviour.needsDestination) {
       giveDestination(group, individual);
     }
-    watchProgress(individual, elapsedMs);
+    watchProgress(group, individual, elapsedMs);
     const travelling = isTravelling(behaviour.activity);
     // At the water, a swimmer swims: a slow circuit round the point, not a swim clip on the spot.
     const swimming =

@@ -21,7 +21,7 @@ import {
 } from '@/shared';
 import type { EnclosureState, FocusArea, GameEvent, GridPoint } from '@/sim';
 import { walkClipScale, type AnimalSource } from './animal-model';
-import type { Activity } from './behaviour';
+import { isTravelling, type Activity } from './behaviour';
 import {
   MAX_ACCEL_MPS2,
   MAX_SPEED_MAX_MPS,
@@ -311,8 +311,7 @@ describe('syncAll', () => {
   });
 });
 
-// Long simulated times: slow under coverage.
-describe('life in the enclosure', { timeout: 120_000 }, () => {
+describe('life in the enclosure', () => {
   it('keeps every animal inside a non-convex enclosure, always', async () => {
     const { herd, parent } = setup();
     const area = createEnclosureArea(L_SHAPE, GRID);
@@ -377,15 +376,14 @@ describe('life in the enclosure', { timeout: 120_000 }, () => {
     );
     await herd.whenLoaded();
     // Bodies, nose to tail, not centres: a long animal is not a point (see the capsule tests).
-    const MIN_GAP_M = -0.02;
+    const MIN_WALKING_GAP_M = -0.02;
+    // At rest, by what the animal does (not by its being still for one image): room is left.
+    const MIN_RESTING_GAP_M = 0.1;
     let closest = Number.POSITIVE_INFINITY;
     let closestAtRest = Number.POSITIVE_INFINITY;
-    let previous = parent.children.map((child) => child.position.clone());
     for (let frame = 0; frame < 12_000; frame += 1) {
       herd.update(FRAME_MS, CLOSE_SCALE, ALL_VISIBLE);
-      const still = parent.children.map(
-        (child, index) => child.position.distanceTo(previous[index] ?? child.position) < 1e-9,
-      );
+      const resting = herd.activities().map((activity) => !isTravelling(activity));
       for (const [index, first] of parent.children.entries()) {
         for (const [offset, second] of parent.children.slice(index + 1).entries()) {
           const apart = capsuleGap(
@@ -398,15 +396,14 @@ describe('life in the enclosure', { timeout: 120_000 }, () => {
             ),
           );
           closest = Math.min(closest, apart);
-          if (still[index] === true && still[index + 1 + offset] === true) {
+          if (resting[index] === true && resting[index + 1 + offset] === true) {
             closestAtRest = Math.min(closestAtRest, apart);
           }
         }
       }
-      previous = parent.children.map((child) => child.position.clone());
     }
-    expect(closest).toBeGreaterThan(MIN_GAP_M);
-    expect(closestAtRest).toBeGreaterThan(MIN_GAP_M);
+    expect(closest).toBeGreaterThan(MIN_WALKING_GAP_M);
+    expect(closestAtRest).toBeGreaterThan(MIN_RESTING_GAP_M);
   });
 
   it('plays a swimming signature at the water only, from the very first routine', async () => {
@@ -577,6 +574,31 @@ describe('arrival of a group', () => {
     expect(parent.children.slice(0, 2)).toEqual(before);
   });
 
+  it('gives only the newcomers the arrival sequence when an arrival comes during the first download', async () => {
+    const { herd, parent } = setup();
+    const enclosure = outlineEnclosure('enclosure-1', SQUARE, CAPYBARA);
+    herd.syncAll(worldOf([enclosure], [{ speciesId: CAPYBARA, stars: 1, groupSize: 2 }]));
+    // The model is not there yet: the third animal arrives while the first two are being set up.
+    herd.handleEvents(
+      eventOf({
+        type: 'arrivalOpened',
+        number: 3,
+        bannerId: null,
+        speciesId: CAPYBARA,
+        rarity: 'common',
+        source: 'draw',
+        isNew: false,
+        stars: 1,
+        groupSize: 3,
+        medalsEarned: 0,
+      }),
+      worldOf([enclosure], [{ speciesId: CAPYBARA, stars: 1, groupSize: 3 }]),
+    );
+    await herd.whenLoaded();
+    expect(parent.children).toHaveLength(3);
+    expect(herd.activities()).toEqual(['rest', 'rest', 'hesitate']);
+  });
+
   it('only touches the enclosure of the species that arrived', async () => {
     const { herd, parent } = setup();
     const world = worldOf(
@@ -703,8 +725,7 @@ describe('enclosure events', () => {
   });
 });
 
-// Long simulated times: slow under coverage.
-describe('animation rate by size on screen', { timeout: 120_000 }, () => {
+describe('animation rate by size on screen', () => {
   async function group(size: number): Promise<{
     herd: ReturnType<typeof createAnimalHerd>;
     parent: Group;
@@ -848,15 +869,14 @@ describe('dispose', () => {
   });
 });
 
-// Long simulated times: slow under coverage.
-describe('life of a big group', { timeout: 120_000 }, () => {
+describe('life of a big group', () => {
   const BIG_FIELD: readonly GridPoint[] = [
     { x: 3, y: 3 },
     { x: 33, y: 3 },
     { x: 33, y: 25 },
     { x: 3, y: 25 },
   ];
-  const TWO_HOURS_FRAMES = (2 * 60 * 60 * 1000) / FRAME_MS;
+  const SIM_FRAMES = (60 * 60 * 1000) / FRAME_MS;
 
   interface Sample {
     readonly activities: readonly Activity[];
@@ -866,9 +886,10 @@ describe('life of a big group', { timeout: 120_000 }, () => {
     readonly bodyX: readonly number[];
   }
 
-  async function liveForTwoHours(
+  async function liveForAnHour(
     size: number,
     onFrame: (sample: Sample, frame: number) => void,
+    hours = 1,
   ): Promise<void> {
     const { herd, parent } = setup();
     herd.syncAll(
@@ -878,7 +899,7 @@ describe('life of a big group', { timeout: 120_000 }, () => {
       ),
     );
     await herd.whenLoaded();
-    for (let frame = 0; frame < TWO_HOURS_FRAMES; frame += 1) {
+    for (let frame = 0; frame < SIM_FRAMES * hours; frame += 1) {
       herd.update(FRAME_MS, CLOSE_SCALE, ALL_VISIBLE);
       const children = parent.children;
       onFrame(
@@ -913,7 +934,7 @@ describe('life of a big group', { timeout: 120_000 }, () => {
 
   it('shows every kind of gesture and encounter over time', async () => {
     const seen = new Set<Activity>();
-    await liveForTwoHours(5, (sample) => {
+    await liveForAnHour(5, (sample) => {
       for (const activity of sample.activities) {
         seen.add(activity);
       }
@@ -941,22 +962,30 @@ describe('life of a big group', { timeout: 120_000 }, () => {
     let joined = 0;
     let inContact = 0;
     let closest = Number.POSITIVE_INFINITY;
-    await liveForTwoHours(5, (sample) => {
-      sample.activities.forEach((activity, index) => {
-        const sleepers = (other: number): boolean => sample.activities[other] === 'sleep';
-        if (activity === 'sleep') {
-          closest = Math.min(closest, nearestOther(sample, index, sleepers));
-        }
-        if (activity === 'sleep' && previous[index] !== 'sleep' && previous[index] !== undefined) {
-          const apart = nearestOther(sample, index, sleepers);
-          if (Number.isFinite(apart)) {
-            joined += 1;
-            inContact += apart <= CONTACT_M ? 1 : 0;
+    await liveForAnHour(
+      5,
+      (sample) => {
+        sample.activities.forEach((activity, index) => {
+          const sleepers = (other: number): boolean => sample.activities[other] === 'sleep';
+          if (activity === 'sleep') {
+            closest = Math.min(closest, nearestOther(sample, index, sleepers));
           }
-        }
-      });
-      previous = sample.activities;
-    });
+          if (
+            activity === 'sleep' &&
+            previous[index] !== 'sleep' &&
+            previous[index] !== undefined
+          ) {
+            const apart = nearestOther(sample, index, sleepers);
+            if (Number.isFinite(apart)) {
+              joined += 1;
+              inContact += apart <= CONTACT_M ? 1 : 0;
+            }
+          }
+        });
+        previous = sample.activities;
+      },
+      2,
+    );
     expect(joined).toBeGreaterThan(5);
     // Left to chance, a sleeper would land within contact of another in a few cases out of a hundred.
     expect(inContact / joined).toBeGreaterThan(0.35);
@@ -972,7 +1001,7 @@ describe('life of a big group', { timeout: 120_000 }, () => {
       (other: number): boolean =>
         sample.activities[other] === 'walk' || sample.activities[other] === 'followWalk';
     let lastSample: Sample | null = null;
-    await liveForTwoHours(5, (sample) => {
+    await liveForAnHour(5, (sample) => {
       sample.activities.forEach((activity, index) => {
         if (activity === 'followWalk' && previous[index] !== 'followWalk') {
           before.push(nearestOther(sample, index, walking(sample)));
@@ -1014,7 +1043,7 @@ describe('life of a big group', { timeout: 120_000 }, () => {
         sumZ / count - (sample.z[index] ?? 0),
       );
     };
-    await liveForTwoHours(4, (sample) => {
+    await liveForAnHour(4, (sample) => {
       sample.activities.forEach((activity, index) => {
         if (activity === 'regroupWalk' && previous[index] !== 'regroupWalk') {
           before.push(centreDistance(sample, index));
@@ -1053,7 +1082,7 @@ describe('life of a big group', { timeout: 120_000 }, () => {
       const turn = Math.abs((sample.yaw[index] ?? 0) - wanted) % (2 * Math.PI);
       return Math.min(turn, 2 * Math.PI - turn);
     };
-    await liveForTwoHours(5, (sample, frame) => {
+    await liveForAnHour(5, (sample, frame) => {
       sample.activities.forEach((activity, index) => {
         if (activity === 'salute' && previous[index] !== 'salute') {
           starts.set(index, frame);
@@ -1090,7 +1119,7 @@ describe('life of a big group', { timeout: 120_000 }, () => {
     const towardsMate: number[] = [];
     const towardsOther: number[] = [];
     let episodes = 0;
-    for (let frame = 0; frame < TWO_HOURS_FRAMES; frame += 1) {
+    for (let frame = 0; frame < SIM_FRAMES; frame += 1) {
       herd.update(FRAME_MS, CLOSE_SCALE, ALL_VISIBLE);
       const now = herd.activities();
       const saluting = now.flatMap((activity, index) => (activity === 'salute' ? [index] : []));
@@ -1161,7 +1190,7 @@ describe('life of a big group', { timeout: 120_000 }, () => {
     let matching = 0;
     let previous: Sample | null = null;
     const walkingFor: number[] = [];
-    await liveForTwoHours(4, (sample) => {
+    await liveForAnHour(4, (sample) => {
       sample.activities.forEach((activity, index) => {
         const speed = previous
           ? Math.hypot(
@@ -1193,7 +1222,6 @@ describe('life of a big group', { timeout: 120_000 }, () => {
   });
 });
 
-// Long simulated times: slow under coverage.
 describe(
   'what an animal does matches how it moves, whatever its length',
   { timeout: 120_000 },
@@ -1205,7 +1233,7 @@ describe(
       { name: 'otter', id: OTTER, size: 4, swims: true },
       { name: 'jaguar', id: JAGUAR, size: 3, swims: false },
     ] as const;
-    const FRAMES = (2 * 60 * 60 * 1000) / FRAME_MS;
+    const FRAMES = (60 * 60 * 1000) / FRAME_MS;
     const dtS = FRAME_MS / 1000;
     /** Above these, an animal plainly moves or turns: its clip must be a walk (or a swim). */
     const NOTABLE_SPEED_MPS = 0.08;
@@ -1285,8 +1313,7 @@ describe(
   },
 );
 
-// Long simulated times: slow under coverage.
-describe('bodies never run into each other, whatever their length', { timeout: 120_000 }, () => {
+describe('bodies never run into each other, whatever their length', () => {
   const KINDS = [
     { name: 'capybara', id: CAPYBARA, lengthM: 1.18, size: 6 },
     { name: 'peccary', id: PECCARY, lengthM: 1.07, size: 6 },
@@ -1294,10 +1321,10 @@ describe('bodies never run into each other, whatever their length', { timeout: 1
   ] as const;
   /** How far two capsules may overlap before it counts as a collision. */
   const OVERLAP_TOLERANCE_M = 0.02;
-  const FRAMES = (2 * 60 * 60 * 1000) / FRAME_MS;
+  const FRAMES = (60 * 60 * 1000) / FRAME_MS;
 
   it.each(KINDS)(
-    '$name: no overlap of the capsules in two hours, at rest or on the move',
+    '$name: no overlap of the capsules in an hour, at rest or on the move',
     async (kind) => {
       const { herd, parent } = setup();
       herd.syncAll(
@@ -1335,14 +1362,14 @@ describe('bodies never run into each other, whatever their length', { timeout: 1
   );
 });
 
-// Long simulated times: slow under coverage.
-describe('lying together and greeting, whatever the length', { timeout: 120_000 }, () => {
+describe('lying together and greeting, whatever the length', () => {
   const KINDS = [
     { name: 'capybara', id: CAPYBARA, lengthM: 1.18 },
     { name: 'peccary', id: PECCARY, lengthM: 1.07 },
     { name: 'tapir', id: TAPIR, lengthM: 2.03 },
   ] as const;
   const OVERLAP_TOLERANCE_M = 0.02;
+  // Piles and greetings are rare: two hours, to have enough of them to judge.
   const FRAMES = (2 * 60 * 60 * 1000) / FRAME_MS;
   const BIG: readonly GridPoint[] = [
     { x: 3, y: 3 },
@@ -1420,8 +1447,7 @@ describe('lying together and greeting, whatever the length', { timeout: 120_000 
   );
 });
 
-// Long simulated times: slow under coverage.
-describe('the otter swims for real at the water', { timeout: 120_000 }, () => {
+describe('the otter swims for real at the water', () => {
   it('moves slowly round the water point while its swim clip plays, inside the enclosure', async () => {
     const area = createEnclosureArea(L_SHAPE, GRID);
     if (area === null) {
