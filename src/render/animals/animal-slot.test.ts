@@ -1,7 +1,7 @@
 import { Group } from 'three';
 import { describe, expect, it, vi } from 'vitest';
 import { err, ok, type Result } from '@/shared';
-import type { AnimalModel, MissingClip } from './animal-model';
+import type { AnimalModel, AnimalModelProblem } from './animal-model';
 import { createAnimalSlot, type AnimalSlotProblem } from './animal-slot';
 
 const PLACEMENT = { x: 3, z: -2, yawRad: 1 };
@@ -11,8 +11,11 @@ function fakeModel(): AnimalModel & { updates: number[]; disposed: number } {
   const updates: number[] = [];
   const model = {
     root,
+    signatureName: 'swim',
     updates,
     disposed: 0,
+    play: () => undefined,
+    setTimeScale: () => undefined,
     update: (elapsedMs: number) => {
       model.updates.push(elapsedMs);
     },
@@ -25,13 +28,13 @@ function fakeModel(): AnimalModel & { updates: number[]; disposed: number } {
 }
 
 function deferred(): {
-  promise: Promise<Result<AnimalModel, MissingClip>>;
-  resolve: (value: Result<AnimalModel, MissingClip>) => void;
+  promise: Promise<Result<AnimalModel, AnimalModelProblem>>;
+  resolve: (value: Result<AnimalModel, AnimalModelProblem>) => void;
   reject: (error: unknown) => void;
 } {
-  let resolve: (value: Result<AnimalModel, MissingClip>) => void = () => undefined;
+  let resolve: (value: Result<AnimalModel, AnimalModelProblem>) => void = () => undefined;
   let reject: (error: unknown) => void = () => undefined;
-  const promise = new Promise<Result<AnimalModel, MissingClip>>((res, rej) => {
+  const promise = new Promise<Result<AnimalModel, AnimalModelProblem>>((res, rej) => {
     resolve = res;
     reject = rej;
   });
@@ -52,6 +55,7 @@ describe('createAnimalSlot', () => {
     pending.resolve(ok(model));
     await slot.ready;
     expect(parent.children).toEqual([model.root]);
+    expect(slot.model()).toBe(model);
     expect(model.root.position.toArray()).toEqual([3, 0, -2]);
     expect(model.root.rotation.y).toBe(1);
 
@@ -62,6 +66,7 @@ describe('createAnimalSlot', () => {
     slot.dispose();
     expect(model.disposed).toBe(1);
     expect(parent.children).toEqual([]);
+    expect(slot.model()).toBeUndefined();
     slot.update(16);
     expect(model.updates).toEqual([33]);
   });
@@ -79,7 +84,7 @@ describe('createAnimalSlot', () => {
     expect(parent.children).toEqual([]);
   });
 
-  it('reports a model without the clip', async () => {
+  it('reports a model that cannot be used', async () => {
     const parent = new Group();
     const onProblem = vi.fn<(problem: AnimalSlotProblem) => void>();
     const slot = createAnimalSlot(
@@ -89,7 +94,10 @@ describe('createAnimalSlot', () => {
       onProblem,
     );
     await slot.ready;
-    expect(onProblem).toHaveBeenCalledWith({ kind: 'missingClip', clip: 'idle' });
+    expect(onProblem).toHaveBeenCalledWith({
+      kind: 'invalidModel',
+      problem: { kind: 'missingClip', name: 'idle' },
+    });
     expect(parent.children).toEqual([]);
   });
 

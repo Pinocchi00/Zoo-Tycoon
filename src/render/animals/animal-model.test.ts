@@ -8,9 +8,22 @@ import {
   VectorKeyframeTrack,
 } from 'three';
 import { describe, expect, it, vi } from 'vitest';
-import { createAnimalModel, loadAnimalModel, parseAnimalModel, pickClip } from './animal-model';
+import {
+  cloneAnimalSource,
+  createAnimalModel,
+  disposeAnimalSource,
+  findSignatureClip,
+  loadAnimalSource,
+  parseAnimalSource,
+  pickClip,
+  type AnimalLook,
+  type AnimalSource,
+} from './animal-model';
 
 const SLIDE_X_M = 1;
+const SLEEP_SCALE = 2;
+const FADE_MS = 400;
+const LOOK: AnimalLook = { startPhase: 0, timeScale: 1 };
 
 /** A clip that slides the root 1 m along X in 1 s, easy to observe. */
 function slideClip(name: string): AnimationClip {
@@ -19,12 +32,37 @@ function slideClip(name: string): AnimationClip {
   ]);
 }
 
+/** A clip that scales the root from 1 to `SLEEP_SCALE` in 1 s: it never touches the position. */
+function scaleClip(name: string): AnimationClip {
+  return new AnimationClip(name, 1, [
+    new VectorKeyframeTrack('.scale', [0, 1], [1, 1, 1, SLEEP_SCALE, SLEEP_SCALE, SLEEP_SCALE]),
+  ]);
+}
+
+function fullClips(signature = 'swim'): AnimationClip[] {
+  return [
+    slideClip('idle'),
+    slideClip('walk'),
+    scaleClip('sleep'),
+    scaleClip('eat'),
+    scaleClip(signature),
+  ];
+}
+
 function texturedScene(): { scene: Group; mesh: Mesh; material: MeshStandardMaterial } {
   const material = new MeshStandardMaterial({ map: new Texture() });
   const mesh = new Mesh(new BoxGeometry(), material);
   const scene = new Group();
   scene.add(mesh);
   return { scene, mesh, material };
+}
+
+function fullSource(signature = 'swim'): AnimalSource & {
+  scene: Group;
+  mesh: Mesh;
+  material: MeshStandardMaterial;
+} {
+  return { ...texturedScene(), animations: fullClips(signature) };
 }
 
 describe('pickClip', () => {
@@ -44,56 +82,183 @@ describe('pickClip', () => {
   });
 });
 
+describe('findSignatureClip', () => {
+  const required = ['idle', 'walk', 'sleep', 'eat'].map((name) => new AnimationClip(name, 1, []));
+
+  it('is the one clip that is not required', () => {
+    const swim = new AnimationClip('swim', 1, []);
+    expect(findSignatureClip([...required, swim])).toEqual({ ok: true, value: swim });
+  });
+
+  it('refuses a model without a signature', () => {
+    expect(findSignatureClip(required)).toEqual({
+      ok: false,
+      error: { kind: 'badSignature', clips: [] },
+    });
+  });
+
+  it('refuses a model with two candidates', () => {
+    const extra = [new AnimationClip('swim', 1, []), new AnimationClip('stretch', 1, [])];
+    expect(findSignatureClip([...required, ...extra])).toEqual({
+      ok: false,
+      error: { kind: 'badSignature', clips: ['swim', 'stretch'] },
+    });
+  });
+});
+
 describe('createAnimalModel', () => {
-  it('plays the requested clip in a loop as time advances', () => {
-    const { scene, mesh } = texturedScene();
-    const created = createAnimalModel(
-      { scene, animations: [slideClip('walk'), slideClip('idle')] },
-      'idle',
-    );
+  it('plays idle in a loop as time advances, from the given phase', () => {
+    const source = fullSource();
+    const created = createAnimalModel(source, { startPhase: 0.25, timeScale: 1 });
     if (!created.ok) {
       throw new Error('expected a model');
     }
-    expect(created.value.root).toBe(scene);
-    expect(mesh.castShadow).toBe(true);
+    expect(created.value.root).toBe(source.scene);
+    expect(created.value.signatureName).toBe('swim');
+    expect(source.mesh.castShadow).toBe(true);
 
     created.value.update(500);
-    expect(scene.position.x).toBeCloseTo(SLIDE_X_M / 2);
-    // 1.25 s into a 1 s loop is 0.25 s into the second lap.
-    created.value.update(750);
-    expect(scene.position.x).toBeCloseTo(SLIDE_X_M / 4);
+    expect(source.scene.position.x).toBeCloseTo(0.75);
+    // 0.75 s into a 1 s loop plus 0.5 s is 0.25 s into the second lap.
+    created.value.update(500);
+    expect(source.scene.position.x).toBeCloseTo(0.25);
   });
 
-  it('refuses a model without the clip and frees its GPU resources', () => {
-    const { scene, mesh, material } = texturedScene();
-    const geometryDispose = vi.spyOn(mesh.geometry, 'dispose');
-    const mapDispose = vi.spyOn(material.map ?? new Texture(), 'dispose');
-    const materialDispose = vi.spyOn(material, 'dispose');
+  it('plays faster or slower with the time scale, set at creation or later', () => {
+    const source = fullSource();
+    const created = createAnimalModel(source, { startPhase: 0, timeScale: 0.5 });
+    if (!created.ok) {
+      throw new Error('expected a model');
+    }
+    created.value.update(500);
+    expect(source.scene.position.x).toBeCloseTo(0.25);
+    created.value.setTimeScale(1);
+    created.value.update(500);
+    expect(source.scene.position.x).toBeCloseTo(0.75);
+  });
 
-    expect(createAnimalModel({ scene, animations: [slideClip('walk')] }, 'idle')).toEqual({
+  it('fades to another clip, and stays on it', () => {
+    const source = fullSource();
+    const created = createAnimalModel(source, LOOK);
+    if (!created.ok) {
+      throw new Error('expected a model');
+    }
+    created.value.play('sleep');
+    created.value.update(FADE_MS * 2);
+    expect(source.scene.scale.x).toBeCloseTo(1 + (SLEEP_SCALE - 1) * ((FADE_MS * 2) / 1000));
+
+    const before = source.scene.scale.x;
+    created.value.play('sleep');
+    created.value.update(100);
+    // Asking again for the clip already playing does not restart it.
+    expect(source.scene.scale.x).toBeGreaterThan(before);
+  });
+
+  it('can play the signature clip', () => {
+    const source = fullSource('stretch');
+    const created = createAnimalModel(source, LOOK);
+    if (!created.ok) {
+      throw new Error('expected a model');
+    }
+    created.value.play('signature');
+    created.value.update(FADE_MS * 2);
+    expect(source.scene.scale.x).toBeCloseTo(1 + (SLEEP_SCALE - 1) * ((FADE_MS * 2) / 1000));
+  });
+
+  it.each(['idle', 'walk', 'sleep', 'eat'] as const)(
+    'refuses a model without %s and frees its GPU resources',
+    (missing) => {
+      const { scene, mesh, material } = texturedScene();
+      const geometryDispose = vi.spyOn(mesh.geometry, 'dispose');
+      const mapDispose = vi.spyOn(material.map ?? new Texture(), 'dispose');
+      const materialDispose = vi.spyOn(material, 'dispose');
+      const animations = fullClips().filter((clip) => clip.name !== missing);
+
+      expect(createAnimalModel({ scene, animations }, LOOK)).toEqual({
+        ok: false,
+        error: { kind: 'missingClip', name: missing },
+      });
+      expect(geometryDispose).toHaveBeenCalledOnce();
+      expect(mapDispose).toHaveBeenCalledOnce();
+      expect(materialDispose).toHaveBeenCalledOnce();
+    },
+  );
+
+  it('refuses a model without a signature', () => {
+    const { scene } = texturedScene();
+    const animations = fullClips().filter((clip) => clip.name !== 'swim');
+    expect(createAnimalModel({ scene, animations }, LOOK)).toEqual({
       ok: false,
-      error: { kind: 'missingClip', name: 'idle' },
+      error: { kind: 'badSignature', clips: [] },
     });
-    expect(geometryDispose).toHaveBeenCalledOnce();
-    expect(mapDispose).toHaveBeenCalledOnce();
-    expect(materialDispose).toHaveBeenCalledOnce();
+  });
+
+  it('keeps shared resources when a clone is refused or disposed', () => {
+    const refused = texturedScene();
+    const refusedDispose = vi.spyOn(refused.material, 'dispose');
+    const options = { sharedResources: true };
+    expect(createAnimalModel({ scene: refused.scene, animations: [] }, LOOK, options).ok).toBe(
+      false,
+    );
+    expect(refusedDispose).not.toHaveBeenCalled();
+
+    const source = fullSource();
+    const created = createAnimalModel(source, LOOK, options);
+    if (!created.ok) {
+      throw new Error('expected a model');
+    }
+    const materialDispose = vi.spyOn(source.material, 'dispose');
+    created.value.dispose();
+    expect(materialDispose).not.toHaveBeenCalled();
   });
 
   it('dispose detaches the model, frees it and stops the animation', () => {
-    const { scene, material } = texturedScene();
+    const source = fullSource();
     const parent = new Group();
-    parent.add(scene);
-    const created = createAnimalModel({ scene, animations: [slideClip('idle')] }, 'idle');
+    parent.add(source.scene);
+    const created = createAnimalModel(source, LOOK);
     if (!created.ok) {
       throw new Error('expected a model');
     }
-    const materialDispose = vi.spyOn(material, 'dispose');
+    const materialDispose = vi.spyOn(source.material, 'dispose');
     created.value.dispose();
     expect(parent.children).toEqual([]);
     expect(materialDispose).toHaveBeenCalledOnce();
 
     created.value.update(500);
-    expect(scene.position.x).toBe(0);
+    expect(source.scene.position.x).toBe(0);
+  });
+});
+
+describe('cloneAnimalSource', () => {
+  it('gives each individual its own nodes but shares geometry, materials and clips', () => {
+    const source = fullSource();
+    const copy = cloneAnimalSource(source);
+    expect(copy.scene).not.toBe(source.scene);
+    expect(copy.animations).toBe(source.animations);
+    const copiedMesh = copy.scene.children[0];
+    expect(copiedMesh).toBeInstanceOf(Mesh);
+    expect(copiedMesh).not.toBe(source.mesh);
+    if (copiedMesh instanceof Mesh) {
+      expect(copiedMesh.geometry).toBe(source.mesh.geometry);
+    }
+
+    const created = createAnimalModel(copy, LOOK, { sharedResources: true });
+    if (!created.ok) {
+      throw new Error('expected a model');
+    }
+    created.value.update(500);
+    expect(copy.scene.position.x).toBeCloseTo(0.5);
+    expect(source.scene.position.x).toBe(0);
+  });
+
+  it('disposeAnimalSource frees the shared geometry and material', () => {
+    const source = fullSource();
+    const geometryDispose = vi.spyOn(source.mesh.geometry, 'dispose');
+    const materialDispose = vi.spyOn(source.material, 'dispose');
+    disposeAnimalSource(source);
+    expect(geometryDispose).toHaveBeenCalledOnce();
+    expect(materialDispose).toHaveBeenCalledOnce();
   });
 });
 
@@ -109,8 +274,8 @@ function padded(bytes: Uint8Array, filler: number): Uint8Array {
   return out;
 }
 
-/** Smallest .glb with an animated node: times [0, 1], translations (0,0,0) then (1,0,0). */
-function animatedGlb(animation: string): ArrayBuffer {
+/** Smallest .glb with one animation per name, all moving a node: translations (0,0,0) to (1,0,0). */
+function animatedGlb(...names: string[]): ArrayBuffer {
   const bin = new Uint8Array(new Float32Array([0, 1, 0, 0, 0, SLIDE_X_M, 0, 0]).buffer);
   const gltf = {
     asset: { version: '2.0' },
@@ -126,13 +291,11 @@ function animatedGlb(animation: string): ArrayBuffer {
       { bufferView: 0, componentType: 5126, count: 2, type: 'SCALAR', min: [0], max: [1] },
       { bufferView: 1, componentType: 5126, count: 2, type: 'VEC3' },
     ],
-    animations: [
-      {
-        name: animation,
-        samplers: [{ input: 0, output: 1 }],
-        channels: [{ sampler: 0, target: { node: 0, path: 'translation' } }],
-      },
-    ],
+    animations: names.map((name) => ({
+      name,
+      samplers: [{ input: 0, output: 1 }],
+      channels: [{ sampler: 0, target: { node: 0, path: 'translation' } }],
+    })),
   };
   const json = padded(new TextEncoder().encode(JSON.stringify(gltf)), 0x20);
   const body = padded(bin, 0);
@@ -152,33 +315,22 @@ function animatedGlb(animation: string): ArrayBuffer {
   return out.buffer;
 }
 
-describe('parseAnimalModel', () => {
-  it('decodes a .glb and plays its idle animation', async () => {
-    const parsed = await parseAnimalModel(animatedGlb('idle'), 'idle');
-    if (!parsed.ok) {
-      throw new Error('expected a model');
-    }
-    parsed.value.update(500);
-    const node = parsed.value.root.getObjectByName('root');
-    expect(node?.position.x).toBeCloseTo(SLIDE_X_M / 2);
-  });
-
-  it('reports a .glb without idle', async () => {
-    expect(await parseAnimalModel(animatedGlb('sleep'), 'idle')).toEqual({
-      ok: false,
-      error: { kind: 'missingClip', name: 'idle' },
-    });
+describe('parseAnimalSource', () => {
+  it('decodes a .glb with its animations', async () => {
+    const source = await parseAnimalSource(animatedGlb('idle', 'swim'));
+    expect(source.animations.map((clip) => clip.name)).toEqual(['idle', 'swim']);
+    expect(source.scene.getObjectByName('root')).toBeDefined();
   });
 });
 
-describe('loadAnimalModel', () => {
+describe('loadAnimalSource', () => {
   it('downloads then decodes the model', async () => {
     const fetchMock = vi.fn(() => Promise.resolve(new Response(animatedGlb('idle'))));
     vi.stubGlobal('fetch', fetchMock);
     try {
-      const loaded = await loadAnimalModel('/capybara.glb', 'idle');
+      const loaded = await loadAnimalSource('/capybara.glb');
       expect(fetchMock).toHaveBeenCalledWith('/capybara.glb');
-      expect(loaded.ok).toBe(true);
+      expect(loaded.animations).toHaveLength(1);
     } finally {
       vi.unstubAllGlobals();
     }
@@ -187,7 +339,7 @@ describe('loadAnimalModel', () => {
   it('rejects when the download fails', async () => {
     vi.stubGlobal('fetch', () => Promise.resolve(new Response(null, { status: 404 })));
     try {
-      await expect(loadAnimalModel('/missing.glb', 'idle')).rejects.toThrow('HTTP 404');
+      await expect(loadAnimalSource('/missing.glb')).rejects.toThrow('HTTP 404');
     } finally {
       vi.unstubAllGlobals();
     }

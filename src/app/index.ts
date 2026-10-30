@@ -15,8 +15,9 @@ import {
   recordFrame,
   type FrameSampler,
   type QualityLevel,
+  type SpeciesLook,
 } from '@/render';
-import { logger } from '@/shared';
+import { logger, type SpeciesId } from '@/shared';
 import { deserialize } from '@/save';
 import {
   advance,
@@ -96,6 +97,14 @@ ${formatDataErrors(loaded.error)}`);
   return loaded.value;
 }
 
+/** What the 3D view needs to know about a species. */
+function speciesLook(data: GameData, id: SpeciesId): SpeciesLook | undefined {
+  const species = data.species.get(id);
+  return species === undefined
+    ? undefined
+    : { modelId: species.modelId, hasWater: species.habitatKit.water !== null };
+}
+
 async function main(): Promise<void> {
   const data = requireGameData();
   logger.info(`Game data loaded: ${String(data.species.size)} species.`);
@@ -122,6 +131,7 @@ async function main(): Promise<void> {
     known ?? BENCHMARK_LEVEL,
     terrainGrid(data.terrain),
     entranceFocus(data.terrain),
+    (id) => speciesLook(data, id),
   );
   const resize = (): void => {
     view.resize(root.clientWidth, root.clientHeight);
@@ -142,13 +152,14 @@ async function main(): Promise<void> {
   const saves = createSaveStorage(store, deserialize);
   const state = await loadOrCreatePark(saves, events, () => createNewGame(newParkSeed(), data));
   const autosaver = createAutosaver(saves, state, () => Date.now());
+  view.syncAnimals(state);
 
   const loop = createGameLoop(browserScheduler, (frameMs, simulationMs) => {
     view.writeFocusArea(focus);
     advance(state, simulationMs, context, events);
     autosaver.record(simulationMs);
-    // Nothing listens to the simulation yet; draining keeps the queue from growing.
-    drain(events);
+    // Only the animals listen to the simulation so far; draining keeps the queue from growing.
+    view.handleEvents(drain(events), state);
     view.frame(frameMs);
     fps?.record(frameMs);
     if (sampler !== null) {
