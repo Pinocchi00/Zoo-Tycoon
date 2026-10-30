@@ -26,12 +26,16 @@ import {
   createSimContext,
   drain,
   type FocusArea,
+  type GameState,
 } from '@/sim';
 import type { FpsCounter } from './dev-fps';
 import { entranceFocus, terrainGrid } from './entrance-focus';
 import { createGameLoop, type FrameScheduler } from './game-loop';
 import { createAutosaver, loadOrCreatePark } from './park-save';
 
+/** Development only: `?demo=animaux` opens a ready-made park to look at the animals. */
+const DEMO_QUERY_PARAMETER = 'demo';
+const ANIMAL_DEMO = 'animaux';
 const QUALITY_STORAGE_KEY = 'settings.quality';
 /** `?quality=low|medium|high` forces a level, and keeps it, until an options screen exists. */
 const QUALITY_QUERY_PARAMETER = 'quality';
@@ -117,10 +121,14 @@ async function main(): Promise<void> {
   const opened = await openPlatformTextStore();
   logStorage(opened);
   const { store } = opened;
+  // The demo never writes to storage: not the park, not even the quality setting.
+  const demo =
+    import.meta.env.DEV &&
+    new URLSearchParams(window.location.search).get(DEMO_QUERY_PARAMETER) === ANIMAL_DEMO;
   const forced = parseQualityLevel(
     new URLSearchParams(window.location.search).get(QUALITY_QUERY_PARAMETER),
   );
-  if (forced !== null) {
+  if (forced !== null && !demo) {
     storeQuality(store, forced);
   }
   const known = forced ?? (await readStoredQuality(store));
@@ -150,14 +158,20 @@ async function main(): Promise<void> {
   const focus: FocusArea = { minColumn: 0, minRow: 0, maxColumn: 0, maxRow: 0 };
   context.focus = focus;
   const saves = createSaveStorage(store, deserialize);
-  const state = await loadOrCreatePark(saves, events, () => createNewGame(newParkSeed(), data));
-  const autosaver = createAutosaver(saves, state, () => Date.now());
+  let state: GameState;
+  if (demo) {
+    const { buildAnimalDemo } = await import('./dev-demo');
+    state = buildAnimalDemo(data, events);
+  } else {
+    state = await loadOrCreatePark(saves, events, () => createNewGame(newParkSeed(), data));
+  }
+  const autosaver = demo ? null : createAutosaver(saves, state, () => Date.now());
   view.syncAnimals(state);
 
   const loop = createGameLoop(browserScheduler, (frameMs, simulationMs) => {
     view.writeFocusArea(focus);
     advance(state, simulationMs, context, events);
-    autosaver.record(simulationMs);
+    autosaver?.record(simulationMs);
     // Only the animals listen to the simulation so far; draining keeps the queue from growing.
     view.handleEvents(drain(events), state);
     view.frame(frameMs);
@@ -167,7 +181,9 @@ async function main(): Promise<void> {
       if (chosen !== null) {
         sampler = null;
         view.setQuality(chosen);
-        storeQuality(store, chosen);
+        if (!demo) {
+          storeQuality(store, chosen);
+        }
         logger.info(`Quality test chose "${chosen}".`);
       }
     }
@@ -178,7 +194,7 @@ async function main(): Promise<void> {
       loop.start();
     } else {
       loop.stop();
-      void autosaver.saveNow();
+      void autosaver?.saveNow();
     }
   });
   if (!document.hidden) {
