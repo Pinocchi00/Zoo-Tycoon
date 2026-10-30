@@ -49,9 +49,11 @@ const limbPartSchema = z.strictObject({
 });
 
 const nonNegative = z.number().nonnegative();
+const MAX_TAIL_LIFT_DEG = 90;
 
 /** Names of the signature animations: each species declares exactly one. */
 export const SIGNATURE_ANIMATIONS = ['swim', 'stretch', 'trunk', 'root'] as const;
+export type SignatureAnimation = (typeof SIGNATURE_ANIMATIONS)[number];
 const signatureSchema = z.enum(SIGNATURE_ANIMATIONS);
 
 const animationsSchema = z.strictObject({
@@ -79,7 +81,7 @@ const animationsSchema = z.strictObject({
     /** How far the head rests below its standing pose. */
     headDropDeg: nonNegative,
     /** Raises the tail (when there is one) so that it does not sink into the ground. */
-    tailLiftDeg: nonNegative.optional(),
+    tailLiftDeg: z.number().min(0).max(MAX_TAIL_LIFT_DEG).optional(),
   }),
   eat: z.strictObject({
     durationS: positive,
@@ -146,6 +148,15 @@ export const speciesDescriptionSchema = z
         path: ['animations', description.signature],
         message: `the signature animation "${description.signature}" needs its settings in animations`,
       });
+    }
+    for (const other of SIGNATURE_ANIMATIONS) {
+      if (other !== description.signature && description.animations[other] !== undefined) {
+        context.addIssue({
+          code: 'custom',
+          path: ['animations', other],
+          message: `the settings of "${other}" are not allowed: the signature is "${description.signature}"`,
+        });
+      }
     }
   });
 

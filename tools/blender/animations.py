@@ -53,6 +53,8 @@ TAIL_LAG = 0.25
 TRUNK_CURL_CYCLES = 2
 # The rooting head sweeps from side to side twice per loop.
 ROOT_SWEEP_CYCLES = 2
+# Without a setting, the tail keeps its standing pose while sleeping.
+DEFAULT_TAIL_LIFT_DEG = 0.0
 
 
 def _frame(seconds):
@@ -107,7 +109,13 @@ def _lift_body(armature, frame, lift_m, tilt_rad=0.0):
     for name in LEG_BONES:
         distance = abs(bones[name].head_local.y - bones["spine"].head_local.y)
         leg_lift = lift_m - distance * math.sin(tilt_rad)
-        _key(armature, name, "scale", frame, (1.0, 1.0 + leg_lift / bones[name].length, 1.0))
+        leg_scale = 1.0 + leg_lift / bones[name].length
+        if leg_scale <= 0.0:
+            raise ValueError(
+                f"{armature.name}: the body drop leaves bone '{name}' with a scale of "
+                f"{leg_scale:.3f}; lower the drop or lengthen the leg"
+            )
+        _key(armature, name, "scale", frame, (1.0, leg_scale, 1.0))
 
 
 def build_idle(armature, params):
@@ -166,7 +174,7 @@ def build_sleep(armature, params):
     breath = params["breathScale"]
     breaths = params["breathsPerLoop"]
     head_drop = math.radians(params["headDropDeg"])
-    tail_lift = math.radians(params.get("tailLiftDeg", 0.0))
+    tail_lift = math.radians(params.get("tailLiftDeg", DEFAULT_TAIL_LIFT_DEG))
     for i in range(breaths * 2 + 1):
         inflated = 1.0 + breath if i % 2 == 1 else 1.0
         _key(armature, "chest", "scale", round(end * i / (breaths * 2)), (inflated, 1.0, inflated))
@@ -295,20 +303,14 @@ SIGNATURE_BUILDERS = {
 }
 
 
-def _declared_signature(params):
-    # build.py hands over only the animation settings: the signature is the one
-    # signature animation they describe (the schema guarantees the declared one is there).
-    declared = [name for name in SIGNATURE_BUILDERS if name in params]
-    if len(declared) != 1:
-        raise ValueError(f"expected settings for exactly one signature animation, got {declared}")
-    return declared[0]
-
-
-def build_animations(armature, params):
+def build_animations(armature, params, signature):
     missing = [name for name in REQUIRED_BONES if name not in armature.pose.bones]
     if missing:
         raise ValueError(f"skeleton is missing bones: {', '.join(missing)}")
-    signature = _declared_signature(params)
+    if signature not in SIGNATURE_BUILDERS:
+        raise ValueError(f"unknown signature animation '{signature}'")
+    if signature not in params:
+        raise ValueError(f"the signature animation '{signature}' has no settings in animations")
     bpy.context.scene.render.fps = FPS
     armature.animation_data_create()
     build_idle(armature, params["idle"])

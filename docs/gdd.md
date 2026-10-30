@@ -221,17 +221,17 @@ La colonne « Signature » liste les traits à exagérer pour qu'on reconnaisse 
 | Espèce | Rareté | Groupe | Signature |
 | --- | --- | --- | --- |
 | Capybara | Commun | 4 | Museau carré, corps en tonneau, zen dans l'eau |
-| Pécari à collier | Commun | 5 | Collier clair, groin |
+| Pécari à collier | Commun | 5 | Collier clair, groin, crête hérissée sur le dos |
 | Ouistiti pygmée | Commun | 4 | Minuscule, crinière autour de la face |
 | Ara macao | Peu commun | 4 | Rouge, jaune et bleu, très longue queue |
 | Toucan toco | Peu commun | 3 | Bec orange géant |
 | Paresseux à deux doigts | Peu commun | 2 | Suspendu tête en bas, sourire permanent |
-| Tapir du Brésil | Peu commun | 2 | Petite trompe mobile, robe brun uni |
+| Tapir du Brésil | Peu commun | 2 | Petite trompe mobile, robe brun uni, croupe ronde et lourde |
 | Singe-araignée | Peu commun | 5 | Membres très longs, queue enroulée aux branches |
 | Tamarin-lion doré | Rare | 4 | Crinière orange vif |
-| Loutre géante | Rare | 4 | Tache blanche sur la gorge, nage en bande |
+| Loutre géante | Rare | 4 | Tache blanche sur la gorge, nage en bande, queue épaisse et plate |
 | Fourmilier géant | Rare | 2 | Museau en tube, queue en panache |
-| Jaguar | Très rare | 2 | Rosettes avec un point au centre, tête massive |
+| Jaguar | Très rare | 2 | Rosettes avec un point au centre, tête massive, longue queue tombante |
 
 ### Asie tropicale
 

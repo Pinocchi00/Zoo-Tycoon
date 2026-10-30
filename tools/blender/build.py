@@ -75,7 +75,7 @@ def main():
     mesh_object = build_mesh(description["parts"], palette, material)
     mesh_object.name = description["id"]
     bind(mesh_object, armature)
-    build_animations(armature, description["animations"])
+    build_animations(armature, description["animations"], description["signature"])
     export(args.out)
 
     triangles = sum(len(p.vertices) - 2 for p in mesh_object.data.polygons)
