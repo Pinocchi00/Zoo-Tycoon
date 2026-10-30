@@ -32,5 +32,5 @@ export const giantOtter = {
     { id: 'log-rest', nameKey: 'behavior.logRest' },
   ],
   texts: { nameKey: 'species.giantOtter.name', signatureKey: 'species.giantOtter.signature' },
-  modelId: null,
+  modelId: 'giant_otter',
 } satisfies SpeciesInput;

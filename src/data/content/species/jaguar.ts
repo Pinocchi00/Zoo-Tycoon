@@ -31,5 +31,5 @@ export const jaguar = {
     { id: 'water-hunt', nameKey: 'behavior.waterHunt' },
   ],
   texts: { nameKey: 'species.jaguar.name', signatureKey: 'species.jaguar.signature' },
-  modelId: null,
+  modelId: 'jaguar',
 } satisfies SpeciesInput;

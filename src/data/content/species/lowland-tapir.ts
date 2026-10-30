@@ -31,5 +31,5 @@ export const lowlandTapir = {
     { id: 'scratch-flop', nameKey: 'behavior.scratchFlop' },
   ],
   texts: { nameKey: 'species.lowlandTapir.name', signatureKey: 'species.lowlandTapir.signature' },
-  modelId: null,
+  modelId: 'lowland_tapir',
 } satisfies SpeciesInput;
