@@ -34,6 +34,8 @@ export const buildingSchema = z.strictObject({
   nameKey: textKeySchema,
   footprint: footprintSchema,
   coinCost: nonNegativeInt,
+  /** Light upkeep, taken from the revenue only (see `economyRules`). */
+  upkeepCoinsPerHour: nonNegativeInt,
   requiresPath: z.boolean(),
   serves: needListSchema,
   /** What one visitor group does there: how long it stays and what it pays. */

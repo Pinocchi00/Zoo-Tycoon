@@ -18,7 +18,14 @@ import {
 } from '@/render';
 import { logger } from '@/shared';
 import { deserialize } from '@/save';
-import { advance, createEventQueue, createSimContext, drain, type FocusArea } from '@/sim';
+import {
+  advance,
+  createEventQueue,
+  createNewGame,
+  createSimContext,
+  drain,
+  type FocusArea,
+} from '@/sim';
 import type { FpsCounter } from './dev-fps';
 import { entranceFocus, terrainGrid } from './entrance-focus';
 import { createGameLoop, type FrameScheduler } from './game-loop';
@@ -133,7 +140,7 @@ async function main(): Promise<void> {
   const focus: FocusArea = { minColumn: 0, minRow: 0, maxColumn: 0, maxRow: 0 };
   context.focus = focus;
   const saves = createSaveStorage(store, deserialize);
-  const state = await loadOrCreatePark(saves, events, newParkSeed);
+  const state = await loadOrCreatePark(saves, events, () => createNewGame(newParkSeed(), data));
   const autosaver = createAutosaver(saves, state, () => Date.now());
 
   const loop = createGameLoop(browserScheduler, (frameMs, simulationMs) => {

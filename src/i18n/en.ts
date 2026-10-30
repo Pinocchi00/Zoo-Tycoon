@@ -122,4 +122,11 @@ export const en: Messages = {
   'build.error.currencyOverflow': 'The coin balance cannot go any higher.',
   'build.error.nothingToUndo': 'Nothing to undo right now.',
   'build.error.nothingToRedo': 'Nothing to redo right now.',
+  'build.error.buildingLocked': 'This building unlocks at a later park level.',
+  'economy.error.invalidEntryPrice': 'This entry price is not possible.',
+  'economy.error.invalidDay': "The device's date seems to have gone back.",
+  'economy.error.mailAlreadyClaimed': "Today's mail is already open. Come back tomorrow!",
+  'economy.error.counterSoldOut': 'The counter has no tickets left today. Come back tomorrow!',
+  'economy.error.notEnoughCoins': 'Not enough coins for now.',
+  'economy.error.currencyOverflow': 'The ticket balance cannot go any higher.',
 };

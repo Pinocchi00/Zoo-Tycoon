@@ -6,6 +6,7 @@ import type { EnclosureId } from '../../shared/brand';
 import { emit, type EventQueue } from '../events';
 import { CELL_FREE, isWalkable, type Occupancy } from '../park/occupancy';
 import { weightedPick, type WeightedEntry } from '../rng';
+import { earnVisitorCoins } from '../economy/revenue';
 import type { GameState } from '../state';
 import { enclosureAttractivenessMilli } from './attractiveness';
 import {
@@ -277,8 +278,7 @@ function startService(world: VisitorWorld, visitor: VisitorState, need: ServiceN
   const price = kind.visitorUse.priceCoins * visitor.groupSize;
   const rateBp = spendingRateBp(toBasisPoints(visitor.satisfaction), data.visitorRules);
   const coinsSpent = Math.floor((price * rateBp) / BASIS_POINTS_TOTAL);
-  const total = Math.min(Number.MAX_SAFE_INTEGER, state.currencies.coins + coinsSpent);
-  state.currencies.coins = total;
+  const total = earnVisitorCoins(state, coinsSpent);
   emit(world.events, {
     type: 'visitorUsedService',
     visitorId: visitor.id,

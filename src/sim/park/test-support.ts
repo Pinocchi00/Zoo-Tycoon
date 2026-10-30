@@ -48,10 +48,15 @@ export const FIRST_ENCLOSURE = testEnclosureId('enclosure-1');
 export const SECOND_ENCLOSURE = testEnclosureId('enclosure-2');
 export const FIRST_BUILDING = testBuildingId('building-1');
 
-/** A park with plenty of coins and a few species already met at one star. */
+/**
+ * A park with plenty of coins, a few species already met at one star, every building unlocked and
+ * the default entry price.
+ */
 export function parkState(coins = 100_000): GameState {
   const state = createGameState(11);
   state.currencies.coins = coins;
+  state.economy.parkLevel = slice.economyRules.parkLevels.length;
+  state.economy.entryPriceCoins = slice.economyRules.entryPrice.defaultCoins;
   for (const speciesId of [CAPYBARA, JAGUAR, GIANT_OTTER]) {
     state.gacha.collection.push({ speciesId, stars: 1, groupSize: 2 });
   }

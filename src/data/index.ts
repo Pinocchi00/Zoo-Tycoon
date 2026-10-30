@@ -7,6 +7,7 @@ export { GAME_CONTENT } from './content';
 export * from './load';
 export * from './schemas/build';
 export * from './schemas/common';
+export * from './schemas/economy';
 export * from './schemas/gacha';
 export * from './schemas/park';
 export * from './schemas/species';

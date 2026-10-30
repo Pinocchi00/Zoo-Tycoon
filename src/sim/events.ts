@@ -153,6 +153,10 @@ export interface VisitorArrivedEvent {
   readonly visitorId: VisitorId;
   readonly archetypeId: ArchetypeId;
   readonly groupSize: number;
+  /** Paid at the gate by the whole group. */
+  readonly entryCoins: number;
+  /** Coin balance right after the entry. */
+  readonly coinsTotal: number;
 }
 
 /**
@@ -183,6 +187,62 @@ export interface ServiceMissedEvent {
   readonly need: ServiceNeed;
 }
 
+/** The park's current attractiveness, rounded down, changed. */
+export interface ParkStarsChangedEvent {
+  readonly type: 'parkStarsChanged';
+  readonly stars: number;
+}
+
+/** The park reached a new level: its tickets are already added. */
+export interface ParkLevelReachedEvent {
+  readonly type: 'parkLevelReached';
+  readonly level: number;
+  readonly rewardTickets: number;
+  readonly unlockedBuildings: readonly ItemId[];
+  readonly ticketsTotal: number;
+}
+
+/** Upkeep taken from the last minute's revenue; never sent when nothing was taken. */
+export interface UpkeepPaidEvent {
+  readonly type: 'upkeepPaid';
+  readonly amount: number;
+  /** Coin balance right after. */
+  readonly total: number;
+}
+
+export interface EntryPriceChangedEvent {
+  readonly type: 'entryPriceChanged';
+  readonly priceCoins: number;
+}
+
+export interface MailClaimedEvent {
+  readonly type: 'mailClaimed';
+  readonly day: number;
+  readonly tickets: number;
+  readonly ticketsTotal: number;
+}
+
+export interface CounterTicketBoughtEvent {
+  readonly type: 'counterTicketBought';
+  readonly coinsSpent: number;
+  readonly coinsTotal: number;
+  readonly ticketsTotal: number;
+  /** Tickets the counter still sells today. */
+  readonly leftToday: number;
+}
+
+/** What happened while the player was away, for the park's journal (GDD "Progression hors ligne"). */
+export interface OfflineReportEvent {
+  readonly type: 'offlineReport';
+  readonly awayMs: number;
+  /** At most 12 hours: beyond that, the park rested. */
+  readonly simulatedMs: number;
+  readonly visitorGroups: number;
+  readonly visitorCoins: number;
+  readonly upkeepCoins: number;
+  readonly levelsGained: number;
+}
+
 /** What happened in the simulation; render, audio and ui react to these instead of diffing the state. */
 export type GameEvent =
   | CoinsAddedEvent
@@ -204,7 +264,14 @@ export type GameEvent =
   | VisitorArrivedEvent
   | VisitorLeftEvent
   | VisitorUsedServiceEvent
-  | ServiceMissedEvent;
+  | ServiceMissedEvent
+  | ParkStarsChangedEvent
+  | ParkLevelReachedEvent
+  | UpkeepPaidEvent
+  | EntryPriceChangedEvent
+  | MailClaimedEvent
+  | CounterTicketBoughtEvent
+  | OfflineReportEvent;
 
 /** Events waiting for the reader. Kept outside GameState so that they never end up in a save. */
 export interface EventQueue {

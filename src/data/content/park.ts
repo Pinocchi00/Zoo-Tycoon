@@ -1,6 +1,6 @@
 import type { BuildingInput, DecorInput, VisitorArchetypeInput } from '../schemas/park';
 
-/** The slice's services (task 1.4): starting prices, to be balanced by task 1.6. */
+/** The slice's services (task 1.4): prices and upkeep balanced by task 1.6. */
 export const buildings: readonly BuildingInput[] = [
   {
     id: 'bench',
@@ -8,6 +8,7 @@ export const buildings: readonly BuildingInput[] = [
     nameKey: 'building.bench',
     footprint: { width: 2, depth: 1 },
     coinCost: 30,
+    upkeepCoinsPerHour: 2,
     requiresPath: true,
     serves: ['rest'],
     visitorUse: { seconds: 20, priceCoins: 0 },
@@ -18,6 +19,7 @@ export const buildings: readonly BuildingInput[] = [
     nameKey: 'building.litterBin',
     footprint: { width: 1, depth: 1 },
     coinCost: 15,
+    upkeepCoinsPerHour: 1,
     requiresPath: true,
     serves: ['comfort'],
     visitorUse: { seconds: 3, priceCoins: 0 },
@@ -28,6 +30,7 @@ export const buildings: readonly BuildingInput[] = [
     nameKey: 'building.waterFountain',
     footprint: { width: 1, depth: 1 },
     coinCost: 40,
+    upkeepCoinsPerHour: 3,
     requiresPath: true,
     serves: ['foodDrink'],
     visitorUse: { seconds: 5, priceCoins: 0 },
@@ -38,9 +41,10 @@ export const buildings: readonly BuildingInput[] = [
     nameKey: 'building.iceCreamKiosk',
     footprint: { width: 3, depth: 2 },
     coinCost: 200,
+    upkeepCoinsPerHour: 12,
     requiresPath: true,
     serves: ['foodDrink'],
-    visitorUse: { seconds: 15, priceCoins: 6 },
+    visitorUse: { seconds: 15, priceCoins: 3 },
   },
   {
     id: 'toilets',
@@ -48,6 +52,7 @@ export const buildings: readonly BuildingInput[] = [
     nameKey: 'building.toilets',
     footprint: { width: 3, depth: 3 },
     coinCost: 250,
+    upkeepCoinsPerHour: 15,
     requiresPath: true,
     serves: ['comfort'],
     visitorUse: { seconds: 30, priceCoins: 0 },

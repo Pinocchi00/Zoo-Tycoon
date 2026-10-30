@@ -1,6 +1,13 @@
 // Layer entry point: see AGENTS.md section 3.
 export * from './commands';
 export * from './context';
+export * from './economy/attendance';
+export * from './economy/economy-commands';
+export * from './economy/economy-state';
+export { economySystem, upkeepPerHour } from './economy/economy-system';
+export * from './economy/entry-price';
+export * from './economy/new-game';
+export { isBuildingUnlocked } from './economy/park-level';
 export * from './events';
 export * from './gacha/arrivals';
 export * from './gacha/collection';

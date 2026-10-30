@@ -2,6 +2,7 @@ import type { RawGameData } from '../load';
 import { banners } from './banners';
 import { biomes } from './biomes';
 import { buildRules, pathSurfaces } from './build-rules';
+import { economyRules } from './economy';
 import { enclosureSizes } from './enclosure-sizes';
 import { gachaRules } from './gacha-rules';
 import { habitatElements } from './habitat-elements';
@@ -25,4 +26,5 @@ export const GAME_CONTENT: RawGameData = {
   decor,
   visitorArchetypes,
   visitorRules,
+  economyRules,
 };

@@ -218,6 +218,19 @@ const visitorsSchema = z.strictObject({
   suggestionsHalvedAtMs: amount,
 });
 
+const economySchema = z.strictObject({
+  entryPriceCoins: amount,
+  parkStars: amount,
+  parkLevel: z.int().min(1),
+  lastMailDay: amount.nullable(),
+  counterDay: amount.nullable(),
+  counterBought: amount,
+  upkeepOwed: amount,
+  periodRevenue: amount,
+  settledAtMs: amount,
+  totals: z.strictObject({ visitorCoins: amount, upkeepCoins: amount }),
+});
+
 /**
  * Full shape of the saved GameState (everything but the session). Strict: an unknown field means
  * the file is not ours. Overlaps are not checked here: only the simulation can build the park.
@@ -248,6 +261,7 @@ export const gameStateSchema = z
     buildings: buildingsSchema,
     nextIds: z.strictObject({ enclosure: z.int().min(1), building: z.int().min(1) }),
     visitors: visitorsSchema,
+    economy: economySchema,
   })
   // A counter behind an existing id would give the next object a twin, merged by every change.
   .superRefine((state, context) => {
@@ -271,6 +285,10 @@ export const gameStateSchema = z
       context.addIssue({ code: 'custom', message: 'aheadOfClock', path });
     }
     // A visitor ahead of the clock would be simulated backwards.
+    if (state.economy.settledAtMs > state.clock.timeMs) {
+      const path = ['economy', 'settledAtMs'];
+      context.addIssue({ code: 'custom', message: 'aheadOfClock', path });
+    }
     if (visitors.list.some((visitor) => visitor.updatedAtMs > state.clock.timeMs)) {
       const path = ['visitors', 'list'];
       context.addIssue({ code: 'custom', message: 'visitorAheadOfClock', path });

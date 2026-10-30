@@ -113,12 +113,47 @@ function migrateV3ToV4(data: unknown): Result<unknown, string> {
   });
 }
 
+// A missing or broken clock is left to the final state check, which reports it with its path.
+const stateV4Schema = z.looseObject({ version: z.literal(4), clock: z.unknown().optional() });
+
+/** Entry price of version 5 saves that predate it: the default price when version 5 shipped. */
+const V5_ENTRY_PRICE_COINS = 2;
+
+/**
+ * Version 5 adds the economy. An older park starts at level 1 with no mail or counter history; its
+ * next step raises the level from its current stars and grants those levels' tickets. Upkeep
+ * starts counting from the save's own time.
+ */
+function migrateV4ToV5(data: unknown): Result<unknown, string> {
+  const parsed = stateV4Schema.safeParse(data);
+  if (!parsed.success) {
+    return err('notAVersion4State');
+  }
+  return ok({
+    ...parsed.data,
+    version: 5,
+    economy: {
+      entryPriceCoins: V5_ENTRY_PRICE_COINS,
+      parkStars: 0,
+      parkLevel: 1,
+      lastMailDay: null,
+      counterDay: null,
+      counterBought: 0,
+      upkeepOwed: 0,
+      periodRevenue: 0,
+      settledAtMs: clockTimeSchema.safeParse(parsed.data.clock).data?.timeMs ?? 0,
+      totals: { visitorCoins: 0, upkeepCoins: 0 },
+    },
+  });
+}
+
 /** Every migration ever written, in order. Never edit a published one: add the next. */
 export const MIGRATIONS: readonly Migration[] = [
   { from: 0, migrate: migrateV0ToV1 },
   { from: 1, migrate: migrateV1ToV2 },
   { from: 2, migrate: migrateV2ToV3 },
   { from: 3, migrate: migrateV3ToV4 },
+  { from: 4, migrate: migrateV4ToV5 },
 ];
 
 /** Checks that the registry holds exactly one step for every version below the target. */

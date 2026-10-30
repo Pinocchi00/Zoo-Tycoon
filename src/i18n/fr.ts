@@ -124,4 +124,11 @@ export const fr = {
   'build.error.currencyOverflow': 'Le compte de pièces ne peut pas monter plus haut.',
   'build.error.nothingToUndo': 'Rien à annuler pour le moment.',
   'build.error.nothingToRedo': 'Rien à rétablir pour le moment.',
+  'build.error.buildingLocked': 'Ce bâtiment se débloque à un prochain niveau du parc.',
+  'economy.error.invalidEntryPrice': "Ce prix d'entrée n'est pas possible.",
+  'economy.error.invalidDay': "La date de l'appareil semble avoir reculé.",
+  'economy.error.mailAlreadyClaimed': 'Le courrier du jour est déjà ouvert. Revenez demain !',
+  'economy.error.counterSoldOut': "Le guichet n'a plus de tickets aujourd'hui. Revenez demain !",
+  'economy.error.notEnoughCoins': "Pas assez de pièces pour l'instant.",
+  'economy.error.currencyOverflow': 'Le compte de tickets ne peut pas monter plus haut.',
 } as const satisfies Record<string, string>;

@@ -1,6 +1,7 @@
 import { banners } from '../content/banners';
 import { biomes } from '../content/biomes';
 import { buildRules, pathSurfaces } from '../content/build-rules';
+import { economyRules } from '../content/economy';
 import { enclosureSizes } from '../content/enclosure-sizes';
 import { gachaRules } from '../content/gacha-rules';
 import { habitatElements } from '../content/habitat-elements';
@@ -38,4 +39,9 @@ export const SYNTHETIC_GACHA_CONTENT: RawGameData = {
   decor: [],
   visitorArchetypes: [],
   visitorRules,
+  // No building here, so no level unlocks one.
+  economyRules: {
+    ...economyRules,
+    parkLevels: economyRules.parkLevels.map((level) => ({ ...level, unlocksBuildings: [] })),
+  },
 };

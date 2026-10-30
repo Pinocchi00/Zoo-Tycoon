@@ -2,6 +2,7 @@ import { SERVICE_NEEDS } from '../../data/schemas/visitors';
 import type { FocusArea, SimContext } from '../context';
 import { emit, type EventQueue } from '../events';
 import { randomInt, weightedPick } from '../rng';
+import { earnVisitorCoins } from '../economy/revenue';
 import type { GameState } from '../state';
 import { arrivalRateMilliPerMinute, MILLI, visitorCapacity } from './attractiveness';
 import { syncPathCache } from './path-cache';
@@ -113,11 +114,15 @@ function admitVisitor(world: VisitorWorld, nowMs: number): void {
   };
   state.visitors.nextNumber += 1;
   state.visitors.list.push(visitor);
+  const entryCoins = state.economy.entryPriceCoins * groupSize;
+  const coinsTotal = earnVisitorCoins(state, entryCoins);
   emit(world.events, {
     type: 'visitorArrived',
     visitorId: visitor.id,
     archetypeId: archetype.id,
     groupSize,
+    entryCoins,
+    coinsTotal,
   });
   chooseGoal(world, visitor);
 }

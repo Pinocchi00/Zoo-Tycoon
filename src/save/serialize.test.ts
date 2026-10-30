@@ -14,6 +14,7 @@ import { loadGameContent } from '../data';
 import {
   advance,
   applyCommand,
+  createEconomyState,
   createEventQueue,
   createGameState,
   createSimContext,
@@ -23,6 +24,7 @@ import {
   STATE_VERSION,
   STEP_MS,
   toSavedState,
+  type EconomyState,
   type GameState,
 } from '../sim';
 import { checksum } from './checksum';
@@ -40,6 +42,11 @@ function unwrap<T, E>(result: Result<T, E>): T {
     throw new Error(`Unexpected error: ${JSON.stringify(result.error)}`);
   }
   return result.value;
+}
+
+/** What a version 4 or older save gets as its economy: upkeep counts from the save's time. */
+function migratedEconomy(timeMs: number): EconomyState {
+  return { ...createEconomyState(), entryPriceCoins: 2, settledAtMs: timeMs };
 }
 
 /** Arrivals, coins, time and random draws, but nothing built: all that older saves could hold. */
@@ -64,6 +71,7 @@ function arrivalsState(): GameState {
   });
   // What any older save becomes: the suggestion feed fades from the time it was written.
   state.visitors.suggestionsHalvedAtMs = state.clock.timeMs;
+  state.economy = migratedEconomy(state.clock.timeMs);
   return state;
 }
 
@@ -144,12 +152,13 @@ function playedState(): GameState {
 /** The fields that versions before 3 did not have. */
 function withoutPark(
   state: GameState,
-): Omit<GameState, 'paths' | 'buildings' | 'nextIds' | 'visitors' | 'session'> {
+): Omit<GameState, 'paths' | 'buildings' | 'nextIds' | 'visitors' | 'economy' | 'session'> {
   const {
     paths: _paths,
     buildings: _buildings,
     nextIds: _nextIds,
     visitors: _visitors,
+    economy: _economy,
     session: _session,
     ...rest
   } = state;
@@ -491,6 +500,22 @@ describe('state validation', () => {
     });
   });
 
+  it('refuses an economy ahead of the clock or with an impossible level', () => {
+    const early = { ...state.economy, settledAtMs: state.clock.timeMs + 1 };
+    expect(pathOf({ ...state, economy: early })).toEqual({
+      kind: 'invalidState',
+      path: 'economy.settledAtMs',
+    });
+    expect(pathOf({ ...state, economy: { ...state.economy, parkLevel: 0 } })).toEqual({
+      kind: 'invalidState',
+      path: 'economy.parkLevel',
+    });
+    expect(pathOf({ ...state, economy: { ...state.economy, lastMailDay: -1 } })).toEqual({
+      kind: 'invalidState',
+      path: 'economy.lastMailDay',
+    });
+  });
+
   it('refuses an unknown field', () => {
     expect(pathOf({ ...state, hackedGems: 9999 })).toMatchObject({ kind: 'invalidState' });
   });
@@ -503,9 +528,30 @@ const EMPTY_GACHA = {
   history: [],
 };
 
+describe('migration from version 4', () => {
+  const state = playedState();
+  const { economy: _economy, session: _session, ...stateV4 } = { ...state, version: 4 };
+
+  it('loads a version 4 save, at park level 1 with the default entry price', () => {
+    expect(deserialize(forgeSave(stateV4))).toEqual({
+      ok: true,
+      value: {
+        ...state,
+        economy: migratedEconomy(state.clock.timeMs),
+        session: createSessionState(),
+      },
+    });
+  });
+});
+
 describe('migration from version 3', () => {
   const state = playedState();
-  const { visitors: _visitors, session: _session, ...stateV3 } = { ...state, version: 3 };
+  const {
+    visitors: _visitors,
+    economy: _economy,
+    session: _session,
+    ...stateV3
+  } = { ...state, version: 3 };
 
   it('loads a version 3 save, with nobody in the park yet', () => {
     expect(deserialize(forgeSave(stateV3))).toEqual({
@@ -513,6 +559,7 @@ describe('migration from version 3', () => {
       value: {
         ...state,
         visitors: { ...createVisitorsState(), suggestionsHalvedAtMs: state.clock.timeMs },
+        economy: migratedEconomy(state.clock.timeMs),
         session: createSessionState(),
       },
     });

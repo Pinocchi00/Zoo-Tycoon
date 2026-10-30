@@ -18,6 +18,7 @@ export const BUILD_ERRORS = [
   'enclosureOccupied',
   'groupAlreadyThere',
   'unknownBuilding',
+  'buildingLocked',
   'unknownPlacedBuilding',
   'buildingNotOnPath',
   'notEnoughCoins',

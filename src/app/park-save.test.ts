@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createMemoryTextStore, createSaveStorage, type TextStore } from '@/platform';
 import { deserialize, serialize } from '@/save';
-import { createEventQueue, createGameState, drain } from '@/sim';
+import { createEventQueue, createGameState, drain, type GameState } from '@/sim';
 import {
   AUTOSAVE_INTERVAL_MS,
   createAutosaver,
@@ -11,6 +11,10 @@ import {
 
 const WRITTEN_AT_MS = 1_793_260_800_000;
 const NEW_PARK_SEED = 42;
+
+function newPark(): GameState {
+  return createGameState(NEW_PARK_SEED);
+}
 
 function savesOn(store: TextStore): ParkSaveStorage {
   return createSaveStorage(store, deserialize);
@@ -24,11 +28,7 @@ async function coinsSaved(saves: ParkSaveStorage): Promise<number | null> {
 describe('loading the park', () => {
   it('opens a new park when there is no save', async () => {
     const events = createEventQueue();
-    const state = await loadOrCreatePark(
-      savesOn(createMemoryTextStore()),
-      events,
-      () => NEW_PARK_SEED,
-    );
+    const state = await loadOrCreatePark(savesOn(createMemoryTextStore()), events, newPark);
     expect(state).toEqual(createGameState(NEW_PARK_SEED));
     expect(drain(events)).toEqual([]);
   });
@@ -39,7 +39,7 @@ describe('loading the park', () => {
     saved.currencies.coins = 500;
     await saves.write(serialize(saved, WRITTEN_AT_MS));
     const events = createEventQueue();
-    expect(await loadOrCreatePark(saves, events, () => NEW_PARK_SEED)).toEqual(saved);
+    expect(await loadOrCreatePark(saves, events, newPark)).toEqual(saved);
     expect(drain(events)).toEqual([]);
   });
 
@@ -51,14 +51,14 @@ describe('loading the park', () => {
     await saves.write(serialize(saved, WRITTEN_AT_MS + 1));
     await store.set('save.copy.2', '{{{');
     const events = createEventQueue();
-    expect(await loadOrCreatePark(saves, events, () => NEW_PARK_SEED)).toEqual(saved);
+    expect(await loadOrCreatePark(saves, events, newPark)).toEqual(saved);
     expect(drain(events)).toEqual([{ type: 'saveRecovered', skippedCopies: 1 }]);
   });
 
   it('opens a new park when no copy can be read', async () => {
     const store = createMemoryTextStore();
     await store.set('save.copy.1', '{{{');
-    const state = await loadOrCreatePark(savesOn(store), createEventQueue(), () => NEW_PARK_SEED);
+    const state = await loadOrCreatePark(savesOn(store), createEventQueue(), newPark);
     expect(state).toEqual(createGameState(NEW_PARK_SEED));
   });
 });

@@ -1,5 +1,10 @@
 import type { GameData } from '../data/load';
 import { err, ok, type Result } from '../shared/result';
+import {
+  applyEconomyCommand,
+  type EconomyCommand,
+  type EconomyError,
+} from './economy/economy-commands';
 import { emit, type EventQueue } from './events';
 import {
   adoptFromCatalog,
@@ -27,9 +32,11 @@ export type Command =
   | PerformArrivalCommand
   | ChooseWelcomeSpeciesCommand
   | AdoptFromCatalogCommand
-  | BuildCommand;
+  | BuildCommand
+  | EconomyCommand;
 
-export type CommandError = 'invalidAmount' | 'currencyOverflow' | ArrivalError | BuildError;
+export type CommandError =
+  'invalidAmount' | 'currencyOverflow' | ArrivalError | BuildError | EconomyError;
 
 /** New stars can unlock a viewpoint element, which raises the enclosure's view score. */
 function withViewScores(
@@ -94,5 +101,9 @@ export function applyCommand(
     case 'undoBuild':
     case 'redoBuild':
       return applyBuildCommand(state, command, data, events);
+    case 'setEntryPrice':
+    case 'claimMail':
+    case 'buyCounterTicket':
+      return applyEconomyCommand(state, command, data, events);
   }
 }
