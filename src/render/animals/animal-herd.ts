@@ -1,10 +1,19 @@
 import type { Object3D } from 'three';
-import { logger, type EnclosureId, type GridSize, type Result, type SpeciesId } from '@/shared';
+import {
+  gridDepth,
+  gridWidth,
+  logger,
+  type EnclosureId,
+  type GridSize,
+  type Result,
+  type SpeciesId,
+} from '@/shared';
 import {
   createRng,
   randomFloat,
   randomInt,
   type EnclosureState,
+  type FocusArea,
   type GameEvent,
   type SpeciesProgress,
 } from '@/sim';
@@ -48,15 +57,19 @@ const HERD_SEED = 0x20_05_a1;
 /** The signature clip that is played at the water instead of on the spot. */
 const SWIM_SIGNATURE = 'swim';
 
-/** Animals further from the camera than this are animated less often. */
-export const FAR_DISTANCE_M = 30;
 /**
- * From this view height on, every animal is drawn small enough to be updated less often. Well
- * above the starting view (40 m), where animals are still big and a reduced rate would show.
+ * Behaviour, steering and position are updated at every image for every animal: they are cheap,
+ * and a lower rate would make movements jerky. Only the animation mixer and the breathing layer
+ * are spared, and only when the animal is too small on screen for the difference to show.
  */
-export const WIDE_VIEW_HEIGHT_M = 56;
-/** A far animal is updated one frame out of this many, with the time of all of them. */
-export const FAR_UPDATE_EVERY_FRAMES = 4;
+/** An animal shorter than this on screen (CSS pixels, nose to tail) counts as small. */
+export const SMALL_ON_SCREEN_PX = 16;
+/** A small animal's animation is advanced one image out of this many, with the time of all. */
+export const SMALL_UPDATE_EVERY_FRAMES = 2;
+/** An animal outside the visible area is never seen: its animation is advanced less often. */
+export const HIDDEN_UPDATE_EVERY_FRAMES = 4;
+/** Phases of the animals are spread over this many images, so they never all update together. */
+const PHASE_COUNT = 4;
 /** A longer gap (a stalled tab) is cut down, so that steering stays stable. */
 const MAX_STEP_MS = 200;
 const MS_PER_SECOND = 1000;
@@ -104,11 +117,11 @@ export interface AnimalHerd {
   /** Refreshes only the enclosures the events talk about. */
   handleEvents: (events: readonly GameEvent[], world: HerdWorld) => void;
   /**
-   * Moves every animal by `elapsedMs`. (focusX, focusZ) is the ground point the camera looks at
-   * and `viewHeight` how much of the world it shows. An animal far from that point, or any animal
-   * when the view is very wide, is updated less often.
+   * Moves every animal by `elapsedMs`. `pixelsPerMetre` is the scale on screen (viewport height
+   * in CSS pixels over the height of the view in metres) and `visible` the cells the camera may
+   * show; they only decide how often the animation of an animal is advanced.
    */
-  update: (elapsedMs: number, focusX: number, focusZ: number, viewHeight: number) => void;
+  update: (elapsedMs: number, pixelsPerMetre: number, visible: Readonly<FocusArea>) => void;
   /** Settles when every animal now in the park has loaded or failed. */
   whenLoaded: () => Promise<void>;
   dispose: () => void;
@@ -121,11 +134,12 @@ interface Individual {
   readonly limits: SteerLimits;
   readonly target: Point2;
   shown: AnimalAnimation;
-  /** Where in the cycle of far updates this animal falls, so that far animals do not all update together. */
-  readonly farPhase: number;
+  /** Where this animal falls in the cycle of animation updates, to spread them over the images. */
+  readonly phase: number;
   /** Direction in which it stands around an interest point, different for each of the group. */
   readonly approachAngle: number;
-  pendingMs: number;
+  /** Time the animation has not been advanced by yet. */
+  mixerMs: number;
 }
 
 interface EnclosureGroup {
@@ -254,8 +268,8 @@ export function createAnimalHerd(options: HerdOptions): AnimalHerd {
       limits,
       target,
       shown: 'idle',
-      pendingMs: 0,
-      farPhase: created % FAR_UPDATE_EVERY_FRAMES,
+      mixerMs: 0,
+      phase: created % PHASE_COUNT,
       approachAngle: group.individuals.length * GOLDEN_ANGLE_RAD,
     });
     created += 1;
@@ -381,11 +395,12 @@ export function createAnimalHerd(options: HerdOptions): AnimalHerd {
     }
   };
 
-  const tick = (group: EnclosureGroup, individual: Individual, elapsedMs: number): void => {
-    const model = individual.slot.model();
-    if (model === undefined) {
-      return;
-    }
+  const tick = (
+    group: EnclosureGroup,
+    individual: Individual,
+    model: AnimalModel,
+    elapsedMs: number,
+  ): void => {
     const { behaviour, body } = individual;
     advanceBehaviour(behaviour, elapsedMs, body.arrived, rng, group.context);
     if (behaviour.needsDestination) {
@@ -412,10 +427,31 @@ export function createAnimalHerd(options: HerdOptions): AnimalHerd {
       model.play(behaviour.animation);
       individual.shown = behaviour.animation;
     }
-    individual.slot.update(elapsedMs);
   };
 
-  const farSquared = FAR_DISTANCE_M * FAR_DISTANCE_M;
+  const isVisible = (body: SteerBody, visible: Readonly<FocusArea>): boolean => {
+    const column = Math.floor(body.x + gridWidth(options.grid) / 2);
+    const row = Math.floor(body.z + gridDepth(options.grid) / 2);
+    return (
+      column >= visible.minColumn &&
+      column <= visible.maxColumn &&
+      row >= visible.minRow &&
+      row <= visible.maxRow
+    );
+  };
+
+  /** How many images apart the animation of this animal is advanced. */
+  const animationInterval = (
+    individual: Individual,
+    model: AnimalModel,
+    pixelsPerMetre: number,
+    visible: Readonly<FocusArea>,
+  ): number => {
+    if (!isVisible(individual.body, visible)) {
+      return HIDDEN_UPDATE_EVERY_FRAMES;
+    }
+    return model.lengthM * pixelsPerMetre < SMALL_ON_SCREEN_PX ? SMALL_UPDATE_EVERY_FRAMES : 1;
+  };
 
   return {
     syncAll: (world) => {
@@ -447,22 +483,22 @@ export function createAnimalHerd(options: HerdOptions): AnimalHerd {
         }
       }
     },
-    update: (elapsedMs, focusX, focusZ, viewHeight) => {
+    update: (elapsedMs, pixelsPerMetre, visible) => {
       frame += 1;
+      const step = Math.min(elapsedMs, MAX_STEP_MS);
       for (const group of groups) {
         for (const individual of group.individuals) {
-          individual.pendingMs += elapsedMs;
-          const dx = individual.body.x - focusX;
-          const dz = individual.body.z - focusZ;
-          if (
-            (dx * dx + dz * dz > farSquared || viewHeight > WIDE_VIEW_HEIGHT_M) &&
-            (frame + individual.farPhase) % FAR_UPDATE_EVERY_FRAMES !== 0
-          ) {
+          const model = individual.slot.model();
+          if (model === undefined) {
             continue;
           }
-          const step = Math.min(individual.pendingMs, MAX_STEP_MS);
-          individual.pendingMs = 0;
-          tick(group, individual, step);
+          tick(group, individual, model, step);
+          individual.mixerMs += step;
+          const interval = animationInterval(individual, model, pixelsPerMetre, visible);
+          if ((frame + individual.phase) % interval === 0) {
+            individual.slot.update(individual.mixerMs);
+            individual.mixerMs = 0;
+          }
         }
       }
     },

@@ -12,6 +12,7 @@ function fakeModel(): AnimalModel & { updates: number[]; disposed: number } {
   const model = {
     root,
     signatureName: 'swim',
+    lengthM: 1,
     updates,
     disposed: 0,
     play: () => undefined,
