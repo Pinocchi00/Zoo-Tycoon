@@ -17,14 +17,14 @@ import {
   type Result,
   type SpeciesId,
 } from '@/shared';
-import type { EnclosureState, GameEvent, GridPoint } from '@/sim';
+import type { EnclosureState, FocusArea, GameEvent, GridPoint } from '@/sim';
 import type { AnimalSource } from './animal-model';
 import {
-  FAR_DISTANCE_M,
   MAX_ACCEL_MPS2,
   MAX_SPEED_MAX_MPS,
-  FAR_UPDATE_EVERY_FRAMES,
-  WIDE_VIEW_HEIGHT_M,
+  HIDDEN_UPDATE_EVERY_FRAMES,
+  SMALL_ON_SCREEN_PX,
+  SMALL_UPDATE_EVERY_FRAMES,
   createAnimalHerd,
   type HerdWorld,
   type SpeciesLook,
@@ -45,8 +45,21 @@ function unwrap<T>(result: Result<T, string>): T {
 
 const GRID = createGridSize(40, 30);
 const FRAME_MS = 100;
-/** A close view: only the distance to what is looked at tells near from far. */
-const NEAR_VIEW_M = 6;
+const MODEL_LENGTH_M = 1.18;
+const VIEWPORT_PX = 600;
+/** Pixels per metre of a view `height` metres tall on a viewport of 600 pixels. */
+function scaleAt(viewHeightM: number): number {
+  return VIEWPORT_PX / viewHeightM;
+}
+/** Close enough for any animal to be big on screen. */
+const CLOSE_SCALE = scaleAt(6);
+const ALL_VISIBLE: FocusArea = {
+  minColumn: 0,
+  minRow: 0,
+  maxColumn: GRID.columns - 1,
+  maxRow: GRID.rows - 1,
+};
+const NOTHING_VISIBLE: FocusArea = { minColumn: 1, minRow: 1, maxColumn: 0, maxRow: 0 };
 const SIGNATURE_SCALE = 3;
 /** Eating lifts the body by this much: a mark no other clip leaves. */
 const EAT_LIFT_M = 1;
@@ -86,7 +99,7 @@ const FAR_AWAY_SQUARE: readonly GridPoint[] = [
 
 /** Idle breathes (scales the body); the other clips only nudge it, so each is visible alone. */
 function fakeSource(signature: string): AnimalSource {
-  const mesh = new Mesh(new BoxGeometry(), new MeshStandardMaterial());
+  const mesh = new Mesh(new BoxGeometry(0.5, 0.7, MODEL_LENGTH_M), new MeshStandardMaterial());
   mesh.name = 'body';
   const scene = new Group();
   scene.add(mesh);
@@ -150,10 +163,9 @@ function setup(): {
   return { herd, parent, downloads };
 }
 
-function run(herd: ReturnType<typeof createAnimalHerd>, seconds: number, camera = [0, 0]): void {
-  const [cameraX = 0, cameraZ = 0] = camera;
+function run(herd: ReturnType<typeof createAnimalHerd>, seconds: number): void {
   for (let elapsed = 0; elapsed < seconds * 1000; elapsed += FRAME_MS) {
-    herd.update(FRAME_MS, cameraX, cameraZ, NEAR_VIEW_M);
+    herd.update(FRAME_MS, CLOSE_SCALE, ALL_VISIBLE);
   }
 }
 
@@ -232,7 +244,7 @@ describe('syncAll', () => {
       ),
     );
     await herd.whenLoaded();
-    herd.update(FRAME_MS, 0, 0, NEAR_VIEW_M);
+    herd.update(FRAME_MS, CLOSE_SCALE, ALL_VISIBLE);
     expect(parent.children).toEqual([]);
     expect(warn).toHaveBeenCalledOnce();
   });
@@ -296,7 +308,7 @@ describe('life in the enclosure', () => {
     let previousSpeeds = parent.children.map(() => 0);
     let moved = 0;
     for (let frame = 0; frame < 3000; frame += 1) {
-      herd.update(FRAME_MS, 0, 0, NEAR_VIEW_M);
+      herd.update(FRAME_MS, CLOSE_SCALE, ALL_VISIBLE);
       const speeds = parent.children.map(
         (child, index) => child.position.distanceTo(previous[index] ?? child.position) / dtS,
       );
@@ -328,7 +340,7 @@ describe('life in the enclosure', () => {
     let closestAtRest = Number.POSITIVE_INFINITY;
     let previous = parent.children.map((child) => child.position.clone());
     for (let frame = 0; frame < 12_000; frame += 1) {
-      herd.update(FRAME_MS, 0, 0, NEAR_VIEW_M);
+      herd.update(FRAME_MS, CLOSE_SCALE, ALL_VISIBLE);
       const still = parent.children.map(
         (child, index) => child.position.distanceTo(previous[index] ?? child.position) < 1e-9,
       );
@@ -362,7 +374,7 @@ describe('life in the enclosure', () => {
     await herd.whenLoaded();
     let swimming = 0;
     for (let frame = 0; frame < 18_000; frame += 1) {
-      herd.update(FRAME_MS, 0, 0, NEAR_VIEW_M);
+      herd.update(FRAME_MS, CLOSE_SCALE, ALL_VISIBLE);
       for (const child of parent.children) {
         if ((child.getObjectByName('body')?.scale.x ?? 0) > SIGNATURE_SCALE - 0.01) {
           swimming += 1;
@@ -440,7 +452,7 @@ describe('life in the enclosure', () => {
       await herd.whenLoaded();
       let frames = 0;
       for (let frame = 0; frame < hour; frame += 1) {
-        herd.update(FRAME_MS, 0, 0, NEAR_VIEW_M);
+        herd.update(FRAME_MS, CLOSE_SCALE, ALL_VISIBLE);
         for (const child of parent.children) {
           // Fully eating (body lifted) or playing (body scaled): marks no other clip leaves.
           const body = child.getObjectByName('body');
@@ -640,85 +652,117 @@ describe('enclosure events', () => {
   });
 });
 
-describe('animals far from the camera', () => {
-  const FAR_CAMERA: [number, number] = [FAR_DISTANCE_M * 10, 0];
-
-  async function lonelyAnimal(): Promise<{
+describe('animation rate by size on screen', () => {
+  async function group(size: number): Promise<{
     herd: ReturnType<typeof createAnimalHerd>;
-    breathing: () => number;
+    parent: Group;
+    breaths: () => number[];
   }> {
     const { herd, parent } = setup();
-    herd.syncAll(
+    const empty = outlineEnclosure('enclosure-1', SQUARE, null);
+    herd.handleEvents(
+      eventOf({ type: 'enclosureGroupChanged', enclosureId: empty.id, speciesId: CAPYBARA }),
       worldOf(
-        [outlineEnclosure('enclosure-1', SQUARE, CAPYBARA)],
-        [{ speciesId: CAPYBARA, stars: 1, groupSize: 1 }],
+        [{ ...empty, speciesId: CAPYBARA }],
+        [{ speciesId: CAPYBARA, stars: 1, groupSize: size }],
       ),
     );
     await herd.whenLoaded();
-    const breathing = (): number => parent.children[0]?.getObjectByName('body')?.scale.x ?? 0;
-    return { herd, breathing };
-  }
-
-  it('animates a near animal at every image', async () => {
-    const { herd, breathing } = await lonelyAnimal();
-    expect(breathing()).toBe(1);
-    herd.update(FRAME_MS, 0, 0, NEAR_VIEW_M);
-    expect(breathing()).toBeGreaterThan(1);
-  });
-
-  it('animates a far animal only once in a few images, with the time of all of them', async () => {
-    const { herd, breathing } = await lonelyAnimal();
-    const [cameraX, cameraZ] = FAR_CAMERA;
-    for (let frame = 1; frame < FAR_UPDATE_EVERY_FRAMES; frame += 1) {
-      herd.update(FRAME_MS, cameraX, cameraZ, NEAR_VIEW_M);
-      expect(breathing()).toBe(1);
-    }
-    herd.update(FRAME_MS, cameraX, cameraZ, NEAR_VIEW_M);
-    expect(breathing()).toBeGreaterThan(1);
-  });
-
-  it('animates a near animal at every image in the starting view, and less often in the widest', async () => {
-    const START_VIEW_M = 40;
-    const WIDEST_VIEW_M = 72;
-    expect(START_VIEW_M).toBeLessThan(WIDE_VIEW_HEIGHT_M);
-    expect(WIDEST_VIEW_M).toBeGreaterThan(WIDE_VIEW_HEIGHT_M);
-
-    const started = await lonelyAnimal();
-    started.herd.update(FRAME_MS, 0, 0, START_VIEW_M);
-    expect(started.breathing()).toBeGreaterThan(1);
-
-    const widest = await lonelyAnimal();
-    for (let frame = 1; frame < FAR_UPDATE_EVERY_FRAMES; frame += 1) {
-      widest.herd.update(FRAME_MS, 0, 0, WIDEST_VIEW_M);
-      expect(widest.breathing()).toBe(1);
-    }
-    widest.herd.update(FRAME_MS, 0, 0, WIDEST_VIEW_M);
-    expect(widest.breathing()).toBeGreaterThan(1);
-  });
-
-  it('keeps far animals spread over the images, even when they all turn far at once', async () => {
-    const { herd, parent } = setup();
-    const empty = outlineEnclosure('enclosure-1', SQUARE, null);
-    const collection = [{ speciesId: CAPYBARA, stars: 1, groupSize: FAR_UPDATE_EVERY_FRAMES }];
-    herd.handleEvents(
-      eventOf({ type: 'enclosureGroupChanged', enclosureId: empty.id, speciesId: CAPYBARA }),
-      worldOf([{ ...empty, speciesId: CAPYBARA }], collection),
-    );
-    await herd.whenLoaded();
-    // They hesitate, idle, for a second and a half at least: only their breathing changes.
-    for (let frame = 0; frame < 3; frame += 1) {
-      herd.update(FRAME_MS, 0, 0, NEAR_VIEW_M);
-    }
     const breaths = (): number[] =>
       parent.children.map((child) => child.getObjectByName('body')?.scale.x ?? 0);
-    let previous = breaths();
-    for (let frame = 0; frame < 2 * FAR_UPDATE_EVERY_FRAMES; frame += 1) {
-      herd.update(FRAME_MS, 1000, 0, NEAR_VIEW_M);
-      const now = breaths();
-      const updated = now.filter((value, index) => value !== previous[index]).length;
-      expect(updated).toBe(1);
-      previous = now;
+    return { herd, parent, breaths };
+  }
+
+  /** Newcomers hesitate, standing idle, for a second and a half at least: only their breathing changes. */
+  function updatedPerImage(
+    before: number[],
+    herd: ReturnType<typeof createAnimalHerd>,
+    scale: number,
+    visible: FocusArea,
+    breaths: () => number[],
+  ): number {
+    herd.update(FRAME_MS, scale, visible);
+    const now = breaths();
+    return now.filter((value, index) => value !== before[index]).length;
+  }
+
+  it('advances every animal at every image in the starting view and at a medium zoom', async () => {
+    const MEDIUM_VIEW_M = 30;
+    const START_VIEW_M = 40;
+    for (const view of [MEDIUM_VIEW_M, START_VIEW_M]) {
+      expect(MODEL_LENGTH_M * scaleAt(view)).toBeGreaterThanOrEqual(SMALL_ON_SCREEN_PX);
+      const { herd, breaths } = await group(4);
+      let previous = breaths();
+      for (let frame = 0; frame < 6; frame += 1) {
+        expect(updatedPerImage(previous, herd, scaleAt(view), ALL_VISIBLE, breaths)).toBe(4);
+        previous = breaths();
+      }
     }
+  });
+
+  it('advances the animation of tiny animals one image out of two, spread over the images', async () => {
+    const WIDEST_VIEW_M = 72;
+    expect(MODEL_LENGTH_M * scaleAt(WIDEST_VIEW_M)).toBeLessThan(SMALL_ON_SCREEN_PX);
+    const { herd, breaths } = await group(4);
+    let previous = breaths();
+    for (let frame = 0; frame < 6; frame += 1) {
+      const updated = updatedPerImage(previous, herd, scaleAt(WIDEST_VIEW_M), ALL_VISIBLE, breaths);
+      expect(updated).toBe(4 / SMALL_UPDATE_EVERY_FRAMES);
+      previous = breaths();
+    }
+  });
+
+  it('keeps the spread when animals turn small after being big', async () => {
+    const { herd, breaths } = await group(4);
+    herd.update(FRAME_MS, CLOSE_SCALE, ALL_VISIBLE);
+    herd.update(FRAME_MS, CLOSE_SCALE, ALL_VISIBLE);
+    let previous = breaths();
+    const updated = updatedPerImage(previous, herd, scaleAt(72), ALL_VISIBLE, breaths);
+    expect(updated).toBe(2);
+    previous = breaths();
+    expect(updatedPerImage(previous, herd, scaleAt(72), ALL_VISIBLE, breaths)).toBe(2);
+  });
+
+  it('advances the animation of animals out of the visible area still less often', async () => {
+    const { herd, breaths } = await group(4);
+    let previous = breaths();
+    for (let frame = 0; frame < 2 * HIDDEN_UPDATE_EVERY_FRAMES; frame += 1) {
+      expect(updatedPerImage(previous, herd, CLOSE_SCALE, NOTHING_VISIBLE, breaths)).toBe(1);
+      previous = breaths();
+    }
+  });
+
+  it('moves a tiny or hidden animal exactly as a near one, at every image and without a jump', async () => {
+    const world = worldOf(
+      [outlineEnclosure('enclosure-1', SQUARE, CAPYBARA)],
+      [{ speciesId: CAPYBARA, stars: 3, groupSize: 4 }],
+    );
+    const lives = new Map<string, string[][]>();
+    const viewings: [string, number, FocusArea][] = [
+      ['close', CLOSE_SCALE, ALL_VISIBLE],
+      ['tiny', scaleAt(72), ALL_VISIBLE],
+      ['hidden', CLOSE_SCALE, NOTHING_VISIBLE],
+    ];
+    for (const [name, scale, visible] of viewings) {
+      const { herd, parent } = setup();
+      herd.syncAll(world);
+      await herd.whenLoaded();
+      const dtS = FRAME_MS / 1000;
+      let previous = parent.children.map((child) => child.position.clone());
+      const trace: string[][] = [];
+      for (let frame = 0; frame < 1500; frame += 1) {
+        herd.update(FRAME_MS, scale, visible);
+        parent.children.forEach((child, index) => {
+          const moved = child.position.distanceTo(previous[index] ?? child.position);
+          expect(moved / dtS).toBeLessThanOrEqual(MAX_SPEED_MAX_MPS + 1e-6);
+        });
+        previous = parent.children.map((child) => child.position.clone());
+        trace.push(positions(parent));
+      }
+      lives.set(name, trace);
+    }
+    expect(lives.get('tiny')).toEqual(lives.get('close'));
+    expect(lives.get('hidden')).toEqual(lives.get('close'));
   });
 });
 
@@ -734,7 +778,7 @@ describe('dispose', () => {
     await herd.whenLoaded();
     herd.dispose();
     expect(parent.children).toEqual([]);
-    herd.update(FRAME_MS, 0, 0, NEAR_VIEW_M);
+    herd.update(FRAME_MS, CLOSE_SCALE, ALL_VISIBLE);
   });
 
   it('drops an animal whose model finishes loading afterwards', async () => {

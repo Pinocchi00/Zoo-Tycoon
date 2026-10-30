@@ -1,5 +1,7 @@
 import {
   AnimationMixer,
+  Box3,
+  Vector3,
   BufferGeometry,
   LoopRepeat,
   Material,
@@ -80,6 +82,8 @@ export interface AnimalModel {
   readonly root: Object3D;
   /** Name of the signature clip (`swim`, `stretch`, `trunk`, `root`). */
   readonly signatureName: string;
+  /** Longest horizontal side of the model's box, in metres: its size on screen follows from it. */
+  readonly lengthM: number;
   /** Fades to `animation`, from a random point of its loop; nothing if it is already playing. */
   play: (animation: AnimalAnimation) => void;
   setTimeScale: (scale: number) => void;
@@ -223,6 +227,8 @@ export function createAnimalModel(
   const life = createBodyLife(root, look.seed);
   const playing = ANIMATIONS.map((name) => ({ action: actions[name], needs: needs[name] }));
   prepareMeshes(root);
+  const size = new Box3().setFromObject(root).getSize(new Vector3());
+  const lengthM = Math.max(size.x, size.z);
   mixer.timeScale = look.timeScale;
   actions.idle.time = look.startPhase * idleDurationS;
   actions.idle.play();
@@ -230,6 +236,7 @@ export function createAnimalModel(
   return ok({
     root,
     signatureName,
+    lengthM,
     play: (animation) => {
       if (animation === current) {
         return;

@@ -108,6 +108,7 @@ export function createParkView(
   const camera = createIsoCamera();
   const rig = createCameraRig(cameraLimits(grid), startPose(focus));
   const viewport = { width: 1, height: 1 };
+  const visibleCells: FocusArea = { minColumn: 0, minRow: 0, maxColumn: 0, maxRow: 0 };
   const detachControls = attachCameraControls(canvas, rig, viewport);
 
   const herd = createAnimalHerd({
@@ -144,7 +145,8 @@ export function createParkView(
     quality: () => level,
     frame: (elapsedMs) => {
       updateCameraRig(rig, elapsedMs);
-      herd.update(elapsedMs, rig.current.x, rig.current.z, rig.current.viewHeight);
+      writeFocusArea(rig.current, viewport.width / viewport.height, grid, visibleCells);
+      herd.update(elapsedMs, viewport.height / rig.current.viewHeight, visibleCells);
       applyCameraPose(camera, rig.current, viewport.width / viewport.height);
       renderer.render(scene, camera);
     },
