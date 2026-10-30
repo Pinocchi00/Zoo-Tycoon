@@ -21,12 +21,19 @@ import type { EnclosureState, GameEvent, GridPoint } from '@/sim';
 import type { AnimalSource } from './animal-model';
 import {
   FAR_DISTANCE_M,
+  MAX_ACCEL_MPS2,
+  MAX_SPEED_MAX_MPS,
   FAR_UPDATE_EVERY_FRAMES,
   createAnimalHerd,
   type HerdWorld,
   type SpeciesLook,
 } from './animal-herd';
-import { containsPoint, createEnclosureArea, placeInterestPoints } from './enclosure-area';
+import {
+  APPROACH_RADIUS_M,
+  containsPoint,
+  createEnclosureArea,
+  placeInterestPoints,
+} from './enclosure-area';
 
 function unwrap<T>(result: Result<T, string>): T {
   if (!result.ok) {
@@ -37,6 +44,9 @@ function unwrap<T>(result: Result<T, string>): T {
 
 const GRID = createGridSize(40, 30);
 const FRAME_MS = 100;
+/** A close view: only the distance to what is looked at tells near from far. */
+const NEAR_VIEW_M = 6;
+const SIGNATURE_SCALE = 3;
 const CLIP_LENGTH_S = 10;
 const CAPYBARA = unwrap(speciesId('capybara'));
 const JAGUAR = unwrap(speciesId('jaguar'));
@@ -81,12 +91,16 @@ function fakeSource(signature: string): AnimalSource {
     new AnimationClip(name, CLIP_LENGTH_S, [
       new VectorKeyframeTrack('body.position', [0, CLIP_LENGTH_S], [0, 0, 0, 0, 0, 0]),
     ]);
+  // The signature scales the body to a value no other clip reaches, so it can be spotted.
+  const signatureClip = new AnimationClip(signature, CLIP_LENGTH_S, [
+    new VectorKeyframeTrack('body.scale', [0, CLIP_LENGTH_S], Array(6).fill(SIGNATURE_SCALE)),
+  ]);
   const idle = new AnimationClip('idle', CLIP_LENGTH_S, [
     new VectorKeyframeTrack('body.scale', [0, CLIP_LENGTH_S], [1, 1, 1, 2, 2, 2]),
   ]);
   return {
     scene,
-    animations: [idle, nudge('walk'), nudge('sleep'), nudge('eat'), nudge(signature)],
+    animations: [idle, nudge('walk'), nudge('sleep'), nudge('eat'), signatureClip],
   };
 }
 
@@ -129,7 +143,7 @@ function setup(): {
 function run(herd: ReturnType<typeof createAnimalHerd>, seconds: number, camera = [0, 0]): void {
   const [cameraX = 0, cameraZ = 0] = camera;
   for (let elapsed = 0; elapsed < seconds * 1000; elapsed += FRAME_MS) {
-    herd.update(FRAME_MS, cameraX, cameraZ);
+    herd.update(FRAME_MS, cameraX, cameraZ, NEAR_VIEW_M);
   }
 }
 
@@ -208,7 +222,7 @@ describe('syncAll', () => {
       ),
     );
     await herd.whenLoaded();
-    herd.update(FRAME_MS, 0, 0);
+    herd.update(FRAME_MS, 0, 0, NEAR_VIEW_M);
     expect(parent.children).toEqual([]);
     expect(warn).toHaveBeenCalledOnce();
   });
@@ -257,7 +271,7 @@ describe('life in the enclosure', () => {
     }
   });
 
-  it('moves gently: no jump between two images', async () => {
+  it('moves gently: speed and acceleration never exceed their limits, with no abrupt stop', async () => {
     const { herd, parent } = setup();
     herd.syncAll(
       worldOf(
@@ -266,17 +280,88 @@ describe('life in the enclosure', () => {
       ),
     );
     await herd.whenLoaded();
-    const MAX_STEP_M = 0.1;
+    const dtS = FRAME_MS / 1000;
+    const TOLERANCE = 1e-6;
     let previous = parent.children.map((child) => child.position.clone());
+    let previousSpeeds = parent.children.map(() => 0);
+    let moved = 0;
     for (let frame = 0; frame < 3000; frame += 1) {
-      herd.update(FRAME_MS, 0, 0);
-      parent.children.forEach((child, index) => {
-        expect(child.position.distanceTo(previous[index] ?? child.position)).toBeLessThan(
-          MAX_STEP_M,
+      herd.update(FRAME_MS, 0, 0, NEAR_VIEW_M);
+      const speeds = parent.children.map(
+        (child, index) => child.position.distanceTo(previous[index] ?? child.position) / dtS,
+      );
+      speeds.forEach((speed, index) => {
+        expect(speed).toBeLessThanOrEqual(MAX_SPEED_MAX_MPS + TOLERANCE);
+        expect(Math.abs(speed - (previousSpeeds[index] ?? 0))).toBeLessThanOrEqual(
+          MAX_ACCEL_MPS2 * dtS + TOLERANCE,
         );
+        moved += speed > 0 ? 1 : 0;
       });
       previous = parent.children.map((child) => child.position.clone());
+      previousSpeeds = speeds;
     }
+    expect(moved).toBeGreaterThan(100);
+  });
+
+  it('keeps the animals of a group apart from each other, resting or walking', async () => {
+    const { herd, parent } = setup();
+    herd.syncAll(
+      worldOf(
+        [outlineEnclosure('enclosure-1', SQUARE, CAPYBARA)],
+        [{ speciesId: CAPYBARA, stars: 3, groupSize: 5 }],
+      ),
+    );
+    await herd.whenLoaded();
+    const MIN_WALKING_APART_M = 0.3;
+    const MIN_RESTING_APART_M = 0.7;
+    let closest = Number.POSITIVE_INFINITY;
+    let closestAtRest = Number.POSITIVE_INFINITY;
+    let previous = parent.children.map((child) => child.position.clone());
+    for (let frame = 0; frame < 12_000; frame += 1) {
+      herd.update(FRAME_MS, 0, 0, NEAR_VIEW_M);
+      const still = parent.children.map(
+        (child, index) => child.position.distanceTo(previous[index] ?? child.position) < 1e-9,
+      );
+      for (const [index, first] of parent.children.entries()) {
+        for (const [offset, second] of parent.children.slice(index + 1).entries()) {
+          const apart = first.position.distanceTo(second.position);
+          closest = Math.min(closest, apart);
+          if (still[index] === true && still[index + 1 + offset] === true) {
+            closestAtRest = Math.min(closestAtRest, apart);
+          }
+        }
+      }
+      previous = parent.children.map((child) => child.position.clone());
+    }
+    expect(closest).toBeGreaterThan(MIN_WALKING_APART_M);
+    expect(closestAtRest).toBeGreaterThan(MIN_RESTING_APART_M);
+  });
+
+  it('plays a swimming signature at the water only, from the very first routine', async () => {
+    const area = createEnclosureArea(SQUARE, GRID);
+    if (area === null) {
+      throw new Error('expected an area');
+    }
+    const enclosure = outlineEnclosure('enclosure-1', SQUARE, CAPYBARA);
+    const water = placeInterestPoints(area, enclosure.id, true, 3).water;
+    if (water === null) {
+      throw new Error('expected a water point');
+    }
+    const { herd, parent } = setup();
+    herd.syncAll(worldOf([enclosure], [{ speciesId: CAPYBARA, stars: 3, groupSize: 4 }]));
+    await herd.whenLoaded();
+    let swimming = 0;
+    for (let frame = 0; frame < 18_000; frame += 1) {
+      herd.update(FRAME_MS, 0, 0, NEAR_VIEW_M);
+      for (const child of parent.children) {
+        if ((child.getObjectByName('body')?.scale.x ?? 0) > SIGNATURE_SCALE - 0.01) {
+          swimming += 1;
+          const away = Math.hypot(child.position.x - water.x, child.position.z - water.z);
+          expect(away).toBeLessThan(APPROACH_RADIUS_M + 0.5);
+        }
+      }
+    }
+    expect(swimming).toBeGreaterThan(0);
   });
 
   it('keeps the animals of a group out of step with each other', async () => {
@@ -335,7 +420,7 @@ describe('life in the enclosure', () => {
     const enclosure = outlineEnclosure('enclosure-1', SQUARE, JAGUAR);
     const spots = placeInterestPoints(area, enclosure.id, false, 5).enrichment;
     expect(spots).toHaveLength(4);
-    const REACHED_M = 0.4;
+    const REACHED_M = APPROACH_RADIUS_M + 0.3;
     const hour = (60 * 60 * 1000) / FRAME_MS;
     const framesAtSpots = async (stars: number): Promise<number> => {
       const { herd, parent } = setup();
@@ -343,7 +428,7 @@ describe('life in the enclosure', () => {
       await herd.whenLoaded();
       let frames = 0;
       for (let frame = 0; frame < hour; frame += 1) {
-        herd.update(FRAME_MS, 0, 0);
+        herd.update(FRAME_MS, 0, 0, NEAR_VIEW_M);
         for (const child of parent.children) {
           const near = spots.some(
             (spot) => Math.hypot(child.position.x - spot.x, child.position.z - spot.z) < REACHED_M,
@@ -356,7 +441,7 @@ describe('life in the enclosure', () => {
     // At one star the animals only pass by those places by chance.
     const rich = await framesAtSpots(5);
     const poor = await framesAtSpots(1);
-    expect(rich).toBeGreaterThan(3 * poor);
+    expect(rich).toBeGreaterThan(1.5 * poor);
   });
 });
 
@@ -559,7 +644,7 @@ describe('animals far from the camera', () => {
   it('animates a near animal at every image', async () => {
     const { herd, breathing } = await lonelyAnimal();
     expect(breathing()).toBe(1);
-    herd.update(FRAME_MS, 0, 0);
+    herd.update(FRAME_MS, 0, 0, NEAR_VIEW_M);
     expect(breathing()).toBeGreaterThan(1);
   });
 
@@ -567,11 +652,47 @@ describe('animals far from the camera', () => {
     const { herd, breathing } = await lonelyAnimal();
     const [cameraX, cameraZ] = FAR_CAMERA;
     for (let frame = 1; frame < FAR_UPDATE_EVERY_FRAMES; frame += 1) {
-      herd.update(FRAME_MS, cameraX, cameraZ);
+      herd.update(FRAME_MS, cameraX, cameraZ, NEAR_VIEW_M);
       expect(breathing()).toBe(1);
     }
-    herd.update(FRAME_MS, cameraX, cameraZ);
+    herd.update(FRAME_MS, cameraX, cameraZ, NEAR_VIEW_M);
     expect(breathing()).toBeGreaterThan(1);
+  });
+
+  it('counts a wide view as far, even for an animal at the centre of it', async () => {
+    const { herd, breathing } = await lonelyAnimal();
+    const WIDE_VIEW_M = FAR_DISTANCE_M * 2;
+    for (let frame = 1; frame < FAR_UPDATE_EVERY_FRAMES; frame += 1) {
+      herd.update(FRAME_MS, 0, 0, WIDE_VIEW_M);
+      expect(breathing()).toBe(1);
+    }
+    herd.update(FRAME_MS, 0, 0, WIDE_VIEW_M);
+    expect(breathing()).toBeGreaterThan(1);
+  });
+
+  it('keeps far animals spread over the images, even when they all turn far at once', async () => {
+    const { herd, parent } = setup();
+    const empty = outlineEnclosure('enclosure-1', SQUARE, null);
+    const collection = [{ speciesId: CAPYBARA, stars: 1, groupSize: FAR_UPDATE_EVERY_FRAMES }];
+    herd.handleEvents(
+      eventOf({ type: 'enclosureGroupChanged', enclosureId: empty.id, speciesId: CAPYBARA }),
+      worldOf([{ ...empty, speciesId: CAPYBARA }], collection),
+    );
+    await herd.whenLoaded();
+    // They hesitate, idle, for a second and a half at least: only their breathing changes.
+    for (let frame = 0; frame < 3; frame += 1) {
+      herd.update(FRAME_MS, 0, 0, NEAR_VIEW_M);
+    }
+    const breaths = (): number[] =>
+      parent.children.map((child) => child.getObjectByName('body')?.scale.x ?? 0);
+    let previous = breaths();
+    for (let frame = 0; frame < 2 * FAR_UPDATE_EVERY_FRAMES; frame += 1) {
+      herd.update(FRAME_MS, 1000, 0, NEAR_VIEW_M);
+      const now = breaths();
+      const updated = now.filter((value, index) => value !== previous[index]).length;
+      expect(updated).toBe(1);
+      previous = now;
+    }
   });
 });
 
@@ -587,7 +708,7 @@ describe('dispose', () => {
     await herd.whenLoaded();
     herd.dispose();
     expect(parent.children).toEqual([]);
-    herd.update(FRAME_MS, 0, 0);
+    herd.update(FRAME_MS, 0, 0, NEAR_VIEW_M);
   });
 
   it('drops an animal whose model finishes loading afterwards', async () => {

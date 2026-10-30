@@ -89,7 +89,7 @@ describe('arrival of a group', () => {
   it('hesitates, sniffs, then explores before it joins the routine', () => {
     for (let seed = 1; seed <= 20; seed += 1) {
       const rng = createRng(seed);
-      const behaviour = createBehaviour(rng, context(), true);
+      const behaviour = createBehaviour(rng, true);
       expect(behaviour.activity).toBe('hesitate');
       expect(behaviour.animation).toBe('idle');
       const runs = play(behaviour, rng, context(), 5 * 60_000);
@@ -101,7 +101,7 @@ describe('arrival of a group', () => {
   it('explores with two or three short walks, and no long walk before that', () => {
     for (let seed = 1; seed <= 20; seed += 1) {
       const rng = createRng(seed);
-      const behaviour = createBehaviour(rng, context(), true);
+      const behaviour = createBehaviour(rng, true);
       const walks: boolean[] = [];
       let arrived = false;
       while (behaviour.stage !== 'done') {
@@ -124,7 +124,7 @@ describe('arrival of a group', () => {
   it('is skipped by an animal that was already there', () => {
     for (let seed = 1; seed <= 20; seed += 1) {
       const rng = createRng(seed);
-      const behaviour = createBehaviour(rng, context(), false);
+      const behaviour = createBehaviour(rng, false);
       expect(behaviour.stage).toBe('done');
       const runs = play(behaviour, rng, context(), 10 * 60_000);
       expect(runs.some((run) => run.activity === 'hesitate' || run.activity === 'sniff')).toBe(
@@ -137,7 +137,7 @@ describe('arrival of a group', () => {
 describe('routine', () => {
   it('uses every kind of timed behaviour over time', () => {
     const rng = createRng(2);
-    const behaviour = createBehaviour(rng, context(), false);
+    const behaviour = createBehaviour(rng, false);
     const seen = new Set(play(behaviour, rng, context(), HOUR_MS).map((run) => run.activity));
     expect(seen).toEqual(new Set(['walk', 'rest', 'eat', 'sleep', 'signature']));
   });
@@ -145,7 +145,7 @@ describe('routine', () => {
   it('never sleeps twice in a row', () => {
     for (let seed = 1; seed <= 10; seed += 1) {
       const rng = createRng(seed);
-      const behaviour = createBehaviour(rng, context({ stars: 3, enrichmentSpots: 2 }), false);
+      const behaviour = createBehaviour(rng, false);
       const runs = play(behaviour, rng, context({ stars: 3, enrichmentSpots: 2 }), 4 * HOUR_MS);
       runs.slice(1).forEach((run, index) => {
         expect(run.activity === 'sleep' && runs[index]?.activity === 'sleep').toBe(false);
@@ -156,7 +156,7 @@ describe('routine', () => {
 
   it('varies its durations and never repeats the same one twice in a row', () => {
     const rng = createRng(8);
-    const behaviour = createBehaviour(rng, context(), false);
+    const behaviour = createBehaviour(rng, false);
     const timed = play(behaviour, rng, context(), 4 * HOUR_MS).filter(
       (run) => !isTravelling(run.activity),
     );
@@ -169,14 +169,14 @@ describe('routine', () => {
   it('is repeatable: same seed, same life', () => {
     const lives = [0, 1].map(() => {
       const rng = createRng(77);
-      return play(createBehaviour(rng, context(), true), rng, context(), HOUR_MS);
+      return play(createBehaviour(rng, true), rng, context(), HOUR_MS);
     });
     expect(lives[0]).toEqual(lives[1]);
   });
 
   it('keeps animals out of step with each other', () => {
     const rng = createRng(5);
-    const group = Array.from({ length: 5 }, () => createBehaviour(rng, context(), true));
+    const group = Array.from({ length: 5 }, () => createBehaviour(rng, true));
     const timelines = group.map((behaviour) => play(behaviour, rng, context(), 60_000));
     const firstDurations = timelines.map((runs) => runs[0]?.durationMs);
     expect(new Set(firstDurations).size).toBeGreaterThan(1);
@@ -188,7 +188,7 @@ describe('routine', () => {
 describe('enrichment', () => {
   function enrichmentRuns(where: BehaviourContext, seed: number): Run[] {
     const rng = createRng(seed);
-    return play(createBehaviour(rng, where, false), rng, where, 6 * HOUR_MS);
+    return play(createBehaviour(rng, false), rng, where, 6 * HOUR_MS);
   }
 
   it('is not used at one star, nor in an enclosure without enrichment points', () => {
@@ -217,7 +217,7 @@ describe('enrichment', () => {
   it('asks for an enrichment point that exists, then eats or plays there', () => {
     const where = context({ stars: 4, enrichmentSpots: 3 });
     const rng = createRng(9);
-    const behaviour = createBehaviour(rng, where, false);
+    const behaviour = createBehaviour(rng, false);
     const spots = new Set<number>();
     const uses = new Set<Activity>();
     let arrived = false;
@@ -244,7 +244,7 @@ describe('enrichment', () => {
 describe('signature', () => {
   it('is played on the spot when it is not swimming', () => {
     const rng = createRng(6);
-    const runs = play(createBehaviour(rng, context(), false), rng, context(), 2 * HOUR_MS);
+    const runs = play(createBehaviour(rng, false), rng, context(), 2 * HOUR_MS);
     expect(runs.some((run) => run.activity === 'signature')).toBe(true);
     expect(runs.some((run) => run.activity === 'waterWalk')).toBe(false);
   });
@@ -252,7 +252,7 @@ describe('signature', () => {
   it('is played at the water when swimming, after walking there', () => {
     const where = context({ stars: 3, enrichmentSpots: 2, signatureAtWater: true });
     const rng = createRng(6);
-    const runs = play(createBehaviour(rng, where, false), rng, where, 2 * HOUR_MS);
+    const runs = play(createBehaviour(rng, false), rng, where, 2 * HOUR_MS);
     const signatures = runs.filter((run) => run.activity === 'signature');
     expect(signatures.length).toBeGreaterThan(0);
     runs.forEach((run, index) => {
@@ -265,7 +265,7 @@ describe('signature', () => {
   it('asks the herd for the water as destination', () => {
     const where = context({ signatureAtWater: true });
     const rng = createRng(6);
-    const behaviour = createBehaviour(rng, where, false);
+    const behaviour = createBehaviour(rng, false);
     const destinations = new Set<string>();
     let arrived = false;
     for (let step = 0; step < HOUR_MS / STEP_MS; step += 1) {
@@ -280,20 +280,30 @@ describe('signature', () => {
   });
 });
 
-describe('walks that cannot happen', () => {
-  function startedWalk(where: BehaviourContext): { behaviour: AnimalBehaviour; rng: RngState } {
-    for (let seed = 1; seed < 200; seed += 1) {
-      const rng = createRng(seed);
-      const behaviour = createBehaviour(rng, where, false);
-      if (behaviour.activity === 'walk') {
+/** Lives on, as the herd would, until the animal has just set off on a walk of this kind. */
+function justStarted(
+  activity: Activity,
+  where: BehaviourContext,
+): { behaviour: AnimalBehaviour; rng: RngState } {
+  for (let seed = 1; seed < 100; seed += 1) {
+    const rng = createRng(seed);
+    const behaviour = createBehaviour(rng, false);
+    let arrived = false;
+    for (let step = 0; step < HOUR_MS / STEP_MS; step += 1) {
+      advanceBehaviour(behaviour, STEP_MS, arrived, rng, where);
+      if (behaviour.activity === activity && behaviour.needsDestination) {
         return { behaviour, rng };
       }
+      behaviour.needsDestination = false;
+      arrived = isTravelling(behaviour.activity) && behaviour.travelledMs >= TRAVEL_MS;
     }
-    throw new Error('no seed starts with a walk');
   }
+  throw new Error(`no seed sets off on a ${activity}`);
+}
 
+describe('walks that cannot happen', () => {
   it('waits for a target without counting time', () => {
-    const { behaviour, rng } = startedWalk(context());
+    const { behaviour, rng } = justStarted('walk', context());
     expect(behaviour.needsDestination).toBe(true);
     advanceBehaviour(behaviour, MAX_TRAVEL_MS * 2, true, rng, context());
     expect(behaviour.activity).toBe('walk');
@@ -302,7 +312,7 @@ describe('walks that cannot happen', () => {
 
   it('rests when the herd finds no way, and ends the arrival exploration', () => {
     const rng = createRng(12);
-    const behaviour = createBehaviour(rng, context(), true);
+    const behaviour = createBehaviour(rng, true);
     behaviour.stage = 'explore';
     failTravel(behaviour, rng);
     expect(behaviour.activity).toBe('rest');
@@ -311,7 +321,7 @@ describe('walks that cannot happen', () => {
   });
 
   it('gives up a walk that never arrives', () => {
-    const { behaviour, rng } = startedWalk(context());
+    const { behaviour, rng } = justStarted('walk', context());
     behaviour.needsDestination = false;
     advanceBehaviour(behaviour, MAX_TRAVEL_MS - 1, false, rng, context());
     expect(behaviour.activity).toBe('walk');
@@ -321,17 +331,34 @@ describe('walks that cannot happen', () => {
 
   it('rests instead of using an enrichment point it never reached', () => {
     const where = context({ stars: 5, enrichmentSpots: 4 });
-    for (let seed = 1; seed < 400; seed += 1) {
-      const rng = createRng(seed);
-      const behaviour = createBehaviour(rng, where, false);
-      if (behaviour.activity !== 'enrichmentWalk') {
-        continue;
-      }
-      behaviour.needsDestination = false;
-      advanceBehaviour(behaviour, MAX_TRAVEL_MS, false, rng, where);
+    const { behaviour, rng } = justStarted('enrichmentWalk', where);
+    behaviour.needsDestination = false;
+    advanceBehaviour(behaviour, MAX_TRAVEL_MS, false, rng, where);
+    expect(behaviour.activity).toBe('rest');
+  });
+});
+
+describe('first moments of an animal that was already there', () => {
+  it('rests first, for a different time each, whatever the habitat offers', () => {
+    const rng = createRng(21);
+    const firsts = Array.from({ length: 8 }, () => createBehaviour(rng, false));
+    for (const behaviour of firsts) {
       expect(behaviour.activity).toBe('rest');
-      return;
+      expect(behaviour.needsDestination).toBe(false);
     }
-    throw new Error('no seed starts with an enrichment walk');
+    expect(new Set(firsts.map((behaviour) => behaviour.remainingMs)).size).toBeGreaterThan(3);
+  });
+
+  it('plays a swimming signature at the water only, even for its very first routine', () => {
+    const where = context({ signatureAtWater: true });
+    for (let seed = 1; seed <= 200; seed += 1) {
+      const rng = createRng(seed);
+      const runs = play(createBehaviour(rng, false), rng, where, 5 * 60_000);
+      runs.forEach((run, index) => {
+        if (run.activity === 'signature') {
+          expect(runs[index - 1]?.activity).toBe('waterWalk');
+        }
+      });
+    }
   });
 });

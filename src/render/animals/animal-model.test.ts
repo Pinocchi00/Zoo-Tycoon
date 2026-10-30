@@ -23,7 +23,7 @@ import {
 const SLIDE_X_M = 1;
 const SLEEP_SCALE = 2;
 const FADE_MS = 400;
-const LOOK: AnimalLook = { startPhase: 0, timeScale: 1 };
+const LOOK: AnimalLook = { startPhase: 0, timeScale: 1, seed: 1 };
 
 /** A clip that slides the root 1 m along X in 1 s, easy to observe. */
 function slideClip(name: string): AnimationClip {
@@ -109,7 +109,7 @@ describe('findSignatureClip', () => {
 describe('createAnimalModel', () => {
   it('plays idle in a loop as time advances, from the given phase', () => {
     const source = fullSource();
-    const created = createAnimalModel(source, { startPhase: 0.25, timeScale: 1 });
+    const created = createAnimalModel(source, { ...LOOK, startPhase: 0.25 });
     if (!created.ok) {
       throw new Error('expected a model');
     }
@@ -126,7 +126,7 @@ describe('createAnimalModel', () => {
 
   it('plays faster or slower with the time scale, set at creation or later', () => {
     const source = fullSource();
-    const created = createAnimalModel(source, { startPhase: 0, timeScale: 0.5 });
+    const created = createAnimalModel(source, { ...LOOK, timeScale: 0.5 });
     if (!created.ok) {
       throw new Error('expected a model');
     }
@@ -137,7 +137,7 @@ describe('createAnimalModel', () => {
     expect(source.scene.position.x).toBeCloseTo(0.75);
   });
 
-  it('fades to another clip, and stays on it', () => {
+  it('fades to another clip, and stays on it, whatever point of its loop it starts at', () => {
     const source = fullSource();
     const created = createAnimalModel(source, LOOK);
     if (!created.ok) {
@@ -145,13 +145,30 @@ describe('createAnimalModel', () => {
     }
     created.value.play('sleep');
     created.value.update(FADE_MS * 2);
-    expect(source.scene.scale.x).toBeCloseTo(1 + (SLEEP_SCALE - 1) * ((FADE_MS * 2) / 1000));
+    // The scale clip goes from 1 to 2 over its loop: only the sleep clip is left playing.
+    const first = source.scene.scale.x;
+    expect(first).toBeGreaterThanOrEqual(1);
+    expect(first).toBeLessThanOrEqual(SLEEP_SCALE);
 
-    const before = source.scene.scale.x;
     created.value.play('sleep');
     created.value.update(100);
-    // Asking again for the clip already playing does not restart it.
-    expect(source.scene.scale.x).toBeGreaterThan(before);
+    // Asking again for the clip already playing does not restart it: it just goes on.
+    const gained = (((source.scene.scale.x - first) % 1) + 1) % 1;
+    expect(gained).toBeCloseTo(0.1);
+  });
+
+  it('starts each clip at a point of its loop of its own, different for each individual', () => {
+    const starts = [1, 2, 3, 4, 5, 6].map((seed) => {
+      const source = fullSource();
+      const created = createAnimalModel(source, { ...LOOK, seed });
+      if (!created.ok) {
+        throw new Error('expected a model');
+      }
+      created.value.play('eat');
+      created.value.update(FADE_MS * 2);
+      return source.scene.scale.x.toFixed(3);
+    });
+    expect(new Set(starts).size).toBeGreaterThan(3);
   });
 
   it('can play the signature clip', () => {
@@ -162,7 +179,8 @@ describe('createAnimalModel', () => {
     }
     created.value.play('signature');
     created.value.update(FADE_MS * 2);
-    expect(source.scene.scale.x).toBeCloseTo(1 + (SLEEP_SCALE - 1) * ((FADE_MS * 2) / 1000));
+    expect(source.scene.scale.x).toBeGreaterThanOrEqual(1);
+    expect(source.scene.scale.x).toBeLessThanOrEqual(SLEEP_SCALE);
   });
 
   it.each(['idle', 'walk', 'sleep', 'eat'] as const)(

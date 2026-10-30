@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { createGridSize } from '@/shared';
 import type { GridPoint } from '@/sim';
-import { containsPoint, createEnclosureArea, type EnclosureArea } from './enclosure-area';
+import {
+  approachPoint,
+  containsPoint,
+  createEnclosureArea,
+  type EnclosureArea,
+} from './enclosure-area';
 import {
   ARRIVE_RADIUS_M,
   SEPARATION_RADIUS_M,
@@ -140,6 +145,51 @@ describe('steerStep', () => {
       steerStep(body, LIMITS, world, true, 30, 0, STEP_S);
       expect(containsPoint(area, body.x, body.z)).toBe(true);
     }
+  });
+
+  it('brakes progressively and turns inwards when sent through a wall', () => {
+    const area = areaOf(ROOM);
+    const body = createSteerBody(1.7, 0, Math.PI / 2);
+    body.speed = LIMITS.maxSpeed;
+    const world = worldOf(area, [body]);
+    let previousSpeed = body.speed;
+    let previousYaw = body.yaw;
+    let slowed = false;
+    for (let step = 0; step < 200; step += 1) {
+      steerStep(body, LIMITS, world, true, 30, 0, STEP_S);
+      expect(containsPoint(area, body.x, body.z)).toBe(true);
+      expect(Math.abs(body.speed - previousSpeed)).toBeLessThanOrEqual(
+        LIMITS.maxAccel * STEP_S + EPSILON,
+      );
+      const turned = Math.abs(body.yaw - previousYaw);
+      expect(Math.min(turned, 2 * Math.PI - turned)).toBeLessThanOrEqual(
+        LIMITS.maxTurnRate * STEP_S + EPSILON,
+      );
+      slowed = slowed || body.speed < LIMITS.maxSpeed;
+      previousSpeed = body.speed;
+      previousYaw = body.yaw;
+    }
+    expect(slowed).toBe(true);
+  });
+
+  it('lets two animals sent to the same interest point both arrive, at places of their own', () => {
+    const area = areaOf(ROOM);
+    const spot = { x: -4, z: 0 };
+    const first = createSteerBody(-8, -3, 0);
+    const second = createSteerBody(-8, 3, 0);
+    const targetA = { x: first.x, z: first.z };
+    const targetB = { x: second.x, z: second.z };
+    const crowd = [first, targetA, second, targetB];
+    expect(approachPoint(area, spot, 0, first, crowd, targetA)).toBe(true);
+    expect(approachPoint(area, spot, 2.4, second, crowd, targetB)).toBe(true);
+    const world = worldOf(area, [first, second]);
+    for (let step = 0; step < 1000 && !(first.arrived && second.arrived); step += 1) {
+      steerStep(first, LIMITS, world, !first.arrived, targetA.x, targetA.z, STEP_S);
+      steerStep(second, LIMITS, world, !second.arrived, targetB.x, targetB.z, STEP_S);
+    }
+    expect(first.arrived).toBe(true);
+    expect(second.arrived).toBe(true);
+    expect(Math.hypot(first.x - second.x, first.z - second.z)).toBeGreaterThan(0.7);
   });
 
   it('does nothing while idle and stopped', () => {

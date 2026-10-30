@@ -144,7 +144,7 @@ export function createParkView(
     quality: () => level,
     frame: (elapsedMs) => {
       updateCameraRig(rig, elapsedMs);
-      herd.update(elapsedMs, rig.current.x, rig.current.z);
+      herd.update(elapsedMs, rig.current.x, rig.current.z, rig.current.viewHeight);
       applyCameraPose(camera, rig.current, viewport.width / viewport.height);
       renderer.render(scene, camera);
     },
