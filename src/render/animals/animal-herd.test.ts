@@ -32,6 +32,7 @@ import {
   type HerdWorld,
   type SpeciesLook,
 } from './animal-herd';
+import { SLEEPER_RANGE_M } from './social';
 import { capsuleGap, createSteerBody } from './steering';
 import {
   APPROACH_RADIUS_M,
@@ -106,6 +107,12 @@ const SEEDS = [
   { seedName: 'first life', seed: undefined },
   { seedName: 'second life', seed: SECOND_SEED },
 ] as const;
+
+/**
+ * Two simulated hours (or two runs of one) take a few seconds, and several times more under
+ * coverage instrumentation: those tests get more than the default 5 s.
+ */
+const LONG_RUN_TIMEOUT_MS = 30_000;
 
 const SQUARE: readonly GridPoint[] = [
   { x: 10, y: 10 },
@@ -489,46 +496,50 @@ describe('life in the enclosure', () => {
     expect(lives[0]).toEqual(lives[1]);
   });
 
-  it('spends its time at its enrichment points when the habitat has stars', async () => {
-    const area = createEnclosureArea(SQUARE, GRID);
-    if (area === null) {
-      throw new Error('expected an area');
-    }
-    const enclosure = outlineEnclosure('enclosure-1', SQUARE, JAGUAR);
-    const spots = placeInterestPoints(area, enclosure.id, false, 5).enrichment;
-    expect(spots).toHaveLength(4);
-    // The ring where animals stand around a point, the middle being left to the element.
-    const ringM = approachRadiusFor(SPECIES_MODELS['jaguar']?.lengthM ?? 0);
-    const RING_MIN_M = ringM - 0.3;
-    const RING_MAX_M = ringM + 0.3;
-    const hour = (60 * 60 * 1000) / FRAME_MS;
-    const framesAtSpots = async (stars: number): Promise<number> => {
-      const { herd, parent } = setup();
-      herd.syncAll(worldOf([enclosure], [{ speciesId: JAGUAR, stars, groupSize: 4 }]));
-      await herd.whenLoaded();
-      let frames = 0;
-      for (let frame = 0; frame < hour; frame += 1) {
-        herd.update(FRAME_MS, CLOSE_SCALE, ALL_VISIBLE);
-        for (const child of parent.children) {
-          // Fully eating (body lifted) or playing (body scaled): marks no other clip leaves.
-          const body = child.getObjectByName('body');
-          const busy =
-            (body?.scale.x ?? 0) > SIGNATURE_SCALE - 0.1 ||
-            (body?.position.y ?? 0) > EAT_LIFT_M - 0.1;
-          const onRing = spots.some((spot) => {
-            const away = Math.hypot(child.position.x - spot.x, child.position.z - spot.z);
-            return away >= RING_MIN_M && away <= RING_MAX_M;
-          });
-          frames += busy && onRing ? 1 : 0;
-        }
+  it(
+    'spends its time at its enrichment points when the habitat has stars',
+    async () => {
+      const area = createEnclosureArea(SQUARE, GRID);
+      if (area === null) {
+        throw new Error('expected an area');
       }
-      return frames;
-    };
-    // At one star the animals only happen to eat or play near those places.
-    const rich = await framesAtSpots(5);
-    const poor = await framesAtSpots(1);
-    expect(rich).toBeGreaterThan(3 * poor);
-  });
+      const enclosure = outlineEnclosure('enclosure-1', SQUARE, JAGUAR);
+      const spots = placeInterestPoints(area, enclosure.id, false, 5).enrichment;
+      expect(spots).toHaveLength(4);
+      // The ring where animals stand around a point, the middle being left to the element.
+      const ringM = approachRadiusFor(SPECIES_MODELS['jaguar']?.lengthM ?? 0);
+      const RING_MIN_M = ringM - 0.3;
+      const RING_MAX_M = ringM + 0.3;
+      const hour = (60 * 60 * 1000) / FRAME_MS;
+      const framesAtSpots = async (stars: number): Promise<number> => {
+        const { herd, parent } = setup();
+        herd.syncAll(worldOf([enclosure], [{ speciesId: JAGUAR, stars, groupSize: 4 }]));
+        await herd.whenLoaded();
+        let frames = 0;
+        for (let frame = 0; frame < hour; frame += 1) {
+          herd.update(FRAME_MS, CLOSE_SCALE, ALL_VISIBLE);
+          for (const child of parent.children) {
+            // Fully eating (body lifted) or playing (body scaled): marks no other clip leaves.
+            const body = child.getObjectByName('body');
+            const busy =
+              (body?.scale.x ?? 0) > SIGNATURE_SCALE - 0.1 ||
+              (body?.position.y ?? 0) > EAT_LIFT_M - 0.1;
+            const onRing = spots.some((spot) => {
+              const away = Math.hypot(child.position.x - spot.x, child.position.z - spot.z);
+              return away >= RING_MIN_M && away <= RING_MAX_M;
+            });
+            frames += busy && onRing ? 1 : 0;
+          }
+        }
+        return frames;
+      };
+      // At one star the animals only happen to eat or play near those places.
+      const rich = await framesAtSpots(5);
+      const poor = await framesAtSpots(1);
+      expect(rich).toBeGreaterThan(3 * poor);
+    },
+    LONG_RUN_TIMEOUT_MS,
+  );
 });
 
 describe('arrival of a group', () => {
@@ -963,43 +974,47 @@ describe('life of a big group', () => {
     }
   });
 
-  it('lies down next to a sleeping neighbour, in contact but never overlapping', async () => {
-    const MIN_APART_M = 0.7;
-    const CONTACT_M = 1.7;
-    let previous: readonly Activity[] = [];
-    let joined = 0;
-    let inContact = 0;
-    let closest = Number.POSITIVE_INFINITY;
-    await liveForAnHour(
-      5,
-      (sample) => {
-        sample.activities.forEach((activity, index) => {
-          const sleepers = (other: number): boolean => sample.activities[other] === 'sleep';
-          if (activity === 'sleep') {
-            closest = Math.min(closest, nearestOther(sample, index, sleepers));
-          }
-          if (
-            activity === 'sleep' &&
-            previous[index] !== 'sleep' &&
-            previous[index] !== undefined
-          ) {
-            const apart = nearestOther(sample, index, sleepers);
-            if (Number.isFinite(apart)) {
-              joined += 1;
-              inContact += apart <= CONTACT_M ? 1 : 0;
+  it(
+    'lies down next to a sleeping neighbour, in contact but never overlapping',
+    async () => {
+      const MIN_APART_M = 0.7;
+      const CONTACT_M = 1.7;
+      let previous: readonly Activity[] = [];
+      let joined = 0;
+      let inContact = 0;
+      let closest = Number.POSITIVE_INFINITY;
+      await liveForAnHour(
+        5,
+        (sample) => {
+          sample.activities.forEach((activity, index) => {
+            const sleepers = (other: number): boolean => sample.activities[other] === 'sleep';
+            if (activity === 'sleep') {
+              closest = Math.min(closest, nearestOther(sample, index, sleepers));
             }
-          }
-        });
-        previous = sample.activities;
-      },
-      2,
-    );
-    expect(joined).toBeGreaterThan(5);
-    // Left to chance, a sleeper would land within contact of another in about 2 cases out of a
-    // hundred (the contact disc is a few square metres in a 660 m2 field): 0.2 is ten times that.
-    expect(inContact / joined).toBeGreaterThan(0.2);
-    expect(closest).toBeGreaterThan(MIN_APART_M);
-  });
+            if (
+              activity === 'sleep' &&
+              previous[index] !== 'sleep' &&
+              previous[index] !== undefined
+            ) {
+              const apart = nearestOther(sample, index, sleepers);
+              // Only a sleeper the animal can see: the others are out of its range.
+              if (apart <= SLEEPER_RANGE_M) {
+                joined += 1;
+                inContact += apart <= CONTACT_M ? 1 : 0;
+              }
+            }
+          });
+          previous = sample.activities;
+        },
+        2,
+      );
+      expect(joined).toBeGreaterThan(5);
+      // Left to chance, a sleeper would land within contact of another in a few cases out of a hundred.
+      expect(inContact / joined).toBeGreaterThan(0.35);
+      expect(closest).toBeGreaterThan(MIN_APART_M);
+    },
+    LONG_RUN_TIMEOUT_MS,
+  );
 
   it('follows a walker and ends up close to it', async () => {
     let previous: readonly Activity[] = [];
@@ -1434,7 +1449,8 @@ describe('lying together and greeting, whatever the length', () => {
             previous[index] !== undefined
           ) {
             // Centres of the other sleepers at this very image.
-            if (Number.isFinite(nearestSleeper)) {
+            // Only a sleeper the animal can see: the others are out of its range.
+            if (nearestSleeper <= SLEEPER_RANGE_M) {
               joined += 1;
               inContact += nearestSleeper <= kind.lengthM + 0.6 ? 1 : 0;
             }
@@ -1443,12 +1459,12 @@ describe('lying together and greeting, whatever the length', () => {
         previous = now;
       }
       expect(joined).toBeGreaterThan(3);
-      // About ten times what chance would give (see the test of the pile above).
-      expect(inContact / joined).toBeGreaterThan(0.2);
+      expect(inContact / joined).toBeGreaterThan(0.3);
       expect(worstPile).toBeGreaterThan(-OVERLAP_TOLERANCE_M);
       expect(greetingFrames).toBeGreaterThan(0);
       expect(worstGreeting).toBeGreaterThan(-OVERLAP_TOLERANCE_M);
     },
+    LONG_RUN_TIMEOUT_MS,
   );
 });
 

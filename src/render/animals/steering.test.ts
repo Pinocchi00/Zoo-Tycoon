@@ -150,39 +150,47 @@ describe('steerStep', () => {
     }
   });
 
-  it('brakes progressively and turns inwards when sent through a wall', () => {
+  it('brakes progressively before the fence', () => {
     const area = areaOf(ROOM);
-    // Far enough from the wall (1.1 m) to stop in time from full speed: it brakes ahead of the fence.
+    // The east fence is at x = 2. 1.1 m from it is room enough to stop from full speed.
     const body = createSteerBody(0.9, 0, Math.PI / 2);
     body.speed = LIMITS.maxSpeed;
     const world = worldOf(area, [body]);
-    let previousSpeed = body.speed;
-    let previousYaw = body.yaw;
+    let previousRealised = LIMITS.maxSpeed;
     let slowed = false;
     for (let step = 0; step < 200; step += 1) {
+      const x = body.x;
+      const z = body.z;
       steerStep(body, LIMITS, world, true, 30, 0, STEP_S);
       expect(containsPoint(area, body.x, body.z)).toBe(true);
-      expect(Math.abs(body.speed - previousSpeed)).toBeLessThanOrEqual(
+      // The speed it really gets, step by step: it only ever drops at the usual rate.
+      const realised = Math.hypot(body.x - x, body.z - z) / STEP_S;
+      expect(Math.abs(realised - previousRealised)).toBeLessThanOrEqual(
         LIMITS.maxAccel * STEP_S + EPSILON,
       );
-      const turned = Math.abs(body.yaw - previousYaw);
-      expect(Math.min(turned, 2 * Math.PI - turned)).toBeLessThanOrEqual(
-        LIMITS.maxTurnRate * STEP_S + EPSILON,
-      );
-      slowed = slowed || body.speed < LIMITS.maxSpeed;
-      previousSpeed = body.speed;
-      previousYaw = body.yaw;
+      slowed = slowed || realised < LIMITS.maxSpeed;
+      previousRealised = realised;
     }
     expect(slowed).toBe(true);
+    // It stops short of the fence (0.1 m for the centre of its body), and stays there.
+    expect(body.x).toBeLessThanOrEqual(2 - 0.1);
+    expect(previousRealised).toBeLessThan(0.01);
   });
 
-  it('glides along the fence when it is too late to stop, and its speed never jumps back up', () => {
+  it('glides along the fence when it is too late to stop, turning inwards and never jumping back up', () => {
     const area = areaOf(ROOM);
     // Against the west fence (x = -10), heading north-west at full speed: no room to stop.
-    const body = createSteerBody(-9.97, 0, (-3 * Math.PI) / 4);
+    const start = (-3 * Math.PI) / 4;
+    const inward = Math.PI / 2;
+    const body = createSteerBody(-9.97, 0, start);
     body.speed = LIMITS.maxSpeed;
     const world = worldOf(area, [body]);
+    const angleTo = (yaw: number, target: number): number => {
+      const turn = Math.abs(yaw - target) % (2 * Math.PI);
+      return Math.min(turn, 2 * Math.PI - turn);
+    };
     let previousRealised = Number.POSITIVE_INFINITY;
+    let previousYaw = start;
     let glided = false;
     for (let step = 0; step < 40; step += 1) {
       const x = body.x;
@@ -194,10 +202,17 @@ describe('steerStep', () => {
       expect(realised - previousRealised).toBeLessThanOrEqual(LIMITS.maxAccel * STEP_S + EPSILON);
       // The speed it is credited with follows the step it really took.
       expect(body.speed).toBeLessThanOrEqual(LIMITS.maxSpeed);
+      // The turn towards the inside never exceeds the turn rate.
+      expect(angleTo(body.yaw, previousYaw)).toBeLessThanOrEqual(
+        LIMITS.maxTurnRate * STEP_S + EPSILON,
+      );
       glided = glided || body.z < z - 0.01;
       previousRealised = realised;
+      previousYaw = body.yaw;
     }
     expect(glided).toBe(true);
+    // The heading has come round towards the inside (the normal of the fence is +x).
+    expect(angleTo(body.yaw, inward)).toBeLessThan(angleTo(start, inward));
   });
 
   it('brakes in time for a tapir-sized neighbour at the nearest place the herd picks', () => {

@@ -24,7 +24,7 @@ const BRAKE_LOOKAHEAD_M = 0.6;
 /** It aims to stop this far (free space between bodies) short of the neighbour in its way. */
 const STOP_MARGIN_M = 0.3;
 /** ... and this far (from the centre of its body) short of the fence. */
-const FENCE_STOP_MARGIN_M = 0.1;
+const FENCE_STOP_MARGIN_M = 0.15;
 /** Neighbours further apart than the two reaches and this cannot touch within a step. */
 const REACH_MARGIN_M = 0.5;
 /** Rounds of halving to find the farthest free part of a step. */
@@ -445,7 +445,11 @@ export function steerStep(
           brakingSpeed(freeToAnimal, STOP_MARGIN_M, limits.maxAccel),
         );
       }
-      const freeToFence = freeToFenceAhead(body, world.area, look);
+      // Far from the fence (nearer to nothing than the way looked at): nothing to look for.
+      const freeToFence =
+        distanceToEdge(world.area, body.x, body.z, world.scratch) > look
+          ? look
+          : freeToFenceAhead(body, world.area, look);
       if (freeToFence < look) {
         wantedSpeed = Math.min(
           wantedSpeed,

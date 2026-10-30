@@ -156,7 +156,10 @@ export interface HerdOptions {
   readonly parent: Object3D;
   readonly grid: GridSize;
   readonly lookupSpecies: (id: SpeciesId) => SpeciesLook | undefined;
-  /** Seed of the visual randomness; a constant of the herd unless a test wants another life. */
+  /**
+   * Seed of the visual randomness: an unsigned 32-bit integer, like every seed of `createRng`.
+   * A constant of the herd unless a test wants another life.
+   */
   readonly seed?: number | undefined;
   /** Downloads and decodes a model; called once per model, rejects when it cannot. */
   readonly loadSource: (modelId: string) => Promise<AnimalSource>;
