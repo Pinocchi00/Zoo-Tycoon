@@ -316,8 +316,9 @@ export function pickDestination(
 
 /**
  * Where an animal stands around `spot` (an interest point, or a sleeping neighbour): on a circle
- * of `radiusM` (`APPROACH_RADIUS_M` for interest points), at `angleRad`, so that each animal of a group has its own place and the element itself (whose
- * model task 1.10 stands on `spot`) stays free. If that place is not reachable in a straight
+ * of `radiusM` (`APPROACH_RADIUS_M` for interest points), at `angleRad`, so that each animal of a
+ * group has its own place and the element itself (whose model task 1.10 stands on `spot`) stays
+ * free. If that place is not reachable in a straight
  * line, the next angles are tried. Writes into `out`; false when none works.
  */
 export function approachPoint(

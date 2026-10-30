@@ -169,7 +169,12 @@ interface Individual {
   /** Top speed before the pace of the walk is applied. */
   readonly topSpeed: number;
   readonly social: SocialReport;
-  lastActivity: Activity;
+  /** Position in the group, which does not change while the animal is there. */
+  readonly index: number;
+  /** Index of the animal being greeted or greeting this one while in `salute`, else -1. */
+  saluteWith: number;
+  /** Index of the walker being followed while in `followWalk`, else -1. */
+  followIndex: number;
   readonly target: Point2;
   shown: AnimalAnimation;
   /** Where this animal falls in the cycle of animation updates, to spread them over the images. */
@@ -307,7 +312,9 @@ export function createAnimalHerd(options: HerdOptions): AnimalHerd {
       limits,
       topSpeed,
       social: createSocialReport(),
-      lastActivity: behaviour.activity,
+      index: group.individuals.length,
+      saluteWith: -1,
+      followIndex: -1,
       target,
       shown: 'idle',
       mixerMs: 0,
@@ -447,17 +454,8 @@ export function createAnimalHerd(options: HerdOptions): AnimalHerd {
         if (walker === undefined) {
           return false;
         }
-        pointBehind(walker.body, FOLLOW_GAP_M, SCRATCH_POINT);
-        const { x, z } = SCRATCH_POINT;
-        if (
-          !isClearOfCrowd(crowd, x, z, body, target, CROWD_CLEARANCE_M) ||
-          !segmentStaysInside(area, body.x, body.z, x, z, PATH_MARGIN_M)
-        ) {
-          return false;
-        }
-        target.x = x;
-        target.z = z;
-        return true;
+        individual.followIndex = walker.index;
+        return aimBehind(group, individual, walker);
       }
       case 'sleeper': {
         const sleeper = group.individuals[social.sleeper];
@@ -487,6 +485,26 @@ export function createAnimalHerd(options: HerdOptions): AnimalHerd {
     }
   };
 
+  /** Puts the target of a follower behind the walker, if that place is free and reachable. */
+  const aimBehind = (
+    group: EnclosureGroup,
+    individual: Individual,
+    walker: Individual,
+  ): boolean => {
+    const { body, target } = individual;
+    pointBehind(walker.body, FOLLOW_GAP_M, SCRATCH_POINT);
+    const { x, z } = SCRATCH_POINT;
+    if (
+      !isClearOfCrowd(group.crowd, x, z, body, target, CROWD_CLEARANCE_M) ||
+      !segmentStaysInside(group.area, body.x, body.z, x, z, PATH_MARGIN_M)
+    ) {
+      return false;
+    }
+    target.x = x;
+    target.z = z;
+    return true;
+  };
+
   const giveDestination = (group: EnclosureGroup, individual: Individual): void => {
     const { behaviour, body } = individual;
     behaviour.needsDestination = false;
@@ -499,20 +517,27 @@ export function createAnimalHerd(options: HerdOptions): AnimalHerd {
     }
   };
 
-  /** Two neighbours who start a greeting turn to each other. */
+  /**
+   * An animal that starts a greeting picks its nearest neighbour as partner and, if that one is
+   * standing about, greets it back: both then turn to each other. A greeted animal never greets
+   * anyone else, so a greeting cannot spread along a chain.
+   */
   const greet = (group: EnclosureGroup, individual: Individual): void => {
-    const partner = group.individuals[individual.social.nearest];
+    individual.saluteWith = individual.social.nearest;
+    const partner = group.individuals[individual.saluteWith];
     if (partner !== undefined && canSalute(partner.behaviour)) {
       beginSalute(partner.behaviour, rng);
+      partner.saluteWith = individual.index;
     }
   };
 
+  /** Moves one animal; true when its animation changed, so that the model must be updated now. */
   const tick = (
     group: EnclosureGroup,
     individual: Individual,
     model: AnimalModel,
     elapsedMs: number,
-  ): void => {
+  ): boolean => {
     const { behaviour, body, social } = individual;
     const dtS = elapsedMs / MS_PER_SECOND;
     observeGroup(individual, group.individuals, social);
@@ -531,18 +556,29 @@ export function createAnimalHerd(options: HerdOptions): AnimalHerd {
       dtS,
     );
     const neighbour = group.individuals[social.nearest];
-    if (behaviour.activity === 'salute' && neighbour !== undefined) {
-      if (individual.lastActivity !== 'salute') {
+    if (behaviour.activity === 'salute') {
+      if (individual.saluteWith < 0) {
         greet(group, individual);
       }
-      turnToward(
-        body,
-        individual.limits.maxTurnRate * SALUTE_TURN_SHARE,
-        bearing(body.x, body.z, neighbour.body.x, neighbour.body.z),
-        dtS,
-      );
+      const partner = group.individuals[individual.saluteWith];
+      if (partner !== undefined) {
+        turnToward(
+          body,
+          individual.limits.maxTurnRate * SALUTE_TURN_SHARE,
+          bearing(body.x, body.z, partner.body.x, partner.body.z),
+          dtS,
+        );
+      }
+    } else {
+      individual.saluteWith = -1;
     }
-    individual.lastActivity = behaviour.activity;
+    if (behaviour.activity === 'followWalk' && !behaviour.needsDestination) {
+      // The walker moves on: the place behind it follows, as long as that place is free.
+      const walker = group.individuals[individual.followIndex];
+      if (walker !== undefined && isTravelling(walker.behaviour.activity)) {
+        aimBehind(group, individual, walker);
+      }
+    }
     if (!travelling && !behaviour.resumeWalk) {
       // A resting animal claims the place where it stands, not the one it was heading for.
       individual.target.x = body.x;
@@ -550,7 +586,8 @@ export function createAnimalHerd(options: HerdOptions): AnimalHerd {
     }
     model.root.position.set(body.x, 0, body.z);
     model.root.rotation.y = body.yaw;
-    if (individual.shown !== behaviour.animation) {
+    const changed = individual.shown !== behaviour.animation;
+    if (changed) {
       model.play(behaviour.animation);
       individual.shown = behaviour.animation;
     }
@@ -564,6 +601,7 @@ export function createAnimalHerd(options: HerdOptions): AnimalHerd {
         bearing(body.x, body.z, neighbour.body.x, neighbour.body.z) - body.yaw,
       );
     }
+    return changed;
   };
 
   const isVisible = (body: SteerBody, visible: Readonly<FocusArea>): boolean => {
@@ -629,10 +667,11 @@ export function createAnimalHerd(options: HerdOptions): AnimalHerd {
           if (model === undefined) {
             continue;
           }
-          tick(group, individual, model, step);
+          const changed = tick(group, individual, model, step);
           individual.mixerMs += step;
           const interval = animationInterval(individual, model, pixelsPerMetre, visible);
-          if ((frame + individual.phase) % interval === 0) {
+          // A new clip is set up now (the layers are taken back): the model must run at once.
+          if (changed || (frame + individual.phase) % interval === 0) {
             individual.slot.update(individual.mixerMs);
             individual.mixerMs = 0;
           }

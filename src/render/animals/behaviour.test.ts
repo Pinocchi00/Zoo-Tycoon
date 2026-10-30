@@ -3,6 +3,7 @@ import { createRng, type RngState } from '@/sim';
 import {
   MAX_TRAVEL_MS,
   NO_SOCIAL,
+  REGROUP_RETRY_MS,
   advanceBehaviour,
   animationOf,
   attentionOf,
@@ -538,6 +539,48 @@ describe('following and regrouping', () => {
       .reduce((sum, [, count]) => sum + count, 0);
     expect(regroup).toBeGreaterThan(others / 2);
     expect(destinations(NO_SOCIAL, 5).get('regroupWalk:group')).toBeUndefined();
+  });
+});
+
+/** Reads the activity through a call, so that the compiler does not assume it never changes. */
+function activityOf(behaviour: AnimalBehaviour): Activity {
+  return behaviour.activity;
+}
+
+describe('regrouping that finds no way', () => {
+  it('waits before it is tried again, then is tried again', () => {
+    const scattered = social({ scattered: true });
+    const where = context();
+    for (let seed = 1; seed < 100; seed += 1) {
+      const rng = createRng(seed);
+      const behaviour = createBehaviour(rng, false);
+      let arrived = false;
+      for (let step = 0; step < HOUR_MS / STEP_MS; step += 1) {
+        advanceBehaviour(behaviour, STEP_MS, arrived, rng, where, scattered);
+        if (behaviour.activity === 'regroupWalk' && behaviour.needsDestination) {
+          failTravel(behaviour, rng);
+          expect(behaviour.regroupCooldownMs).toBe(REGROUP_RETRY_MS);
+          // Until the delay is over, no regrouping starts again.
+          for (let waited = 0; waited < REGROUP_RETRY_MS; waited += STEP_MS) {
+            advanceBehaviour(behaviour, STEP_MS, false, rng, where, scattered);
+            behaviour.needsDestination = false;
+            expect(activityOf(behaviour)).not.toBe('regroupWalk');
+          }
+          // Afterwards the scattered animal tries again, as a clear favourite.
+          let again = false;
+          for (let later = 0; later < 600_000 && !again; later += STEP_MS) {
+            advanceBehaviour(behaviour, STEP_MS, false, rng, where, scattered);
+            again = activityOf(behaviour) === 'regroupWalk';
+            behaviour.needsDestination = false;
+          }
+          expect(again).toBe(true);
+          return;
+        }
+        behaviour.needsDestination = false;
+        arrived = isTravelling(behaviour.activity) && behaviour.travelledMs >= TRAVEL_MS;
+      }
+    }
+    throw new Error('no animal tried to regroup');
   });
 });
 
