@@ -43,7 +43,7 @@ export interface SocialView {
   neighbourClose: boolean;
 }
 
-export const NO_SOCIAL: SocialView = {
+export const NO_SOCIAL: Readonly<SocialView> = {
   walkerNear: false,
   sleeperNear: false,
   scattered: false,
@@ -82,6 +82,8 @@ export interface AnimalBehaviour {
   lastDurationMs: number;
   /** Time before the walk is interrupted by a pause or a sniff; negative: not drawn yet. */
   wayEventMs: number;
+  /** Time before a regrouping that failed may be tried again. */
+  regroupCooldownMs: number;
   /** The timed activity is an interruption: the walk resumes, with the same target, after it. */
   resumeWalk: boolean;
 }
@@ -101,6 +103,8 @@ const FOLLOW_WEIGHT = 14;
 /** A scattered group pulls its far members back: this must be a clear favourite. */
 const REGROUP_WEIGHT = 60;
 const SALUTE_WEIGHT = 8;
+/** After a regrouping that found no way, the animal waits this long before trying again. */
+export const REGROUP_RETRY_MS = 15_000;
 /** Share of the sleepers that lie next to a sleeping neighbour, when there is one. */
 const SLEEP_NEXT_TO_PERCENT = 75;
 const PERCENT_TOTAL = 100;
@@ -337,7 +341,7 @@ function chooseRoutine(
   behaviour: AnimalBehaviour,
   rng: RngState,
   context: BehaviourContext,
-  social: SocialView,
+  social: Readonly<SocialView>,
 ): void {
   walkEntry.weight = WALK_WEIGHT;
   restEntry.weight = REST_WEIGHT;
@@ -350,7 +354,7 @@ function chooseRoutine(
     : 0;
   lookAroundEntry.weight = LOOK_AROUND_WEIGHT;
   followEntry.weight = social.walkerNear ? FOLLOW_WEIGHT : 0;
-  regroupEntry.weight = social.scattered ? REGROUP_WEIGHT : 0;
+  regroupEntry.weight = social.scattered && behaviour.regroupCooldownMs <= 0 ? REGROUP_WEIGHT : 0;
   saluteEntry.weight = social.neighbourClose ? SALUTE_WEIGHT : 0;
   switch (weightedPick(rng, ROUTINE_ENTRIES)) {
     case 'walk':
@@ -438,6 +442,7 @@ export function createBehaviour(rng: RngState, withArrival: boolean): AnimalBeha
     exploreWalksLeft: 0,
     lastDurationMs: 0,
     wayEventMs: -1,
+    regroupCooldownMs: 0,
     resumeWalk: false,
   };
   if (withArrival) {
@@ -457,7 +462,7 @@ function finishTimed(
   behaviour: AnimalBehaviour,
   rng: RngState,
   context: BehaviourContext,
-  social: SocialView,
+  social: Readonly<SocialView>,
 ): void {
   if (behaviour.resumeWalk) {
     // The interruption is over: back to the same walk, towards the same target.
@@ -482,7 +487,7 @@ function finishTravel(
   arrived: boolean,
   rng: RngState,
   context: BehaviourContext,
-  social: SocialView,
+  social: Readonly<SocialView>,
 ): void {
   if (behaviour.activity === 'walk') {
     if (behaviour.stage === 'explore') {
@@ -535,8 +540,9 @@ export function advanceBehaviour(
   arrived: boolean,
   rng: RngState,
   context: BehaviourContext,
-  social: SocialView = NO_SOCIAL,
+  social: Readonly<SocialView> = NO_SOCIAL,
 ): void {
+  behaviour.regroupCooldownMs = Math.max(0, behaviour.regroupCooldownMs - elapsedMs);
   if (isTravelling(behaviour.activity)) {
     if (behaviour.needsDestination) {
       return;
@@ -557,6 +563,9 @@ export function advanceBehaviour(
 
 /** The herd found no way to the target: the animal rests instead and tries something else later. */
 export function failTravel(behaviour: AnimalBehaviour, rng: RngState): void {
+  if (behaviour.activity === 'regroupWalk') {
+    behaviour.regroupCooldownMs = REGROUP_RETRY_MS;
+  }
   if (behaviour.stage === 'explore') {
     behaviour.stage = 'done';
   }

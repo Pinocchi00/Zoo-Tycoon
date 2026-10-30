@@ -1,9 +1,11 @@
 import {
   AnimationClip,
+  Bone,
   BoxGeometry,
   Group,
   Mesh,
   MeshStandardMaterial,
+  Quaternion,
   VectorKeyframeTrack,
   type Object3D,
 } from 'three';
@@ -106,8 +108,10 @@ const FAR_AWAY_SQUARE: readonly GridPoint[] = [
 function fakeSource(signature: string): AnimalSource {
   const mesh = new Mesh(new BoxGeometry(0.5, 0.7, MODEL_LENGTH_M), new MeshStandardMaterial());
   mesh.name = 'body';
+  const head = new Bone();
+  head.name = 'head';
   const scene = new Group();
-  scene.add(mesh);
+  scene.add(mesh, head);
   // The signature scales the body to a value no other clip reaches, so it can be spotted.
   const signatureClip = new AnimationClip(signature, CLIP_LENGTH_S, [
     new VectorKeyframeTrack('body.scale', [0, CLIP_LENGTH_S], Array(6).fill(SIGNATURE_SCALE)),
@@ -952,6 +956,8 @@ describe('life of a big group', () => {
     const mean = (values: number[]): number =>
       values.reduce((sum, value) => sum + value, 0) / values.length;
     expect(mean(after)).toBeLessThan(mean(finite));
+    // The follower keeps up with the walker, so it stops close to it.
+    expect(mean(after)).toBeLessThan(3);
   });
 
   it('brings back an animal that strayed from the group', async () => {
@@ -1030,6 +1036,85 @@ describe('life of a big group', () => {
       values.reduce((sum, value) => sum + value, 0) / values.length;
     expect(mean(last)).toBeLessThan(mean(first));
     expect(mean(last)).toBeLessThan(1);
+  });
+
+  it('turns a greeted animal towards the one who greeted it, in a group of three, with no chain', async () => {
+    const { herd, parent } = setup();
+    herd.syncAll(
+      worldOf(
+        [outlineEnclosure('enclosure-1', SQUARE, CAPYBARA)],
+        [{ speciesId: CAPYBARA, stars: 1, groupSize: 3 }],
+      ),
+    );
+    await herd.whenLoaded();
+    const facing = (from: Object3D, to: Object3D): number => {
+      const wanted = Math.atan2(to.position.x - from.position.x, to.position.z - from.position.z);
+      const turn = Math.abs(from.rotation.y - wanted) % (2 * Math.PI);
+      return Math.min(turn, 2 * Math.PI - turn);
+    };
+    let previous: Activity[] = [];
+    const towardsMate: number[] = [];
+    const towardsOther: number[] = [];
+    let episodes = 0;
+    for (let frame = 0; frame < TWO_HOURS_FRAMES; frame += 1) {
+      herd.update(FRAME_MS, CLOSE_SCALE, ALL_VISIBLE);
+      const now = herd.activities();
+      const saluting = now.flatMap((activity, index) => (activity === 'salute' ? [index] : []));
+      // A greeting is between two animals: the third never joins in.
+      expect(saluting.length).toBeLessThanOrEqual(2);
+      now.forEach((activity, index) => {
+        if (activity === 'salute' || previous[index] !== 'salute') {
+          return;
+        }
+        // Just ended: how well did it face its mate, rather than the third animal?
+        const mate = previous.findIndex((other, at) => at !== index && other === 'salute');
+        const third = [0, 1, 2].find((at) => at !== index && at !== mate);
+        const self = parent.children[index];
+        const mateNode = parent.children[mate];
+        const thirdNode = parent.children[third ?? -1];
+        if (self && mateNode && thirdNode) {
+          episodes += 1;
+          towardsMate.push(facing(self, mateNode));
+          towardsOther.push(facing(self, thirdNode));
+        }
+      });
+      previous = now;
+    }
+    expect(episodes).toBeGreaterThan(3);
+    const mean = (values: number[]): number =>
+      values.reduce((sum, value) => sum + value, 0) / values.length;
+    expect(mean(towardsMate)).toBeLessThan(0.8);
+    expect(mean(towardsMate)).toBeLessThan(mean(towardsOther));
+  });
+
+  it('keeps the head moving smoothly when a small animal changes clip', async () => {
+    const { herd, parent } = setup();
+    herd.syncAll(
+      worldOf(
+        [outlineEnclosure('enclosure-1', SQUARE, CAPYBARA)],
+        [{ speciesId: CAPYBARA, stars: 1, groupSize: 3 }],
+      ),
+    );
+    await herd.whenLoaded();
+    const tiny = scaleAt(72);
+    expect(MODEL_LENGTH_M * tiny).toBeLessThan(SMALL_ON_SCREEN_PX);
+    // The head turns at most 0.9 rad/s and the animation is advanced every second image.
+    const MAX_JUMP_RAD = 0.9 * SMALL_UPDATE_EVERY_FRAMES * (FRAME_MS / 1000) + 0.1;
+    const rest = new Quaternion();
+    let previous = parent.children.map(() => 0);
+    let turned = 0;
+    for (let frame = 0; frame < 30_000; frame += 1) {
+      herd.update(FRAME_MS, tiny, ALL_VISIBLE);
+      const angles = parent.children.map(
+        (child) => child.getObjectByName('head')?.quaternion.angleTo(rest) ?? 0,
+      );
+      angles.forEach((angle, index) => {
+        expect(Math.abs(angle - (previous[index] ?? 0))).toBeLessThan(MAX_JUMP_RAD);
+        turned += angle > 0.2 ? 1 : 0;
+      });
+      previous = angles;
+    }
+    expect(turned).toBeGreaterThan(1000);
   });
 
   it('walks at a stroll or at a decided pace, with the walk clip at the matching speed', async () => {
