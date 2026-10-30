@@ -1,5 +1,6 @@
 // Rules every exported animal model must follow (GDD, "Fabrication des modèles 3D"
 // and "Budgets de performance").
+import type { SignatureAnimation } from './species';
 import type { Gltf, GltfNode, GltfPrimitive } from './glb';
 
 /** "Animal (près)" budget of the GDD. */
@@ -44,7 +45,7 @@ export type ModelIssue =
 export interface ModelExpectations {
   readonly lengthM: number;
   /** The signature animation named by the species description. */
-  readonly signature: string;
+  readonly signature: SignatureAnimation;
 }
 
 type Vec3 = readonly [number, number, number];

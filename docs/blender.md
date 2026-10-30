@@ -56,7 +56,7 @@ npm run models:silhouettes
 | `tools/blender/palette.json` | Les couleurs partagées par tous les animaux (une seule petite texture). |
 | `tools/blender/parts.py` | La bibliothèque de pièces : corps, tête, museau, oreilles, yeux, pattes, pieds, queue, taches. |
 | `tools/blender/rig.py` | Le squelette : chaque pièce suit un seul os. |
-| `tools/blender/animations.py` | Les animations : `idle`, `walk`, `sleep` et `eat` pour tous, plus la signature de l'espèce (`swim`, `stretch`, `trunk` ou `root`). |
+| `tools/blender/animations.py` | Les animations : `idle`, `walk`, `sleep` et `eat` pour tous, plus la signature de l'espèce (`swim`, `stretch`, `trunk` ou `root`). Seuls les réglages de la signature déclarée par l'espèce sont acceptés ; `sleep.tailLiftDeg` (0 à 90, optionnel, 0 par défaut) relève la queue pendant le sommeil. |
 | `tools/blender/silhouettes.py` | La planche de silhouettes (`npm run models:silhouettes`). |
 | `tools/blender/build.py` | Assemble le tout et exporte le `.glb`. |
 | `tools/assets/` | La vérification automatique des modèles. |

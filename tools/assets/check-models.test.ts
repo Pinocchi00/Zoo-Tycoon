@@ -83,11 +83,12 @@ describe('checkModels', () => {
   });
 
   it('reads the expected signature from the description', () => {
+    const { swim: _swim, ...shared } = VALID_DESCRIPTION.animations;
     const trunk = JSON.stringify({
       ...VALID_DESCRIPTION,
       signature: 'trunk',
       animations: {
-        ...VALID_DESCRIPTION.animations,
+        ...shared,
         trunk: { durationS: 3, swingDeg: 20, curlDeg: 30, headNodDeg: 5 },
       },
     });
@@ -139,6 +140,34 @@ describe('species descriptions', () => {
     const { idle, walk, eat, swim } = VALID_DESCRIPTION.animations;
     const withoutSleep = { ...VALID_DESCRIPTION, animations: { idle, walk, eat, swim } };
     expect(speciesDescriptionSchema.safeParse(withoutSleep).success).toBe(false);
+  });
+
+  it('refuses the settings of a signature other than the declared one', () => {
+    const stretch = { durationS: 1, rumpLiftM: 0.1, foreLegReachDeg: 5, headDownDeg: 5 };
+    const both = {
+      ...VALID_DESCRIPTION,
+      animations: { ...VALID_DESCRIPTION.animations, stretch },
+    };
+    expect(speciesDescriptionSchema.safeParse(both).success).toBe(false);
+    expect(speciesDescriptionSchema.safeParse(VALID_DESCRIPTION).success).toBe(true);
+  });
+
+  it('bounds the optional tail lift of the sleep animation', () => {
+    const withLift = (tailLiftDeg: number): unknown => ({
+      ...VALID_DESCRIPTION,
+      animations: {
+        ...VALID_DESCRIPTION.animations,
+        sleep: { ...VALID_DESCRIPTION.animations.sleep, tailLiftDeg },
+      },
+    });
+    expect(speciesDescriptionSchema.safeParse(withLift(30)).success).toBe(true);
+    expect(speciesDescriptionSchema.safeParse(withLift(-1)).success).toBe(false);
+    expect(speciesDescriptionSchema.safeParse(withLift(120)).success).toBe(false);
+    const absent = {
+      ...VALID_DESCRIPTION,
+      animations: { ...VALID_DESCRIPTION.animations, sleep: VALID_DESCRIPTION.animations.sleep },
+    };
+    expect(speciesDescriptionSchema.safeParse(absent).success).toBe(true);
   });
 
   it('refuses a typo in a field name', () => {

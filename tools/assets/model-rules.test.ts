@@ -9,7 +9,7 @@ import {
   type ModelIssue,
 } from './model-rules';
 
-const EXPECTED = { lengthM: 1.1, signature: 'swim' };
+const EXPECTED = { lengthM: 1.1, signature: 'swim' } as const;
 
 function issuesFor(json: unknown): readonly ModelIssue[] {
   return checkModel(gltfSchema.parse(json), EXPECTED);
