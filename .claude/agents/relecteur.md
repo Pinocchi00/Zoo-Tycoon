@@ -2,7 +2,7 @@
 name: relecteur
 description: Relecture indépendante d'une branche avant fusion, avec la grille de la section 10 d'AGENTS.md et la méthode « Relire une branche » de CLAUDE.md. À utiliser à la fin de chaque tâche, une fois le code écrit et vérifié, en donnant le nom de la branche et la section du brief. N'a pas écrit le code et ne voit pas la conversation du chef, donc son regard est neuf. Répond par trois listes (Bloquant, À corriger, Suggestion) et ne modifie jamais le code.
 tools: Read, Glob, Grep, Bash
-model: opus
+model: sonnet
 maxTurns: 30
 ---
 

@@ -14,6 +14,7 @@ Toutes les règles d'`AGENTS.md` s'appliquent. Ce qui suit les complète.
 ## Économie du quota
 
 - Une seule tâche par session. Quand elle est terminée, la session suivante repart de zéro.
+- **Modèle du chef :** Opus seulement pour les tâches critiques (simulation, gacha, économie, sauvegarde, schémas de données) et pour les plans de phase. Pour les autres tâches (outillage, rendu, interface, audio technique, Android, pipeline Blender), le chef ne fait que planifier et déléguer : Sonnet suffit. Si tu tournes sur Opus pour une tâche non critique, dis-le au propriétaire dans ton premier message et propose-lui de passer la session en Sonnet avant de commencer.
 - Ne lis que les fichiers nécessaires à la tâche. Ne parcours jamais tout le dépôt.
 - Pour toute tâche qui touche plus de trois fichiers, commence par un plan et attends la validation.
 - Les sous-agents sont dans `.claude/agents/`. Ils comptent dans le même quota que toi, mais Sonnet et Haiku en consomment moins qu'Opus : c'est pour cela qu'on leur délègue l'exécution.
