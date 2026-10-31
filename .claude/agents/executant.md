@@ -20,6 +20,12 @@ Règles :
 6. Ne modifie jamais les configurations (tsconfig, ESLint, Prettier, Vitest, CI). Ne contourne aucune règle (`eslint-disable`, `any`, `as`, `!`, `@ts-ignore`).
 7. N'invente aucune règle de jeu. Si le brief ou le GDD ne la donne pas, demande.
 8. Ne lance jamais d'autres sous-agents. Ne crée pas de branche et ne fais pas de commit, sauf si le chef le demande.
+9. Économise ton contexte, car chaque message relit toute ta conversation :
+   - modifie les fichiers avec `Edit`, pas avec des scripts `node` ou `python` écrits à la volée ;
+   - ne relis pas un fichier que tu viens d'écrire ou de modifier ;
+   - lis les gros fichiers par passages (au plus 150 lignes), jamais en entier s'ils dépassent 300 lignes ;
+   - filtre toute sortie de commande (`| tail -n 40`), y compris `npm run check` : ne garde que les erreurs et le résumé.
+10. Si tu approches ta limite de tours sans avoir fini, arrête-toi proprement et rends un rapport qui dit exactement ce qui reste à faire. Le chef lancera un exécutant neuf.
 
 Rends la main avec une question, sans rien deviner, dans trois cas : le plan est ambigu, une règle d'AGENTS.md serait contournée, ou le périmètre donné ne suffit pas pour atteindre les critères d'acceptation.
 

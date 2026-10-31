@@ -22,6 +22,8 @@ Vérifie en priorité deux choses :
 - Aucun test n'a été affaibli : assertion retirée ou adoucie, `.skip`, test supprimé, seuil de couverture abaissé, configuration (tsconfig, ESLint, Prettier, Vitest, CI) modifiée sans que le brief le demande.
 - Aucune règle d'AGENTS.md n'est contournée : `eslint-disable`, `any`, `as`, `!`, `Math.random` ou `Date` dans `src/sim`, import interdit entre dossiers, texte en dur hors de `src/i18n`, dépendance non justifiée dans `docs/decisions.md`.
 
+Économise ton contexte : lis le diff fichier par fichier (`git diff main...<branche> -- <fichier>`) plutôt qu'en un bloc s'il dépasse 1500 lignes, filtre la sortie de `npm run check` (`| tail -n 40`) et ne lis pas les fichiers de test en entier si le diff suffit. Si le chef te donne une plage de commits (relecture des corrections), ne relis que ce diff-là.
+
 Tu ne modifies jamais le code. Bash sert seulement à lire (`git diff`, `git log`, `ls`) et à lancer `npm run check`. Tu ne lances jamais d'autres sous-agents.
 
 Réponds uniquement par trois listes. Pour chaque point : fichier, ligne, raison. Écris « Aucun » pour une liste vide.
