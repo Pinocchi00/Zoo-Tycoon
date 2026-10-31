@@ -103,6 +103,8 @@ export const MAX_TRAVEL_MS = 30_000;
  */
 export const MAX_PURPOSEFUL_TRAVEL_MS = 90_000;
 
+const MS_PER_SECOND = 1000;
+
 /** A long walk gets this much more time than the trip needs at the pace of the walker. */
 export const TRIP_TIME_MARGIN = 2.5;
 
@@ -111,7 +113,7 @@ export const TRIP_TIME_MARGIN = 2.5;
  * the limit of an ordinary walk and `MAX_PURPOSEFUL_TRAVEL_MS`.
  */
 export function tripLimitMs(distanceM: number, paceMps: number): number {
-  const needed = paceMps > 0 ? (distanceM / paceMps) * TRIP_TIME_MARGIN * 1000 : Infinity;
+  const needed = paceMps > 0 ? (distanceM / paceMps) * TRIP_TIME_MARGIN * MS_PER_SECOND : Infinity;
   return Math.max(MAX_TRAVEL_MS, Math.min(MAX_PURPOSEFUL_TRAVEL_MS, needed));
 }
 

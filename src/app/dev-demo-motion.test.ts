@@ -520,13 +520,13 @@ const MAX_ACCEL_FLIPS_PER_S = countLimit(4);
 const MAX_SPEED_CROSSINGS_PER_S = countLimit(3);
 /** Worst measured: 2 (a walk, a stop, the clip of the pause, the walk again). */
 const MAX_CLIP_SWITCHES_PER_S = countLimit(2);
-/** The fastest the bones may move (radians a second). Worst measured: head 1.33, ears 4.87, tail 4.53, trunk 1.18. */
+/** The fastest the bones may move (radians a second), never looser than before the margin was taken from the measures. Worst measured: head 1.33, ears 4.87, tail 4.53, trunk 1.18. */
 const MAX_BONE_RATE_RAD_S: Readonly<Record<(typeof BONES)[number], number>> = {
-  head: amountLimit(1.33, 0),
-  ear_l: amountLimit(4.87, 0),
-  ear_r: amountLimit(4.87, 0),
-  tail: amountLimit(4.53, 0),
-  trunk: amountLimit(1.18, 0),
+  head: Math.min(1.5, amountLimit(1.33, 0)),
+  ear_l: Math.min(6, amountLimit(4.87, 0)),
+  ear_r: Math.min(6, amountLimit(4.87, 0)),
+  tail: Math.min(5, amountLimit(4.53, 0)),
+  trunk: Math.min(1.5, amountLimit(1.18, 0)),
 };
 /** Worst measured: 7 (the tail, with its fly-swat). */
 const MAX_BONE_FLIPS_PER_S = countLimit(7);

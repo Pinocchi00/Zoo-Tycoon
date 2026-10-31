@@ -838,13 +838,7 @@ export function createAnimalHerd(options: HerdOptions): AnimalHerd {
     const yawRate = Math.abs(wrapAngle(body.yaw - yawBefore)) / dtS;
     individual.moving = nextMoving(individual.moving, body.speed, yawRate);
     const moving = individual.moving;
-    const clip = settleClip(individual, {
-      moving,
-      behaviourClip: behaviour.animation,
-      intent,
-      swimming,
-      elapsedMs,
-    });
+    const clip = settleClip(individual, moving, behaviour.animation, intent, swimming, elapsedMs);
     if (showClip(individual, clip)) {
       model.play(clip);
       changed = true;
