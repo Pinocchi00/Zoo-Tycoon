@@ -66,29 +66,23 @@ export function promoteToLegs(
   return showClip(state, legsClip);
 }
 
-export interface SettleInput {
-  /** The animal moves or turns (see `nextMoving`). */
-  readonly moving: boolean;
-  /** The clip its activity asks for. */
-  readonly behaviourClip: AnimalAnimation;
-  /** It means to go somewhere (walking, or swimming round the water). */
-  readonly intent: boolean;
-  /** It is swimming: its signature clip is the clip of a movement. */
-  readonly swimming: boolean;
-  readonly elapsedMs: number;
-}
-
 /**
  * The clip an animal shows once it has moved. Whatever its activity, if it moves it walks (or
  * swims); once it stops the walk goes on a moment (so that a body that flickers between moving
  * and still does not make the clip flicker); and an animal that wants to go but stands still
  * puts down its walk and waits before it shows it again (see `RESTART_COOLDOWN_MS`).
  */
-export function settleClip(state: ClipState, input: SettleInput): AnimalAnimation {
-  const { behaviourClip } = input;
-  if (input.moving) {
+export function settleClip(
+  state: ClipState,
+  moving: boolean,
+  behaviourClip: AnimalAnimation,
+  intent: boolean,
+  swimming: boolean,
+  elapsedMs: number,
+): AnimalAnimation {
+  if (moving) {
     state.stillMs = 0;
-    const legs = behaviourClip === 'walk' || (behaviourClip === 'signature' && input.swimming);
+    const legs = behaviourClip === 'walk' || (behaviourClip === 'signature' && swimming);
     return legs ? behaviourClip : 'walk';
   }
   if (state.shown !== 'walk') {
@@ -96,11 +90,12 @@ export function settleClip(state: ClipState, input: SettleInput): AnimalAnimatio
     // The walk clip comes back by moving or by `promoteToLegs`, not by the wish alone.
     return behaviourClip === 'walk' ? state.shown : behaviourClip;
   }
-  state.stillMs += input.elapsedMs;
+  state.stillMs += elapsedMs;
   if (state.stillMs < WALK_HOLD_MS) {
     return 'walk';
   }
-  if (input.intent) {
+  // Only a walk that cannot go on waits: a swimmer on its circuit takes up its swim again at once.
+  if (intent && behaviourClip === 'walk') {
     state.restMs = RESTART_COOLDOWN_MS;
   }
   return behaviourClip === 'walk' ? 'idle' : behaviourClip;

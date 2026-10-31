@@ -24,7 +24,14 @@ function image(
 ): AnimalAnimation {
   tickClipClock(state, STEP_MS);
   promoteToLegs(state, options.intent, 'walk');
-  const clip = settleClip(state, { ...options, swimming: false, elapsedMs: STEP_MS });
+  const clip = settleClip(
+    state,
+    options.moving,
+    options.behaviourClip,
+    options.intent,
+    false,
+    STEP_MS,
+  );
   showClip(state, clip);
   return state.shown;
 }
@@ -66,6 +73,15 @@ describe('the clip of an animal that wants to walk but cannot', () => {
     );
     // ... then shows it again.
     expect(shown[firstIdle + waitFrames + 1]).toBe('walk');
+  });
+
+  it('does not make a swimmer wait: only a walk that cannot go on does', () => {
+    const state = still('walk');
+    for (let frame = 0; frame < 10; frame += 1) {
+      tickClipClock(state, STEP_MS);
+      settleClip(state, false, 'signature', true, true, STEP_MS);
+    }
+    expect(state.restMs).toBe(0);
   });
 
   it('does not start a walk clip that nothing asks for', () => {
