@@ -20,7 +20,7 @@ import { createGestures, type GazeInput } from './gestures';
 
 const MS_PER_SECOND = 1000;
 /** Short enough to feel responsive, long enough to hide the change of pose. */
-const CROSS_FADE_S = 0.4;
+export const CROSS_FADE_S = 0.4;
 
 /** Clips every animal model carries (checked by npm run assets:check). */
 export const REQUIRED_CLIPS = ['idle', 'walk', 'sleep', 'eat'] as const;
@@ -88,7 +88,8 @@ export function findSignatureClip(
 
 /** Walking clips are played at a speed that follows the real speed, so feet do not slide. */
 export const WALK_REFERENCE_SPEED_MPS = 0.6;
-const WALK_SCALE_MIN = 0.35;
+/** A very slow walk plays very slowly; the animal stops rather than glide on legs that do not move. */
+const WALK_SCALE_MIN = 0.1;
 const WALK_SCALE_MAX = 1.6;
 
 /** Speed at which the swim clip plays at its natural rate (a slow, relaxed swim). */
@@ -99,9 +100,74 @@ export function swimClipScale(speedMps: number): number {
   return Math.max(WALK_SCALE_MIN, Math.min(WALK_SCALE_MAX, speedMps / SWIM_REFERENCE_SPEED_MPS));
 }
 
-/** Playback speed of the walk clip for an animal moving at `speedMps`. */
-export function walkClipScale(speedMps: number): number {
-  return Math.max(WALK_SCALE_MIN, Math.min(WALK_SCALE_MAX, speedMps / WALK_REFERENCE_SPEED_MPS));
+/**
+ * Playback speed of the walk clip for an animal moving at `speedMps`, given the speed over the
+ * ground that the clip covers at its natural rate (`walkSpeedMps` of the model).
+ */
+export function walkClipScale(
+  speedMps: number,
+  naturalSpeedMps: number = WALK_REFERENCE_SPEED_MPS,
+): number {
+  return Math.max(WALK_SCALE_MIN, Math.min(WALK_SCALE_MAX, speedMps / naturalSpeedMps));
+}
+
+/** Largest turn between two keys of a rotation track, in radians. */
+function largestSwing(values: ArrayLike<number>): number {
+  const keys = Math.floor(values.length / 4);
+  let largest = 0;
+  for (let first = 0; first < keys; first += 1) {
+    for (let second = first + 1; second < keys; second += 1) {
+      const dot = Math.abs(
+        (values[first * 4] ?? 0) * (values[second * 4] ?? 0) +
+          (values[first * 4 + 1] ?? 0) * (values[second * 4 + 1] ?? 0) +
+          (values[first * 4 + 2] ?? 0) * (values[second * 4 + 2] ?? 0) +
+          (values[first * 4 + 3] ?? 0) * (values[second * 4 + 3] ?? 0),
+      );
+      largest = Math.max(largest, 2 * Math.acos(Math.min(1, dot)));
+    }
+  }
+  return largest;
+}
+
+/** Metres of stride an animal pivoting on the spot is credited with, to pace its walk clip. */
+const PIVOT_STRIDE_M = 0.4;
+/** Above this speed (m/s) the turning no longer adds to the pace of the feet. */
+const PIVOT_FADE_SPEED_MPS = 0.2;
+
+/**
+ * The pace the feet must keep, as a speed: that of the body, or when it hardly moves and turns on
+ * the spot, a stride a turn needs. The turn counts for less as the body goes faster.
+ */
+export function walkPace(speedMps: number, turnRateRadS: number): number {
+  const pivot = turnRateRadS * PIVOT_STRIDE_M * Math.max(0, 1 - speedMps / PIVOT_FADE_SPEED_MPS);
+  return Math.max(speedMps, pivot);
+}
+
+/** Speeds over the ground that a model can walk at without sliding are within these. */
+const NATURAL_SPEED_MIN_MPS = 0.15;
+const NATURAL_SPEED_MAX_MPS = 2.5;
+/** Over a cycle a foot is on the ground for half of it and travels back by 2 hip heights times sin(swing): 4 times, a second. */
+const STRIDE_FACTOR = 4;
+
+/**
+ * The speed over the ground at which the walk clip of a model moves its feet at the pace of the
+ * ground: in a cycle each foot is on the ground for half of it and travels back by twice the
+ * height of the hip times the sine of the swing, which is half the largest turn of a leg.
+ * Falls back to the reference speed for a model without legs to measure.
+ */
+export function naturalWalkSpeed(root: Object3D, walk: AnimationClip): number {
+  const leg = walk.tracks.find((track) => track.name === 'leg_fl.quaternion');
+  const hip = root.getObjectByName('leg_fl');
+  if (leg === undefined || hip === undefined || walk.duration <= 0) {
+    return WALK_REFERENCE_SPEED_MPS;
+  }
+  root.updateWorldMatrix(true, true);
+  const hipHeight = hip.getWorldPosition(new Vector3()).y;
+  const speed =
+    (STRIDE_FACTOR * hipHeight * Math.sin(largestSwing(leg.values) / 2)) / walk.duration;
+  return Number.isFinite(speed) && speed >= NATURAL_SPEED_MIN_MPS && speed <= NATURAL_SPEED_MAX_MPS
+    ? speed
+    : WALK_REFERENCE_SPEED_MPS;
 }
 
 /** The head looks about this much less while the animal eats. */
@@ -125,6 +191,8 @@ export interface AnimalModel {
   readonly signatureName: string;
   /** Longest horizontal side of the model's box, in metres: its size on screen follows from it. */
   readonly lengthM: number;
+  /** Speed over the ground at which the walk clip plays at its natural rate (see `naturalWalkSpeed`). */
+  readonly walkSpeedMps: number;
   /** Where the neighbours are: the head may look their way. Written by the herd. */
   readonly gaze: GazeInput;
   /** How much the animal looks about, from 0 (head still) to 1; see `attentionOf`. */
@@ -289,14 +357,29 @@ export function createAnimalModel(
   }));
   prepareMeshes(root);
   const lengthM = animalLength(root);
+  const walkSpeedMps = naturalWalkSpeed(root, actions.walk.getClip());
   mixer.timeScale = look.timeScale;
   actions.idle.time = look.startPhase * idleDurationS;
-  actions.idle.play();
+  // Every clip plays all the time; the model sets how much of each shows. The weights are its
+  // own, not the mixer's fades, so that asking for another clip while a fade is still going on
+  // goes on from where the weights are, instead of starting the fade over and making a pop.
+  const weights: Record<AnimalAnimation, number> = {
+    idle: 1,
+    walk: 0,
+    sleep: 0,
+    eat: 0,
+    signature: 0,
+  };
+  for (const { name, action } of playing) {
+    action.weight = weights[name];
+    action.play();
+  }
   let current: AnimalAnimation = 'idle';
   return ok({
     root,
     signatureName,
     lengthM,
+    walkSpeedMps,
     gaze,
     setAttention: (attention) => {
       if (gestures !== null) {
@@ -313,14 +396,11 @@ export function createAnimalModel(
       if (animation === current) {
         return;
       }
-      // Before a clip binds a bone for the first time, which would keep the layer's addition as its rest value.
-      life?.undo();
-      gestures?.undo();
+      // A clip that is not showing at all starts from a point of its loop of its own.
       const next = actions[animation];
-      next.reset();
-      next.time = randomFloat(rng) * next.getClip().duration;
-      next.play();
-      actions[current].crossFadeTo(next, CROSS_FADE_S, false);
+      if (weights[animation] <= 0) {
+        next.time = randomFloat(rng) * next.getClip().duration;
+      }
       current = animation;
     },
     setTimeScale: (scale) => {
@@ -330,28 +410,37 @@ export function createAnimalModel(
       const elapsedS = elapsedMs / MS_PER_SECOND;
       life?.undo();
       gestures?.undo();
-      mixer.update(elapsedS);
-      if (life === null && gestures === null) {
-        return;
-      }
+      // The wanted clip gains weight, the others lose it, at the pace of the cross-fade; the
+      // weights are kept adding up to one.
+      const fade = elapsedS / CROSS_FADE_S;
       let total = 0;
+      for (const { name } of playing) {
+        const goal = name === current ? 1 : 0;
+        const weight = weights[name];
+        weights[name] =
+          goal > weight ? Math.min(goal, weight + fade) : Math.max(goal, weight - fade);
+        total += weights[name];
+      }
       let breathing = 0;
       let blinking = 0;
       let sleeping = 0;
       let eating = 0;
       let walking = 0;
       for (const { name, action, needs: clip } of playing) {
-        if (action.isRunning()) {
-          const weight = action.getEffectiveWeight();
-          total += weight;
-          breathing += clip.breath ? weight : 0;
-          blinking += clip.blink ? weight : 0;
-          sleeping += name === 'sleep' ? weight : 0;
-          eating += name === 'eat' ? weight : 0;
-          walking += name === 'walk' ? weight : 0;
-        }
+        const weight = total > 0 ? weights[name] / total : name === current ? 1 : 0;
+        weights[name] = weight;
+        action.weight = weight;
+        breathing += clip.breath ? weight : 0;
+        blinking += clip.blink ? weight : 0;
+        sleeping += name === 'sleep' ? weight : 0;
+        eating += name === 'eat' ? weight : 0;
+        walking += name === 'walk' ? weight : 0;
       }
-      const share = total > 0 ? 1 / total : 0;
+      mixer.update(elapsedS);
+      if (life === null && gestures === null) {
+        return;
+      }
+      const share = 1;
       const layerS = elapsedS * mixer.timeScale;
       life?.apply(layerS, breathing * share, blinking * share);
       if (gestures !== null) {

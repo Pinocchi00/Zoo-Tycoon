@@ -18,12 +18,14 @@ import {
   type SpeciesProgress,
 } from '@/sim';
 import {
+  CROSS_FADE_S,
   cloneAnimalSource,
   animalLength,
   createAnimalModel,
   disposeAnimalSource,
   swimClipScale,
   walkClipScale,
+  walkPace,
   type AnimalAnimation,
   type AnimalModel,
   type AnimalModelProblem,
@@ -122,12 +124,20 @@ export const MAX_NO_PROGRESS_MS = 5000;
 /** Nearer than the best distance so far by this much counts as progress. */
 const PROGRESS_M = 0.25;
 /** An animal faster than this moves, one turning faster than this turns: its clip must be a walk. */
-const MOVING_SPEED_MPS = 0.03;
-const TURNING_RATE_RAD_S = 0.2;
+const MOVING_ON_SPEED_MPS = 0.04;
+const TURNING_ON_RATE_RAD_S = 0.2;
+/** ... and keeps moving, for this purpose, until it goes below these (so that it cannot flicker). */
+const MOVING_OFF_SPEED_MPS = 0.02;
+const TURNING_OFF_RATE_RAD_S = 0.1;
+/**
+ * An animal that sets off waits for its walk clip to take over: it starts to move when the clip
+ * has this share of the cross-fade behind it, and is free to go at full pace at the end of it.
+ */
+const GATE_START = 0.7;
+const MS_PER_FADE_S = 1000;
+const RESTART_COOLDOWN_MS = 1500;
 /** A walk clip goes on this long after the animal stopped, so that it does not flicker. */
 const WALK_HOLD_MS = 500;
-/** Metres of stride an animal pivoting on the spot is credited with, to pace its walk clip. */
-const PIVOT_STRIDE_M = 0.4;
 
 const TWO_PI = Math.PI * 2;
 /** Two animals greeting each other turn more slowly than they walk round. */
@@ -221,6 +231,14 @@ interface Individual {
   stillMs: number;
   /** Which way round the water the animal swims: 1 or -1. */
   swimDirection: number;
+  /** Top speed on the present walk, before the clip has taken over (see `GATE_START`). */
+  paceSpeed: number;
+  /** Time the clip shown has been shown. */
+  clipAgeMs: number;
+  /** Whether the animal moves or turns, as far as its clip is concerned (with a margin). */
+  moving: boolean;
+  /** Time before an animal that stopped walking in vain may show its walk again. */
+  restMs: number;
 }
 
 interface EnclosureGroup {
@@ -382,6 +400,10 @@ export function createAnimalHerd(options: HerdOptions): AnimalHerd {
       noProgressMs: 0,
       stillMs: 0,
       swimDirection: created % 2 === 0 ? 1 : -1,
+      paceSpeed: topSpeed,
+      clipAgeMs: 0,
+      moving: false,
+      restMs: 0,
       phase: created % PHASE_COUNT,
       approachAngle: group.individuals.length * GOLDEN_ANGLE_RAD,
     });
@@ -433,7 +455,7 @@ export function createAnimalHerd(options: HerdOptions): AnimalHerd {
       individuals: [],
       bodies,
       crowd: [],
-      steer: { area, others: bodies, scratch: { x: 0, z: 0 } },
+      steer: { area, others: bodies, scratch: { x: 0, z: 0 }, goal: null },
       lengthM: null,
       clearanceM: CROWD_CLEARANCE_M,
       approachRadiusM: APPROACH_RADIUS_M,
@@ -632,7 +654,7 @@ export function createAnimalHerd(options: HerdOptions): AnimalHerd {
       individual.bestDistance = distanceToGoal(group, individual);
       individual.noProgressMs = 0;
       // A stroll or a decided pace, for the whole walk.
-      individual.limits.maxSpeed = individual.topSpeed * rollPace(rng);
+      individual.paceSpeed = individual.topSpeed * rollPace(rng);
     } else {
       failTravel(behaviour, rng);
     }
@@ -748,9 +770,35 @@ export function createAnimalHerd(options: HerdOptions): AnimalHerd {
       group.context.signatureAtWater &&
       group.pois.water !== null;
     const circling = swimming && circuitTarget(group, individual);
-    if (circling) {
-      individual.limits.maxSpeed = individual.topSpeed * SWIM_PACE;
+    individual.clipAgeMs += elapsedMs;
+    // An animal that means to move shows the clip of the movement first, and only gets going
+    // as that clip takes over: it never moves while the posture it left still shows.
+    let changed = false;
+    const legsClip = circling ? 'signature' : 'walk';
+    const intent = travelling || circling;
+    individual.restMs = Math.max(0, individual.restMs - elapsedMs);
+    if (intent && individual.shown !== legsClip && individual.restMs <= 0) {
+      model.play(legsClip);
+      individual.shown = legsClip;
+      individual.clipAgeMs = 0;
+      individual.stillMs = 0;
+      changed = true;
     }
+    const fade = Math.min(1, individual.clipAgeMs / (CROSS_FADE_S * MS_PER_FADE_S));
+    // Not showing the clip of the movement yet (or any more): no movement.
+    const gate =
+      intent && individual.shown === legsClip
+        ? Math.max(0, (fade - GATE_START) / (1 - GATE_START))
+        : intent
+          ? 0
+          : 1;
+    individual.limits.maxSpeed =
+      (circling ? individual.topSpeed * SWIM_PACE : individual.paceSpeed) * gate;
+    // Going to lie down next to a sleeper: it is not an obstacle to stop short of, but the goal.
+    group.steer.goal =
+      behaviour.activity === 'sleeperWalk'
+        ? (group.individuals[social.sleeper]?.body ?? null)
+        : null;
     steerStep(
       body,
       individual.limits,
@@ -795,28 +843,42 @@ export function createAnimalHerd(options: HerdOptions): AnimalHerd {
     // The clip fits the movement: whatever the animal is doing, if it moves or turns, it walks
     // (or swims); and a walk clip does not go on long once it stands still.
     const yawRate = Math.abs(wrapAngle(body.yaw - yawBefore)) / dtS;
-    const moving = body.speed > MOVING_SPEED_MPS || yawRate > TURNING_RATE_RAD_S;
+    individual.moving = individual.moving
+      ? body.speed > MOVING_OFF_SPEED_MPS || yawRate > TURNING_OFF_RATE_RAD_S
+      : body.speed > MOVING_ON_SPEED_MPS || yawRate > TURNING_ON_RATE_RAD_S;
+    const moving = individual.moving;
     let clip = behaviour.animation;
     if (moving) {
       individual.stillMs = 0;
       if (clip !== 'walk' && !(clip === 'signature' && swimming)) {
         clip = 'walk';
       }
+    } else if (individual.shown === 'walk' && clip !== 'walk') {
+      // It has just stopped: the walk clip goes on a moment, so that a body that flickers
+      // between moving and still does not flicker between clips too.
+      individual.stillMs += elapsedMs;
+      if (individual.stillMs < WALK_HOLD_MS) {
+        clip = 'walk';
+      }
     } else if (clip === 'walk') {
       individual.stillMs += elapsedMs;
       if (individual.stillMs >= WALK_HOLD_MS) {
         clip = 'idle';
+        // An animal that wants to go but cannot (a neighbour in the way) does not start its walk
+        // clip again and again: it waits before it tries once more.
+        individual.restMs = intent ? RESTART_COOLDOWN_MS : 0;
       }
     } else {
       individual.stillMs = 0;
     }
-    const changed = individual.shown !== clip;
-    if (changed) {
+    if (individual.shown !== clip) {
       model.play(clip);
       individual.shown = clip;
+      individual.clipAgeMs = 0;
+      changed = true;
     }
     if (clip === 'walk') {
-      model.setWalkScale(walkClipScale(Math.max(body.speed, yawRate * PIVOT_STRIDE_M)));
+      model.setWalkScale(walkClipScale(walkPace(body.speed, yawRate), model.walkSpeedMps));
     } else if (clip === 'signature' && swimming) {
       model.setSignatureScale(swimClipScale(body.speed));
     }

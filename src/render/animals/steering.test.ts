@@ -41,7 +41,7 @@ function areaOf(outline: readonly GridPoint[]): EnclosureArea {
 }
 
 function worldOf(area: EnclosureArea, bodies: readonly SteerBody[]): SteerWorld {
-  return { area, others: bodies, scratch: { x: 0, z: 0 } };
+  return { area, others: bodies, scratch: { x: 0, z: 0 }, goal: null };
 }
 
 /** Reads the flag through a call, so that the compiler does not assume it never changes. */
@@ -400,6 +400,7 @@ describe('steerStep', () => {
       yaw: 1,
       speed: 0,
       arrived: false,
+      turnRate: 0,
       lengthM: 0,
       radius: 0,
       halfSpan: 0,

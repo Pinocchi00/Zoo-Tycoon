@@ -8,8 +8,11 @@ import {
   Texture,
   VectorKeyframeTrack,
   Quaternion,
+  QuaternionKeyframeTrack,
+  Vector3,
 } from 'three';
 import { describe, expect, it, vi } from 'vitest';
+import { createRng, randomInt } from '@/sim';
 import {
   cloneAnimalSource,
   createAnimalModel,
@@ -23,6 +26,8 @@ import {
   SWIM_REFERENCE_SPEED_MPS,
   animalLength,
   swimClipScale,
+  naturalWalkSpeed,
+  walkPace,
   type AnimalLook,
   type AnimalSource,
 } from './animal-model';
@@ -425,6 +430,141 @@ describe('walk clip speed', () => {
     expect(advance(1)).toBeCloseTo(0.1);
     expect(advance(0.5)).toBeCloseTo(0.05);
     expect(advance(1.6)).toBeCloseTo(0.16);
+  });
+});
+
+describe('asking for another clip before the fade is over', () => {
+  /** Clips whose chest differs a lot from one to the next, so that a pop would show. */
+  function poseOf(name: string, chest: number): AnimationClip {
+    return new AnimationClip(name, 1, [
+      new VectorKeyframeTrack('chest.scale', [0, 1], [chest, 1, chest, chest, 1, chest]),
+    ]);
+  }
+
+  it('goes on from where the weights are: no pop, whatever the order and the pace of the requests', () => {
+    const root = new Group();
+    for (const name of ['chest', 'trunk', 'head']) {
+      const bone = new Bone();
+      bone.name = name;
+      root.add(bone);
+    }
+    const created = createAnimalModel(
+      {
+        scene: root,
+        animations: [
+          poseOf('idle', 1),
+          poseOf('walk', 1.2),
+          poseOf('sleep', 1.4),
+          poseOf('eat', 1.1),
+          poseOf('swim', 1.3),
+        ],
+      },
+      LOOK,
+    );
+    if (!created.ok) {
+      throw new Error('expected a model');
+    }
+    const chest = root.getObjectByName('chest');
+    const trunk = root.getObjectByName('trunk');
+    if (chest === undefined || trunk === undefined) {
+      throw new Error('expected bones');
+    }
+    const names = ['idle', 'walk', 'sleep', 'eat', 'signature'] as const;
+    const rng = createRng(3);
+    const FRAME_MS = 1000 / 60;
+    // A full change of pose (0.4) takes 24 images; two clips may be on their way out at once, so
+    // no image may do more than two such steps (and the breathing a little).
+    const MAX_CHEST_STEP = (2 * 0.4) / 24 + 0.01;
+    const MAX_TRUNK_STEP_RAD = 0.03;
+    let previousChest = chest.scale.x;
+    let previousTrunk = trunk.quaternion.angleTo(new Quaternion());
+    let worstChest = 0;
+    let worstTrunk = 0;
+    for (let round = 0; round < 3000; round += 1) {
+      created.value.play(names[randomInt(rng, 0, names.length - 1)] ?? 'idle');
+      for (let frame = randomInt(rng, 1, 40); frame > 0; frame -= 1) {
+        created.value.update(FRAME_MS);
+        if (round > 3) {
+          worstChest = Math.max(worstChest, Math.abs(chest.scale.x - previousChest));
+          worstTrunk = Math.max(
+            worstTrunk,
+            Math.abs(trunk.quaternion.angleTo(new Quaternion()) - previousTrunk),
+          );
+        }
+        previousChest = chest.scale.x;
+        previousTrunk = trunk.quaternion.angleTo(new Quaternion());
+      }
+    }
+    expect(worstChest).toBeLessThan(MAX_CHEST_STEP);
+    expect(worstTrunk).toBeLessThan(MAX_TRUNK_STEP_RAD);
+  });
+});
+
+describe('the pace of the feet', () => {
+  /** A leg whose hip is 0.36 m up, swinging 24 degrees each side over a one second cycle. */
+  function walker(
+    hipHeight: number,
+    swingDeg: number,
+    durationS: number,
+    legs = true,
+  ): {
+    root: Group;
+    walk: AnimationClip;
+  } {
+    const root = new Group();
+    if (legs) {
+      const leg = new Bone();
+      leg.name = 'leg_fl';
+      leg.position.set(0, hipHeight, 0);
+      root.add(leg);
+    }
+    const swing = (turn: number): number[] =>
+      new Quaternion().setFromAxisAngle(new Vector3(1, 0, 0), turn).toArray();
+    const rad = (swingDeg * Math.PI) / 180;
+    const values = [rad, 0, -rad, 0, rad].flatMap((turn) => swing(turn));
+    const times = [0, 0.25, 0.5, 0.75, 1].map((fraction) => fraction * durationS);
+    return {
+      root,
+      walk: new AnimationClip('walk', durationS, [
+        new QuaternionKeyframeTrack('leg_fl.quaternion', times, values),
+      ]),
+    };
+  }
+
+  it('is worked out from the legs of the walk clip: four hip heights times the sine of the swing, a second', () => {
+    const { root, walk } = walker(0.36, 24, 1);
+    expect(naturalWalkSpeed(root, walk)).toBeCloseTo(
+      (4 * 0.36 * Math.sin((24 * Math.PI) / 180)) / 1,
+    );
+    const slow = walker(0.66, 20, 1.4);
+    expect(naturalWalkSpeed(slow.root, slow.walk)).toBeCloseTo(
+      (4 * 0.66 * Math.sin((20 * Math.PI) / 180)) / 1.4,
+    );
+    // The same legs, twice as slow a cycle: half the speed over the ground.
+    const half = walker(0.36, 24, 2);
+    expect(naturalWalkSpeed(half.root, half.walk)).toBeCloseTo(naturalWalkSpeed(root, walk) / 2);
+  });
+
+  it('falls back to the reference for a model without legs to measure', () => {
+    const { root, walk } = walker(0.36, 24, 1, false);
+    expect(naturalWalkSpeed(root, walk)).toBe(WALK_REFERENCE_SPEED_MPS);
+    expect(naturalWalkSpeed(new Group(), new AnimationClip('walk', 1, []))).toBe(
+      WALK_REFERENCE_SPEED_MPS,
+    );
+  });
+
+  it('plays the walk clip as fast as the ground goes by, whatever the species', () => {
+    for (const natural of [0.59, 0.85, 1]) {
+      expect(walkClipScale(natural, natural)).toBeCloseTo(1);
+      expect(walkClipScale(natural / 2, natural)).toBeCloseTo(0.5);
+    }
+  });
+
+  it('counts a turn on the spot as a stride, less and less as the body goes faster', () => {
+    expect(walkPace(0.3, 2)).toBe(0.3);
+    expect(walkPace(0, 1)).toBeCloseTo(0.4);
+    expect(walkPace(0.1, 1)).toBeCloseTo(0.2);
+    expect(walkPace(0.1, 0)).toBe(0.1);
   });
 });
 

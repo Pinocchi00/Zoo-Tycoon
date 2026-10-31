@@ -47,8 +47,8 @@ export const TAIL_SWAY_RAD = 0.22;
 const TAIL_PERIOD_S = { min: 3.5, max: 6.5 } as const;
 export const TAIL_SWAT_RAD = 0.55;
 const TAIL_SWAT_GAP_S = { min: 10, max: 28 } as const;
-const TAIL_SWAT_S = 0.7;
-const TAIL_SWAT_WAVES = 2.5;
+const TAIL_SWAT_S = 0.9;
+const TAIL_SWAT_WAVES = 1;
 
 export const TRUNK_YAW_RAD = 0.3;
 export const TRUNK_PITCH_RAD = 0.18;
