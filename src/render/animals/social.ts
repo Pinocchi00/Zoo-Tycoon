@@ -19,7 +19,7 @@ const WALKING_SPEED_MPS = 0.05;
 /** Free space a follower leaves between itself and the walker it follows, beyond its length. */
 const FOLLOW_SLACK_M = 0.3;
 /** Free space between two sleepers in contact: they touch, nearly, but never overlap. */
-const SLEEP_CONTACT_SLACK_M = 0.15;
+const SLEEP_CONTACT_SLACK_M = 0.2;
 /** A regrouping animal stops at least this far from the middle of the others. */
 const REGROUP_RADIUS_MIN_M = 1.6;
 /** ... and, for a long animal, this share of its length plus this much room. */

@@ -19,8 +19,16 @@ const MAX_AVOID_PULL = 0.9;
 /** Below this speed an animal turning is pivoting on the spot, which it does more gently. */
 const PIVOT_SPEED_MPS = 0.1;
 const PIVOT_TURN_SHARE = 0.6;
+/**
+ * The heading follows the wanted direction like a spring (turn rate = error times this, per
+ * second) whose rate may change by at most this share of the top turn rate each second, so that a
+ * wanted direction that flips from one image to the next (a neighbour on one side, the target on
+ * the other) moves the animal by a hair instead of shaking it.
+ */
+const TURN_GAIN_PER_S = 4;
+const TURN_ACCEL_SHARE_PER_S = 3;
 /** The animal starts braking when a neighbour is nearer than its stopping distance plus this. */
-const BRAKE_LOOKAHEAD_M = 0.6;
+const BRAKE_LOOKAHEAD_M = 0.5;
 /** It aims to stop this far (free space between bodies) short of the neighbour in its way. */
 const STOP_MARGIN_M = 0.3;
 /** ... and this far (from the centre of its body) short of the fence. */
@@ -29,6 +37,11 @@ const FENCE_STOP_MARGIN_M = 0.15;
 const REACH_MARGIN_M = 0.5;
 /** Rounds of halving to find the farthest free part of a step. */
 const BISECTION_STEPS = 7;
+/**
+ * A walk slower than this is not a walk: an animal that can only creep, held back by a neighbour
+ * or the fence, stops instead (its feet could not keep up with so slow a body).
+ */
+const MIN_WALK_SPEED_MPS = 0.06;
 /** A step or a turn may not bring the body nearer than this to a neighbour's (unless it is already). */
 const KEEP_CLEAR_M = 0.15;
 const TWO_PI = Math.PI * 2;
@@ -50,6 +63,8 @@ export interface SteerBody {
   speed: number;
   /** True once the animal reached the target it was told to go to. */
   arrived: boolean;
+  /** Radians per second: the heading changes gradually, so it cannot flicker left and right. */
+  turnRate: number;
   /** Nose to tail, in metres; zero for a point. */
   readonly lengthM: number;
   /** Radius of the capsule that stands for the body. */
@@ -74,6 +89,8 @@ export interface SteerWorld {
   readonly others: readonly SteerBody[];
   /** Scratch slot for the nearest point of the fence. */
   readonly scratch: Point2;
+  /** The neighbour the animal is going to be next to: it brakes for the others, not for this one. */
+  goal: SteerBody | null;
 }
 
 export function createSteerBody(x: number, z: number, yaw: number, lengthM = 0): SteerBody {
@@ -84,6 +101,7 @@ export function createSteerBody(x: number, z: number, yaw: number, lengthM = 0):
     yaw,
     speed: 0,
     arrived: false,
+    turnRate: 0,
     lengthM,
     radius,
     halfSpan: Math.max(0, lengthM / 2 - radius),
@@ -193,10 +211,11 @@ function clearToMove(
   others: readonly SteerBody[],
   marginM = REACH_MARGIN_M,
   minGapM = 0,
+  skip: SteerBody | null = null,
 ): boolean {
   const own = reach(body);
   for (const other of others) {
-    if (other === body) {
+    if (other === body || other === skip) {
       continue;
     }
     const range = own + reach(other) + marginM;
@@ -214,7 +233,12 @@ function clearToMove(
 }
 
 /** How far ahead (up to `lookM`) the body can go before it would run into a neighbour. */
-function freeAhead(body: SteerBody, others: readonly SteerBody[], lookM: number): number {
+function freeAhead(
+  body: SteerBody,
+  others: readonly SteerBody[],
+  lookM: number,
+  goal: SteerBody | null,
+): number {
   const sx = Math.sin(body.yaw);
   const sz = Math.cos(body.yaw);
   const margin = lookM + REACH_MARGIN_M;
@@ -227,6 +251,7 @@ function freeAhead(body: SteerBody, others: readonly SteerBody[], lookM: number)
       others,
       margin,
       KEEP_CLEAR_M,
+      goal,
     )
   ) {
     return lookM;
@@ -244,6 +269,7 @@ function freeAhead(body: SteerBody, others: readonly SteerBody[], lookM: number)
         others,
         margin,
         KEEP_CLEAR_M,
+        goal,
       )
     ) {
       near = middle;
@@ -366,7 +392,10 @@ export function turnToward(
   const error = wrapAngle(headingRad - body.yaw);
   const yaw = wrapAngle(body.yaw + clamp(error, rateRadS * dtS));
   if (clearToMove(body, body.x, body.z, yaw, others, REACH_MARGIN_M, KEEP_CLEAR_M)) {
+    body.turnRate = wrapAngle(yaw - body.yaw) / dtS;
     body.yaw = yaw;
+  } else {
+    body.turnRate = 0;
   }
 }
 
@@ -385,7 +414,9 @@ function turnInwards(
   const yaw = wrapAngle(yawBefore + clamp(error, limits.maxTurnRate * dtS));
   // Turning away from the fence must not swing the body into a neighbour either.
   body.yaw = yawBefore;
+  body.turnRate = 0;
   if (clearToMove(body, body.x, body.z, yaw, world.others, REACH_MARGIN_M, KEEP_CLEAR_M)) {
+    body.turnRate = wrapAngle(yaw - yawBefore) / dtS;
     body.yaw = yaw;
   }
 }
@@ -412,6 +443,9 @@ export function steerStep(
   const speedBefore = body.speed;
   let wantedSpeed = 0;
   let alignment = 1;
+  if (!moving) {
+    body.turnRate = 0;
+  }
   if (moving) {
     const toX = targetX - body.x;
     const toZ = targetZ - body.z;
@@ -423,10 +457,16 @@ export function steerStep(
       const wantedZ = toZ / distance + PUSH.z * AVOID_GAIN;
       const error = wrapAngle(Math.atan2(wantedX, wantedZ) - body.yaw);
       const pivot = body.speed < PIVOT_SPEED_MPS ? PIVOT_TURN_SHARE : 1;
-      const turn = clamp(error, limits.maxTurnRate * pivot * dtS);
+      const rateLimit = limits.maxTurnRate * pivot;
+      const wantedRate = clamp(error * TURN_GAIN_PER_S, rateLimit);
+      const rateStep = limits.maxTurnRate * TURN_ACCEL_SHARE_PER_S * dtS;
+      body.turnRate = clamp(body.turnRate + clamp(wantedRate - body.turnRate, rateStep), rateLimit);
+      const turn = body.turnRate * dtS;
       const yaw = wrapAngle(body.yaw + turn);
       if (clearToMove(body, body.x, body.z, yaw, world.others, REACH_MARGIN_M, KEEP_CLEAR_M)) {
         body.yaw = yaw;
+      } else {
+        body.turnRate = 0;
       }
       // Slow down while still turning, so the animal never skids sideways.
       alignment = Math.max(0, Math.cos(error - turn));
@@ -434,11 +474,13 @@ export function steerStep(
       wantedSpeed = limits.maxSpeed * Math.max(MIN_SPEED_RATIO, arriveRatio);
       // A neighbour or the fence in the way: brake in time to stop short of it, at the usual
       // rate. Only the way to the target counts: what lies beyond it does not matter.
+      // Looked at from a distance that does not depend on the present speed, so that the speed
+      // wanted is a smooth function of the free space and braking cannot switch on and off.
       const look = Math.min(
         distance,
-        (body.speed * body.speed) / (2 * limits.maxAccel) + body.speed * dtS + BRAKE_LOOKAHEAD_M,
+        (limits.maxSpeed * limits.maxSpeed) / (2 * limits.maxAccel) + BRAKE_LOOKAHEAD_M,
       );
-      const freeToAnimal = freeAhead(body, world.others, look);
+      const freeToAnimal = freeAhead(body, world.others, look, world.goal);
       if (freeToAnimal < look) {
         wantedSpeed = Math.min(
           wantedSpeed,
@@ -457,6 +499,9 @@ export function steerStep(
         );
       }
     }
+  }
+  if (wantedSpeed < MIN_WALK_SPEED_MPS) {
+    wantedSpeed = 0;
   }
   const change = clamp(wantedSpeed * alignment - body.speed, limits.maxAccel * dtS);
   body.speed = Math.max(0, body.speed + change);

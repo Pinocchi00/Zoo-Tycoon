@@ -13,6 +13,7 @@ function fakeModel(): AnimalModel & { updates: number[]; disposed: number } {
     root,
     signatureName: 'swim',
     lengthM: 1,
+    walkSpeedMps: 0.6,
     gaze: { hasNeighbour: false, yaw: 0 },
     setAttention: () => undefined,
     setWalkScale: () => undefined,
