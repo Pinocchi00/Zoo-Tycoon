@@ -31,6 +31,7 @@ import {
   type AnimalModelProblem,
   type AnimalSource,
 } from './animal-model';
+import { nextMoving, promoteToLegs, settleClip, showClip, tickClipClock } from './clip-choice';
 import { createAnimalSlot, type AnimalSlot, type AnimalSlotProblem } from './animal-slot';
 import {
   advanceBehaviour,
@@ -40,7 +41,9 @@ import {
   createBehaviour,
   failTravel,
   isTravelling,
+  MAX_TRAVEL_MS,
   rollPace,
+  tripLimitMs,
   type Activity,
   type AnimalBehaviour,
   type BehaviourContext,
@@ -123,38 +126,12 @@ const SWIM_LOOKAHEAD_RAD = 1.3;
 export const MAX_NO_PROGRESS_MS = 5000;
 /** Nearer than the best distance so far by this much counts as progress. */
 const PROGRESS_M = 0.25;
-/** An animal faster than this moves, one turning faster than this turns: its clip must be a walk. */
-const MOVING_ON_SPEED_MPS = 0.04;
-const TURNING_ON_RATE_RAD_S = 0.2;
-/** ... and keeps moving, for this purpose, until it goes below these (so that it cannot flicker). */
-const MOVING_OFF_SPEED_MPS = 0.02;
-const TURNING_OFF_RATE_RAD_S = 0.1;
 /**
  * An animal that sets off waits for its walk clip to take over: it starts to move when the clip
  * has this share of the cross-fade behind it, and is free to go at full pace at the end of it.
  */
 const GATE_START = 0.7;
 const MS_PER_FADE_S = 1000;
-export const RESTART_COOLDOWN_MS = 1500;
-
-/**
- * Whether an animal counts as moving for its clip: it needs a clear movement to start, and keeps
- * counting until it is nearly still, so that a speed that wavers round one threshold does not
- * make the clip flicker.
- */
-export function nextMoving(wasMoving: boolean, speedMps: number, turnRateRadS: number): boolean {
-  return wasMoving
-    ? speedMps > MOVING_OFF_SPEED_MPS || turnRateRadS > TURNING_OFF_RATE_RAD_S
-    : speedMps > MOVING_ON_SPEED_MPS || turnRateRadS > TURNING_ON_RATE_RAD_S;
-}
-
-/** How long an animal that stopped walking in vain waits before it shows its walk clip again. */
-export function restartDelayMs(wantsToMove: boolean): number {
-  return wantsToMove ? RESTART_COOLDOWN_MS : 0;
-}
-/** A walk clip goes on this long after the animal stopped, so that it does not flicker. */
-const WALK_HOLD_MS = 500;
-
 const TWO_PI = Math.PI * 2;
 /** Two animals greeting each other turn more slowly than they walk round. */
 const SALUTE_TURN_SHARE = 0.6;
@@ -671,6 +648,10 @@ export function createAnimalHerd(options: HerdOptions): AnimalHerd {
       individual.noProgressMs = 0;
       // A stroll or a decided pace, for the whole walk.
       individual.paceSpeed = individual.topSpeed * rollPace(rng);
+      // A long walk gets the time its trip needs at that pace.
+      if (behaviour.travelLimitMs > MAX_TRAVEL_MS) {
+        behaviour.travelLimitMs = tripLimitMs(individual.bestDistance, individual.paceSpeed);
+      }
     } else {
       failTravel(behaviour, rng);
     }
@@ -786,18 +767,14 @@ export function createAnimalHerd(options: HerdOptions): AnimalHerd {
       group.context.signatureAtWater &&
       group.pois.water !== null;
     const circling = swimming && circuitTarget(group, individual);
-    individual.clipAgeMs += elapsedMs;
+    tickClipClock(individual, elapsedMs);
     // An animal that means to move shows the clip of the movement first, and only gets going
     // as that clip takes over: it never moves while the posture it left still shows.
     let changed = false;
     const legsClip = circling ? 'signature' : 'walk';
     const intent = travelling || circling;
-    individual.restMs = Math.max(0, individual.restMs - elapsedMs);
-    if (intent && individual.shown !== legsClip && individual.restMs <= 0) {
+    if (promoteToLegs(individual, intent, legsClip)) {
       model.play(legsClip);
-      individual.shown = legsClip;
-      individual.clipAgeMs = 0;
-      individual.stillMs = 0;
       changed = true;
     }
     const fade = Math.min(1, individual.clipAgeMs / (CROSS_FADE_S * MS_PER_FADE_S));
@@ -861,34 +838,15 @@ export function createAnimalHerd(options: HerdOptions): AnimalHerd {
     const yawRate = Math.abs(wrapAngle(body.yaw - yawBefore)) / dtS;
     individual.moving = nextMoving(individual.moving, body.speed, yawRate);
     const moving = individual.moving;
-    let clip = behaviour.animation;
-    if (moving) {
-      individual.stillMs = 0;
-      if (clip !== 'walk' && !(clip === 'signature' && swimming)) {
-        clip = 'walk';
-      }
-    } else if (individual.shown === 'walk' && clip !== 'walk') {
-      // It has just stopped: the walk clip goes on a moment, so that a body that flickers
-      // between moving and still does not flicker between clips too.
-      individual.stillMs += elapsedMs;
-      if (individual.stillMs < WALK_HOLD_MS) {
-        clip = 'walk';
-      }
-    } else if (clip === 'walk') {
-      individual.stillMs += elapsedMs;
-      if (individual.stillMs >= WALK_HOLD_MS) {
-        clip = 'idle';
-        // An animal that wants to go but cannot (a neighbour in the way) does not start its walk
-        // clip again and again: it waits before it tries once more.
-        individual.restMs = restartDelayMs(intent);
-      }
-    } else {
-      individual.stillMs = 0;
-    }
-    if (individual.shown !== clip) {
+    const clip = settleClip(individual, {
+      moving,
+      behaviourClip: behaviour.animation,
+      intent,
+      swimming,
+      elapsedMs,
+    });
+    if (showClip(individual, clip)) {
       model.play(clip);
-      individual.shown = clip;
-      individual.clipAgeMs = 0;
       changed = true;
     }
     if (clip === 'walk') {

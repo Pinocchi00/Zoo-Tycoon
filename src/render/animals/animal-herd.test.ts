@@ -25,9 +25,6 @@ import { isTravelling, type Activity } from './behaviour';
 import {
   MAX_ACCEL_MPS2,
   MAX_SPEED_MAX_MPS,
-  RESTART_COOLDOWN_MS,
-  nextMoving,
-  restartDelayMs,
   HIDDEN_UPDATE_EVERY_FRAMES,
   SMALL_ON_SCREEN_PX,
   SMALL_UPDATE_EVERY_FRAMES,
@@ -545,30 +542,6 @@ describe('life in the enclosure', () => {
   );
 });
 
-describe('clip bookkeeping', () => {
-  it('keeps counting a body as moving until it is nearly still: no flicker round one threshold', () => {
-    let moving = false;
-    let changes = 0;
-    // A speed that wavers between 0.025 and 0.035 m/s, round the old single threshold of 0.03.
-    for (let step = 0; step < 100; step += 1) {
-      const next = nextMoving(moving, step % 2 === 0 ? 0.025 : 0.035, 0);
-      changes += next === moving ? 0 : 1;
-      moving = next;
-    }
-    expect(changes).toBe(0);
-    expect(nextMoving(false, 0.05, 0)).toBe(true);
-    expect(nextMoving(true, 0.03, 0)).toBe(true);
-    expect(nextMoving(true, 0.01, 0)).toBe(false);
-    expect(nextMoving(false, 0, 0.3)).toBe(true);
-    expect(nextMoving(true, 0, 0.15)).toBe(true);
-  });
-
-  it('makes an animal that wants to go but cannot wait before it shows its walk again', () => {
-    expect(restartDelayMs(true)).toBe(RESTART_COOLDOWN_MS);
-    expect(restartDelayMs(false)).toBe(0);
-  });
-});
-
 describe('arrival of a group', () => {
   it('shows the new group still at first, then exploring', async () => {
     const { herd, parent } = setup();
@@ -936,12 +909,13 @@ describe('life of a big group', () => {
     size: number,
     onFrame: (sample: Sample, frame: number) => void,
     hours = 1,
+    stars = 1,
   ): Promise<void> {
     const { herd, parent } = setup();
     herd.syncAll(
       worldOf(
         [outlineEnclosure('enclosure-1', BIG_FIELD, CAPYBARA)],
-        [{ speciesId: CAPYBARA, stars: 1, groupSize: size }],
+        [{ speciesId: CAPYBARA, stars, groupSize: size }],
       ),
     );
     await herd.whenLoaded();
@@ -1044,32 +1018,48 @@ describe('life of a big group', () => {
   );
 
   it(
-    'gets to the water and to the sleeper it walks to, whatever the pace',
+    'gets to the water, the toy and the sleeper it walks to, whatever the pace',
     async () => {
       let previous: readonly Activity[] = [];
       const outcomes = new Map<string, { arrived: number; given: number }>();
       const startedAt: number[] = [];
       // A walk that ended at once found no way (no free place round the point): not a walk.
       const REAL_WALK_FRAMES = 5;
-      await liveForAnHour(5, (sample, frame) => {
-        sample.activities.forEach((activity, index) => {
-          const before = previous[index];
-          if ((activity === 'waterWalk' || activity === 'sleeperWalk') && activity !== before) {
-            startedAt[index] = frame;
-          }
-          const real = frame - (startedAt[index] ?? frame) >= REAL_WALK_FRAMES;
-          if (real && (before === 'waterWalk' || before === 'sleeperWalk') && activity !== before) {
-            const entry = outcomes.get(before) ?? { arrived: 0, given: 0 };
-            const arrived = activity === 'signature' || activity === 'sleep';
-            outcomes.set(before, {
-              arrived: entry.arrived + (arrived ? 1 : 0),
-              given: entry.given + 1,
-            });
-          }
-        });
-        previous = sample.activities;
-      });
-      for (const kind of ['waterWalk', 'sleeperWalk']) {
+      // What it does on getting there.
+      const ARRIVAL: Readonly<Record<string, readonly string[]>> = {
+        waterWalk: ['signature'],
+        sleeperWalk: ['sleep'],
+        enrichmentWalk: ['eat', 'signature'],
+      };
+      await liveForAnHour(
+        5,
+        (sample, frame) => {
+          sample.activities.forEach((activity, index) => {
+            const before = previous[index];
+            if (ARRIVAL[activity] !== undefined && activity !== before) {
+              startedAt[index] = frame;
+            }
+            const real = frame - (startedAt[index] ?? frame) >= REAL_WALK_FRAMES;
+            if (
+              real &&
+              before !== undefined &&
+              ARRIVAL[before] !== undefined &&
+              activity !== before
+            ) {
+              const entry = outcomes.get(before) ?? { arrived: 0, given: 0 };
+              const arrived = ARRIVAL[before].includes(activity);
+              outcomes.set(before, {
+                arrived: entry.arrived + (arrived ? 1 : 0),
+                given: entry.given + 1,
+              });
+            }
+          });
+          previous = sample.activities;
+        },
+        1,
+        3,
+      );
+      for (const kind of ['waterWalk', 'sleeperWalk', 'enrichmentWalk']) {
         const outcome = outcomes.get(kind);
         expect(outcome?.given ?? 0, kind).toBeGreaterThan(8);
         expect((outcome?.arrived ?? 0) / (outcome?.given ?? 1), kind).toBeGreaterThan(0.85);
