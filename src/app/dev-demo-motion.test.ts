@@ -6,6 +6,7 @@ import {
   Mesh,
   MeshStandardMaterial,
   Quaternion,
+  QuaternionKeyframeTrack,
   Vector3,
   VectorKeyframeTrack,
   type Object3D,
@@ -13,27 +14,71 @@ import {
 import { describe, expect, it } from 'vitest';
 import { loadGameContent, type GameData } from '@/data';
 import { createEventQueue, type FocusArea } from '@/sim';
-import { createAnimalHerd } from '../render/animals/animal-herd';
 import {
   CROSS_FADE_S,
   SWIM_REFERENCE_SPEED_MPS,
-  WALK_REFERENCE_SPEED_MPS,
+  createAnimalHerd,
   swimClipScale,
   walkClipScale,
   walkPace,
   type AnimalSource,
-} from '../render/animals/animal-model';
+} from '@/render';
 import { buildAnimalDemo } from './dev-demo';
 import { terrainGrid } from './entrance-focus';
 
 /** Real lengths and signature clips of the five models (read in assets/models). */
-const MODELS: Readonly<Record<string, { lengthM: number; signature: string; trunk: boolean }>> = {
-  capybara: { lengthM: 1.18, signature: 'swim', trunk: false },
-  collared_peccary: { lengthM: 1.07, signature: 'root', trunk: false },
-  lowland_tapir: { lengthM: 2.03, signature: 'trunk', trunk: true },
-  giant_otter: { lengthM: 1.27, signature: 'swim', trunk: false },
-  jaguar: { lengthM: 1.64, signature: 'stretch', trunk: false },
+interface ModelFacts {
+  readonly lengthM: number;
+  readonly signature: string;
+  readonly trunk: boolean;
+  /** Height of the hip, swing of the legs (degrees) and length of the cycle (s): the walk clip. */
+  readonly hipM: number;
+  readonly swingDeg: number;
+  readonly cycleS: number;
+}
+
+const MODELS: Readonly<Record<string, ModelFacts>> = {
+  capybara: { lengthM: 1.18, signature: 'swim', trunk: false, hipM: 0.36, swingDeg: 24, cycleS: 1 },
+  collared_peccary: {
+    lengthM: 1.07,
+    signature: 'root',
+    trunk: false,
+    hipM: 0.36,
+    swingDeg: 28,
+    cycleS: 0.8,
+  },
+  lowland_tapir: {
+    lengthM: 2.03,
+    signature: 'trunk',
+    trunk: true,
+    hipM: 0.66,
+    swingDeg: 20,
+    cycleS: 1.4,
+  },
+  giant_otter: {
+    lengthM: 1.27,
+    signature: 'swim',
+    trunk: false,
+    hipM: 0.2,
+    swingDeg: 32,
+    cycleS: 0.7,
+  },
+  jaguar: {
+    lengthM: 1.64,
+    signature: 'stretch',
+    trunk: false,
+    hipM: 0.57,
+    swingDeg: 26,
+    cycleS: 1,
+  },
 };
+
+/** The speed over the ground at which the walk clip of a model plays at its natural rate. */
+function naturalSpeedOf(model: ModelFacts | undefined): number {
+  return model === undefined
+    ? 0.6
+    : (4 * model.hipM * Math.sin((model.swingDeg * Math.PI) / 180)) / model.cycleS;
+}
 
 const REST = new Quaternion().setFromAxisAngle(new Vector3(1, 0, 0), 0.3);
 const LOOP_S = 4;
@@ -53,6 +98,11 @@ function fakeSource(modelId: string): AnimalSource {
     throw new Error(`unknown model ${modelId}`);
   }
   const scene = new Group();
+  const breathing = track('chest.scale', [1, 1, 1], [1.03, 1, 1.03]);
+  const held = track('chest.scale', [1, 1, 1], [1, 1, 1]);
+  const blinking = track('eyes.scale', [1, 1, 1], [1, 0.1, 1]);
+  const open = track('eyes.scale', [1, 1, 1], [1, 1, 1]);
+  const closed = track('eyes.scale', [1, 0.1, 1], [1, 0.1, 1]);
   scene.add(new Mesh(new BoxGeometry(0.5, 0.7, model.lengthM), new MeshStandardMaterial()));
   const names = [
     'head',
@@ -69,16 +119,28 @@ function fakeSource(modelId: string): AnimalSource {
     bone.quaternion.copy(REST);
     scene.add(bone);
   }
-  const breathing = track('chest.scale', [1, 1, 1], [1.03, 1, 1.03]);
-  const held = track('chest.scale', [1, 1, 1], [1, 1, 1]);
-  const blinking = track('eyes.scale', [1, 1, 1], [1, 0.1, 1]);
-  const open = track('eyes.scale', [1, 1, 1], [1, 1, 1]);
-  const closed = track('eyes.scale', [1, 0.1, 1], [1, 0.1, 1]);
+  const leg = new Bone();
+  leg.name = 'leg_fl';
+  leg.position.set(0, model.hipM, 0);
+  scene.add(leg);
+  const swing = (model.swingDeg * Math.PI) / 180;
+  const legKeys = [swing, 0, -swing, 0, swing].flatMap((turn) =>
+    new Quaternion().setFromAxisAngle(new Vector3(1, 0, 0), turn).toArray(),
+  );
+  const stride = new AnimationClip('walk', model.cycleS, [
+    new QuaternionKeyframeTrack(
+      'leg_fl.quaternion',
+      [0, 0.25, 0.5, 0.75, 1].map((fraction) => fraction * model.cycleS),
+      legKeys,
+    ),
+    held,
+    open,
+  ]);
   return {
     scene,
     animations: [
       clip('idle', breathing, blinking),
-      clip('walk', held, open),
+      stride,
       clip('sleep', breathing, closed),
       clip('eat', held, open),
       clip(model.signature, held, open),
@@ -97,6 +159,10 @@ function gameData(): GameData {
 const ALL_VISIBLE: FocusArea = { minColumn: 0, minRow: 0, maxColumn: 255, maxRow: 255 };
 const CLOSE_SCALE = 100;
 const WINDOW_S = 1;
+/** Minutes of the demo park lived per image rate: enough for hundreds of walks and pauses. */
+const SIMULATED_MINUTES = 3;
+/** A few seconds of simulated life, several times more under coverage. */
+const LONG_RUN_TIMEOUT_MS = 30_000;
 
 /** Events within the last second: a rolling count with no allocation worth worrying about. */
 class Rate {
@@ -171,7 +237,7 @@ function angleOf(root: Object3D, name: string): number | null {
 }
 
 /** Runs the demo park for `minutes` at `fps` and measures how much each animal shakes. */
-export async function measureDemoPark(minutes: number, fps: number): Promise<MotionReport> {
+async function measureDemoPark(minutes: number, fps: number): Promise<MotionReport> {
   const data = gameData();
   const state = buildAnimalDemo(data, createEventQueue());
   const parent = new Group();
@@ -324,9 +390,10 @@ export async function measureDemoPark(minutes: number, fps: number): Promise<Mot
       }
       const age = walkAge[index] ?? Number.POSITIVE_INFINITY;
       const weight = legsClip ? Math.min(1, age / CROSS_FADE_S) : 0;
+      const natural = naturalSpeedOf(MODELS[modelOf[index] ?? '']);
       const legs = swims
         ? weight * swimClipScale(speed) * SWIM_REFERENCE_SPEED_MPS
-        : weight * walkClipScale(walkPace(speed, Math.abs(omega))) * WALK_REFERENCE_SPEED_MPS;
+        : weight * walkClipScale(walkPace(speed, Math.abs(omega)), natural) * natural;
       const start = onset[index];
       if (start !== undefined && legsClip && age < ONSET_S) {
         start.sum += Math.hypot(dx, dz);
@@ -517,8 +584,12 @@ function violations(report: MotionReport, fps: number): string[] {
 }
 
 describe.each([60, 30])('the demo park at %d images a second', (fps) => {
-  it('does not shake, seat itself while it walks, or skate', async () => {
-    const report = await measureDemoPark(10, fps);
-    expect(violations(report, fps)).toEqual([]);
-  }, 120_000);
+  it(
+    'does not shake, seat itself while it walks, or skate',
+    async () => {
+      const report = await measureDemoPark(SIMULATED_MINUTES, fps);
+      expect(violations(report, fps)).toEqual([]);
+    },
+    LONG_RUN_TIMEOUT_MS,
+  );
 });

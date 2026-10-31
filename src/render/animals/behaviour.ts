@@ -97,13 +97,16 @@ export const ENRICHMENT_MIN_STARS = 2;
 export const MAX_TRAVEL_MS = 30_000;
 /**
  * Going to a sleeping neighbour or back to the group can mean a long way at a stroll (a dozen
- * metres at 0.25 m/s): those walks get twice as long.
+ * metres at 0.25 m/s): those walks get three times as long.
  */
-export const MAX_PURPOSEFUL_TRAVEL_MS = 60_000;
+export const MAX_PURPOSEFUL_TRAVEL_MS = 90_000;
 
 /** How long a walk of this kind may take before it is given up. */
 export function travelLimitMs(activity: Activity): number {
-  return activity === 'sleeperWalk' || activity === 'regroupWalk'
+  return activity === 'sleeperWalk' ||
+    activity === 'regroupWalk' ||
+    activity === 'waterWalk' ||
+    activity === 'enrichmentWalk'
     ? MAX_PURPOSEFUL_TRAVEL_MS
     : MAX_TRAVEL_MS;
 }

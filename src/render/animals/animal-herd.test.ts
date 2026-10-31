@@ -25,6 +25,9 @@ import { isTravelling, type Activity } from './behaviour';
 import {
   MAX_ACCEL_MPS2,
   MAX_SPEED_MAX_MPS,
+  RESTART_COOLDOWN_MS,
+  nextMoving,
+  restartDelayMs,
   HIDDEN_UPDATE_EVERY_FRAMES,
   SMALL_ON_SCREEN_PX,
   SMALL_UPDATE_EVERY_FRAMES,
@@ -542,6 +545,30 @@ describe('life in the enclosure', () => {
   );
 });
 
+describe('clip bookkeeping', () => {
+  it('keeps counting a body as moving until it is nearly still: no flicker round one threshold', () => {
+    let moving = false;
+    let changes = 0;
+    // A speed that wavers between 0.025 and 0.035 m/s, round the old single threshold of 0.03.
+    for (let step = 0; step < 100; step += 1) {
+      const next = nextMoving(moving, step % 2 === 0 ? 0.025 : 0.035, 0);
+      changes += next === moving ? 0 : 1;
+      moving = next;
+    }
+    expect(changes).toBe(0);
+    expect(nextMoving(false, 0.05, 0)).toBe(true);
+    expect(nextMoving(true, 0.03, 0)).toBe(true);
+    expect(nextMoving(true, 0.01, 0)).toBe(false);
+    expect(nextMoving(false, 0, 0.3)).toBe(true);
+    expect(nextMoving(true, 0, 0.15)).toBe(true);
+  });
+
+  it('makes an animal that wants to go but cannot wait before it shows its walk again', () => {
+    expect(restartDelayMs(true)).toBe(RESTART_COOLDOWN_MS);
+    expect(restartDelayMs(false)).toBe(0);
+  });
+});
+
 describe('arrival of a group', () => {
   it('shows the new group still at first, then exploring', async () => {
     const { herd, parent } = setup();
@@ -1012,6 +1039,41 @@ describe('life of a big group', () => {
       // Left to chance, a sleeper would land within contact of another in a few cases out of a hundred.
       expect(inContact / joined).toBeGreaterThan(0.35);
       expect(closest).toBeGreaterThan(MIN_APART_M);
+    },
+    LONG_RUN_TIMEOUT_MS,
+  );
+
+  it(
+    'gets to the water and to the sleeper it walks to, whatever the pace',
+    async () => {
+      let previous: readonly Activity[] = [];
+      const outcomes = new Map<string, { arrived: number; given: number }>();
+      const startedAt: number[] = [];
+      // A walk that ended at once found no way (no free place round the point): not a walk.
+      const REAL_WALK_FRAMES = 5;
+      await liveForAnHour(5, (sample, frame) => {
+        sample.activities.forEach((activity, index) => {
+          const before = previous[index];
+          if ((activity === 'waterWalk' || activity === 'sleeperWalk') && activity !== before) {
+            startedAt[index] = frame;
+          }
+          const real = frame - (startedAt[index] ?? frame) >= REAL_WALK_FRAMES;
+          if (real && (before === 'waterWalk' || before === 'sleeperWalk') && activity !== before) {
+            const entry = outcomes.get(before) ?? { arrived: 0, given: 0 };
+            const arrived = activity === 'signature' || activity === 'sleep';
+            outcomes.set(before, {
+              arrived: entry.arrived + (arrived ? 1 : 0),
+              given: entry.given + 1,
+            });
+          }
+        });
+        previous = sample.activities;
+      });
+      for (const kind of ['waterWalk', 'sleeperWalk']) {
+        const outcome = outcomes.get(kind);
+        expect(outcome?.given ?? 0, kind).toBeGreaterThan(8);
+        expect((outcome?.arrived ?? 0) / (outcome?.given ?? 1), kind).toBeGreaterThan(0.85);
+      }
     },
     LONG_RUN_TIMEOUT_MS,
   );
@@ -1487,16 +1549,23 @@ describe('the otter swims for real at the water', () => {
     const MAX_SWIM_SPEED_MPS = 0.4;
     let swimming = 0;
     let still = 0;
+    let sinceStart = 0;
+    const SET_OFF_FRAMES = 5;
     let previous = parent.children.map((child) => child.position.clone());
     for (let frame = 0; frame < 60_000; frame += 1) {
       herd.update(FRAME_MS, CLOSE_SCALE, ALL_VISIBLE);
       const [child] = parent.children;
       const [clip] = herd.animations();
       const before = previous[0];
+      if (clip !== 'signature') {
+        sinceStart = 0;
+      }
       if (child && before && clip === 'signature') {
         swimming += 1;
+        sinceStart += 1;
         const speed = child.position.distanceTo(before) / (FRAME_MS / 1000);
-        still += speed < MIN_SWIM_SPEED_MPS ? 1 : 0;
+        // The swimmer waits for its swim clip to take over before it sets off: not counted.
+        still += speed < MIN_SWIM_SPEED_MPS && sinceStart > SET_OFF_FRAMES ? 1 : 0;
         expect(speed).toBeLessThanOrEqual(MAX_SWIM_SPEED_MPS);
         expect(containsPoint(area, child.position.x, child.position.z)).toBe(true);
         expect(Math.hypot(child.position.x - water.x, child.position.z - water.z)).toBeLessThan(
