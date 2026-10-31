@@ -85,6 +85,8 @@ export interface AnimalBehaviour {
   lastDurationMs: number;
   /** Time before the walk is interrupted by a pause or a sniff; negative: not drawn yet. */
   wayEventMs: number;
+  /** How long the walk may take before it is given up (see `tripLimitMs`). */
+  travelLimitMs: number;
   /** Time before a regrouping that failed may be tried again. */
   regroupCooldownMs: number;
   /** The timed activity is an interruption: the walk resumes, with the same target, after it. */
@@ -101,7 +103,19 @@ export const MAX_TRAVEL_MS = 30_000;
  */
 export const MAX_PURPOSEFUL_TRAVEL_MS = 90_000;
 
-/** How long a walk of this kind may take before it is given up. */
+/** A long walk gets this much more time than the trip needs at the pace of the walker. */
+export const TRIP_TIME_MARGIN = 2.5;
+
+/**
+ * How long a long walk may take: the time the trip needs at its pace, plus a margin, but between
+ * the limit of an ordinary walk and `MAX_PURPOSEFUL_TRAVEL_MS`.
+ */
+export function tripLimitMs(distanceM: number, paceMps: number): number {
+  const needed = paceMps > 0 ? (distanceM / paceMps) * TRIP_TIME_MARGIN * 1000 : Infinity;
+  return Math.max(MAX_TRAVEL_MS, Math.min(MAX_PURPOSEFUL_TRAVEL_MS, needed));
+}
+
+/** How long a walk of this kind may take before it is given up, until its trip is known. */
 export function travelLimitMs(activity: Activity): number {
   return activity === 'sleeperWalk' ||
     activity === 'regroupWalk' ||
@@ -345,6 +359,7 @@ function startTravel(
   behaviour.needsDestination = true;
   behaviour.resumeWalk = false;
   behaviour.wayEventMs = -1;
+  behaviour.travelLimitMs = travelLimitMs(activity);
 }
 
 function startRest(behaviour: AnimalBehaviour, rng: RngState): void {
@@ -461,6 +476,7 @@ export function createBehaviour(rng: RngState, withArrival: boolean): AnimalBeha
     exploreWalksLeft: 0,
     lastDurationMs: 0,
     wayEventMs: -1,
+    travelLimitMs: MAX_TRAVEL_MS,
     regroupCooldownMs: 0,
     resumeWalk: false,
   };
@@ -567,7 +583,7 @@ export function advanceBehaviour(
       return;
     }
     behaviour.travelledMs += elapsedMs;
-    if (arrived || behaviour.travelledMs >= travelLimitMs(behaviour.activity)) {
+    if (arrived || behaviour.travelledMs >= behaviour.travelLimitMs) {
       finishTravel(behaviour, arrived, rng, context, social);
     } else if (behaviour.activity === 'walk' && !behaviour.shortTrip) {
       interruptWalk(behaviour, elapsedMs, rng);

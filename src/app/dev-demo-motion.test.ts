@@ -491,33 +491,52 @@ async function measureDemoPark(minutes: number, fps: number): Promise<MotionRepo
   };
 }
 
-/** What counts as shaking, per second of the demo park and per animal. */
-const MAX_TURN_REVERSALS_PER_S = 8;
-const MAX_MOVE_REVERSALS_PER_S = 4;
-const MAX_ACCEL_FLIPS_PER_S = 8;
 /**
- * Stopping and setting off again (arrive, a short pause, go on) crosses the line between still
- * and moving two to four times in a second; shaking crosses it every image.
+ * What counts as shaking, per second of the demo park and per animal: the worst of 3 minutes at
+ * 60 and at 30 images a second, plus this margin. Before the corrections it was far above: 61
+ * reversals of the angular velocity a second, 31 reversals of the speed, tail and trunk at 7 to
+ * 12 radians a second, a clip changing 18 times a second.
  */
-const MAX_SPEED_CROSSINGS_PER_S = 4;
-/** A walk, a stop (the walk clip goes on a moment), the clip of the pause, and the walk again. */
-const MAX_CLIP_SWITCHES_PER_S = 3;
-/** The fastest the bones may move (radians a second): quick for the ears, gentle for the rest. */
+const SAFETY_MARGIN = 1.15;
+/** A whole number of events a second: the margin rounded up, and at least one more than seen. */
+function countLimit(worst: number): number {
+  return Math.max(Math.ceil(worst * SAFETY_MARGIN), worst + 1);
+}
+/** A measure with a floor, for the worst cases that measured nothing at all. */
+function amountLimit(worst: number, floor: number): number {
+  return Math.max(worst * SAFETY_MARGIN, floor);
+}
+
+/** Worst measured: 0. */
+const MAX_TURN_REVERSALS_PER_S = countLimit(0);
+/** Worst measured: 0. */
+const MAX_MOVE_REVERSALS_PER_S = countLimit(0);
+/** Worst measured: 4 (at 30 images a second). */
+const MAX_ACCEL_FLIPS_PER_S = countLimit(4);
+/**
+ * Worst measured: 3. Stopping and setting off again (arrive, a short pause, go on) crosses the
+ * line between still and moving a few times in a second; shaking crosses it every image.
+ */
+const MAX_SPEED_CROSSINGS_PER_S = countLimit(3);
+/** Worst measured: 2 (a walk, a stop, the clip of the pause, the walk again). */
+const MAX_CLIP_SWITCHES_PER_S = countLimit(2);
+/** The fastest the bones may move (radians a second). Worst measured: head 1.33, ears 4.87, tail 4.53, trunk 1.18. */
 const MAX_BONE_RATE_RAD_S: Readonly<Record<(typeof BONES)[number], number>> = {
-  head: 1.5,
-  ear_l: 6,
-  ear_r: 6,
-  tail: 5,
-  trunk: 1.5,
+  head: amountLimit(1.33, 0),
+  ear_l: amountLimit(4.87, 0),
+  ear_r: amountLimit(4.87, 0),
+  tail: amountLimit(4.53, 0),
+  trunk: amountLimit(1.18, 0),
 };
-const MAX_BONE_FLIPS_PER_S = 8;
-/** Moving while the clip is not a walk (or swim): hardly at all. */
-const MAX_SEATED_MOVE_M = 0.05;
-const MAX_SEATED_SPEED_MPS = 0.04;
-/** Moving before the walk clip has taken over: nothing to see. */
-const MAX_ONSET_MOVE_M = 0.01;
-/** The body may go faster than its feet by more than 0.1 m/s no longer than this. */
-const MAX_SLIP_RUN_S = 0.3;
+/** Worst measured: 7 (the tail, with its fly-swat). */
+const MAX_BONE_FLIPS_PER_S = countLimit(7);
+/** Moving while the clip is not a walk (or swim). Worst measured: 0.0017 m, 0.033 m/s. */
+const MAX_SEATED_MOVE_M = amountLimit(0.0017, 0.002);
+const MAX_SEATED_SPEED_MPS = amountLimit(0.0333, 0.04);
+/** Moving before the walk clip has taken over: nothing to see. Worst measured: 0. */
+const MAX_ONSET_MOVE_M = amountLimit(0, 0.002);
+/** The body may go faster than its feet by more than 0.1 m/s no longer than this. Worst measured: 0. */
+const MAX_SLIP_RUN_S = amountLimit(0, 0.07);
 
 /** Every animal that goes past a limit, with what it was doing, so that a failure says who and why. */
 function violations(report: MotionReport, fps: number): string[] {

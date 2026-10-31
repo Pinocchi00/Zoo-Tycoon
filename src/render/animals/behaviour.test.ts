@@ -3,6 +3,8 @@ import { createRng, type RngState } from '@/sim';
 import {
   MAX_PURPOSEFUL_TRAVEL_MS,
   MAX_TRAVEL_MS,
+  TRIP_TIME_MARGIN,
+  tripLimitMs,
   NO_SOCIAL,
   travelLimitMs,
   REGROUP_RETRY_MS,
@@ -558,6 +560,15 @@ describe('how long a walk may take', () => {
     expect(travelLimitMs('sleeperWalk')).toBe(MAX_PURPOSEFUL_TRAVEL_MS);
     expect(travelLimitMs('regroupWalk')).toBe(MAX_PURPOSEFUL_TRAVEL_MS);
     expect(MAX_PURPOSEFUL_TRAVEL_MS).toBe(3 * MAX_TRAVEL_MS);
+  });
+
+  it('gives a long walk the time its trip needs at the pace of the walker, within the limits', () => {
+    expect(tripLimitMs(1, 0.5)).toBe(MAX_TRAVEL_MS);
+    expect(tripLimitMs(10, 0.5)).toBeCloseTo((10 / 0.5) * TRIP_TIME_MARGIN * 1000);
+    expect(tripLimitMs(10, 0.25)).toBeGreaterThan(tripLimitMs(10, 0.5));
+    expect(tripLimitMs(10, 0.25)).toBe(MAX_PURPOSEFUL_TRAVEL_MS);
+    expect(tripLimitMs(10, 0.5)).toBeLessThan(MAX_PURPOSEFUL_TRAVEL_MS);
+    expect(tripLimitMs(10, 0)).toBe(MAX_PURPOSEFUL_TRAVEL_MS);
   });
 
   it('does not give up a walk to a sleeper after the time of an ordinary walk', () => {
