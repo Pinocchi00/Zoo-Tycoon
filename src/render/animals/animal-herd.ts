@@ -135,7 +135,23 @@ const TURNING_OFF_RATE_RAD_S = 0.1;
  */
 const GATE_START = 0.7;
 const MS_PER_FADE_S = 1000;
-const RESTART_COOLDOWN_MS = 1500;
+export const RESTART_COOLDOWN_MS = 1500;
+
+/**
+ * Whether an animal counts as moving for its clip: it needs a clear movement to start, and keeps
+ * counting until it is nearly still, so that a speed that wavers round one threshold does not
+ * make the clip flicker.
+ */
+export function nextMoving(wasMoving: boolean, speedMps: number, turnRateRadS: number): boolean {
+  return wasMoving
+    ? speedMps > MOVING_OFF_SPEED_MPS || turnRateRadS > TURNING_OFF_RATE_RAD_S
+    : speedMps > MOVING_ON_SPEED_MPS || turnRateRadS > TURNING_ON_RATE_RAD_S;
+}
+
+/** How long an animal that stopped walking in vain waits before it shows its walk clip again. */
+export function restartDelayMs(wantsToMove: boolean): number {
+  return wantsToMove ? RESTART_COOLDOWN_MS : 0;
+}
 /** A walk clip goes on this long after the animal stopped, so that it does not flicker. */
 const WALK_HOLD_MS = 500;
 
@@ -843,9 +859,7 @@ export function createAnimalHerd(options: HerdOptions): AnimalHerd {
     // The clip fits the movement: whatever the animal is doing, if it moves or turns, it walks
     // (or swims); and a walk clip does not go on long once it stands still.
     const yawRate = Math.abs(wrapAngle(body.yaw - yawBefore)) / dtS;
-    individual.moving = individual.moving
-      ? body.speed > MOVING_OFF_SPEED_MPS || yawRate > TURNING_OFF_RATE_RAD_S
-      : body.speed > MOVING_ON_SPEED_MPS || yawRate > TURNING_ON_RATE_RAD_S;
+    individual.moving = nextMoving(individual.moving, body.speed, yawRate);
     const moving = individual.moving;
     let clip = behaviour.animation;
     if (moving) {
@@ -866,7 +880,7 @@ export function createAnimalHerd(options: HerdOptions): AnimalHerd {
         clip = 'idle';
         // An animal that wants to go but cannot (a neighbour in the way) does not start its walk
         // clip again and again: it waits before it tries once more.
-        individual.restMs = intent ? RESTART_COOLDOWN_MS : 0;
+        individual.restMs = restartDelayMs(intent);
       }
     } else {
       individual.stillMs = 0;

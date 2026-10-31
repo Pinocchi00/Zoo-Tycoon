@@ -288,6 +288,22 @@ describe('steerStep', () => {
     expect(body.arrived).toBe(true);
   });
 
+  it.each([0.2, 0.25, 0.29, 0.5])(
+    'reaches a free target at a top speed of %f m/s, however slowly it walks',
+    (maxSpeed) => {
+      const area = areaOf(ROOM);
+      const body = createSteerBody(-8, 0, Math.PI / 2, 1.18);
+      const world = worldOf(area, [body]);
+      const slow = { ...LIMITS, maxSpeed };
+      let steps = 0;
+      while (!body.arrived && steps < 3000) {
+        steerStep(body, slow, world, true, 0, 0, STEP_S);
+        steps += 1;
+      }
+      expect(body.arrived).toBe(true);
+    },
+  );
+
   it('reaches a target the neighbour pushes on, whatever the push: the pull of the target stays', () => {
     const area = areaOf(ROOM);
     const neighbour = createSteerBody(-4, 0, 0);

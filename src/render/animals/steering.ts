@@ -39,7 +39,8 @@ const REACH_MARGIN_M = 0.5;
 const BISECTION_STEPS = 7;
 /**
  * A walk slower than this is not a walk: an animal that can only creep, held back by a neighbour
- * or the fence, stops instead (its feet could not keep up with so slow a body).
+ * or the fence, stops instead (its feet could not keep up with so slow a body). This is not
+ * applied to the slowing down on arrival, or a slow walker would stop short of its target.
  */
 const MIN_WALK_SPEED_MPS = 0.06;
 /** A step or a turn may not bring the body nearer than this to a neighbour's (unless it is already). */
@@ -473,19 +474,19 @@ export function steerStep(
       const arriveRatio = Math.min(1, distance / SLOW_RADIUS_M);
       wantedSpeed = limits.maxSpeed * Math.max(MIN_SPEED_RATIO, arriveRatio);
       // A neighbour or the fence in the way: brake in time to stop short of it, at the usual
-      // rate. Only the way to the target counts: what lies beyond it does not matter.
+      // rate. Only the way to the target counts: what lies well beyond it does not matter.
       // Looked at from a distance that does not depend on the present speed, so that the speed
       // wanted is a smooth function of the free space and braking cannot switch on and off.
+      // The target itself may lie in the keep-clear zone of a neighbour who came: look a little
+      // beyond it, as far as the animal keeps from neighbours.
       const look = Math.min(
-        distance,
+        distance + STOP_MARGIN_M + KEEP_CLEAR_M,
         (limits.maxSpeed * limits.maxSpeed) / (2 * limits.maxAccel) + BRAKE_LOOKAHEAD_M,
       );
+      let held = Number.POSITIVE_INFINITY;
       const freeToAnimal = freeAhead(body, world.others, look, world.goal);
       if (freeToAnimal < look) {
-        wantedSpeed = Math.min(
-          wantedSpeed,
-          brakingSpeed(freeToAnimal, STOP_MARGIN_M, limits.maxAccel),
-        );
+        held = brakingSpeed(freeToAnimal, STOP_MARGIN_M, limits.maxAccel);
       }
       // Far from the fence (nearer to nothing than the way looked at): nothing to look for.
       const freeToFence =
@@ -493,15 +494,14 @@ export function steerStep(
           ? look
           : freeToFenceAhead(body, world.area, look);
       if (freeToFence < look) {
-        wantedSpeed = Math.min(
-          wantedSpeed,
-          brakingSpeed(freeToFence, FENCE_STOP_MARGIN_M, limits.maxAccel),
-        );
+        held = Math.min(held, brakingSpeed(freeToFence, FENCE_STOP_MARGIN_M, limits.maxAccel));
+      }
+      // Held back by an obstacle: it can only creep, so it stops. The slowing down on arrival is
+      // not held back: a slow walker still reaches its target.
+      if (held < Number.POSITIVE_INFINITY) {
+        wantedSpeed = held < MIN_WALK_SPEED_MPS ? 0 : Math.min(wantedSpeed, held);
       }
     }
-  }
-  if (wantedSpeed < MIN_WALK_SPEED_MPS) {
-    wantedSpeed = 0;
   }
   const change = clamp(wantedSpeed * alignment - body.speed, limits.maxAccel * dtS);
   body.speed = Math.max(0, body.speed + change);

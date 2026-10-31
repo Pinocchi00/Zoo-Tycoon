@@ -17,7 +17,7 @@ export const GAZE_RANGE_M = 9;
 /** A walker slower than this does not count as walking. */
 const WALKING_SPEED_MPS = 0.05;
 /** Free space a follower leaves between itself and the walker it follows, beyond its length. */
-const FOLLOW_SLACK_M = 0.3;
+const FOLLOW_SLACK_M = 0.6;
 /** Free space between two sleepers in contact: they touch, nearly, but never overlap. */
 const SLEEP_CONTACT_SLACK_M = 0.2;
 /** A regrouping animal stops at least this far from the middle of the others. */

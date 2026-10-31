@@ -347,7 +347,7 @@ describe('walks that cannot happen', () => {
     const where = context({ stars: 5, enrichmentSpots: 4 });
     const { behaviour, rng } = justStarted('enrichmentWalk', where);
     behaviour.needsDestination = false;
-    advanceBehaviour(behaviour, MAX_TRAVEL_MS, false, rng, where);
+    advanceBehaviour(behaviour, MAX_PURPOSEFUL_TRAVEL_MS, false, rng, where);
     expect(behaviour.activity).toBe('rest');
   });
 });
@@ -550,12 +550,14 @@ function activityOf(behaviour: AnimalBehaviour): Activity {
 }
 
 describe('how long a walk may take', () => {
-  it('gives the long, purposeful walks twice as long as the others', () => {
+  it('gives the long, purposeful walks three times as long as the others', () => {
     expect(travelLimitMs('walk')).toBe(MAX_TRAVEL_MS);
-    expect(travelLimitMs('enrichmentWalk')).toBe(MAX_TRAVEL_MS);
+    expect(travelLimitMs('followWalk')).toBe(MAX_TRAVEL_MS);
+    expect(travelLimitMs('enrichmentWalk')).toBe(MAX_PURPOSEFUL_TRAVEL_MS);
+    expect(travelLimitMs('waterWalk')).toBe(MAX_PURPOSEFUL_TRAVEL_MS);
     expect(travelLimitMs('sleeperWalk')).toBe(MAX_PURPOSEFUL_TRAVEL_MS);
     expect(travelLimitMs('regroupWalk')).toBe(MAX_PURPOSEFUL_TRAVEL_MS);
-    expect(MAX_PURPOSEFUL_TRAVEL_MS).toBe(2 * MAX_TRAVEL_MS);
+    expect(MAX_PURPOSEFUL_TRAVEL_MS).toBe(3 * MAX_TRAVEL_MS);
   });
 
   it('does not give up a walk to a sleeper after the time of an ordinary walk', () => {

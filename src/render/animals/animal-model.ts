@@ -440,13 +440,12 @@ export function createAnimalModel(
       if (life === null && gestures === null) {
         return;
       }
-      const share = 1;
       const layerS = elapsedS * mixer.timeScale;
-      life?.apply(layerS, breathing * share, blinking * share);
+      life?.apply(layerS, breathing, blinking);
       if (gestures !== null) {
-        gestures.drive.awake = 1 - sleeping * share;
-        gestures.drive.lookScale = (1 - sleeping * share) * (1 - EATING_LOOK_CUT * eating * share);
-        gestures.drive.walking = walking * share;
+        gestures.drive.awake = 1 - sleeping;
+        gestures.drive.lookScale = (1 - sleeping) * (1 - EATING_LOOK_CUT * eating);
+        gestures.drive.walking = walking;
         gestures.apply(layerS);
       }
     },
