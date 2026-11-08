@@ -11,6 +11,7 @@ import {
 import type { VisitorId } from '@/shared';
 import { randomFloat } from '@/sim/rng';
 import type { QualityLevel } from '../quality/quality';
+import { isShadowCastingPiece } from './model-source';
 import type { VisitorSource, VisitorTint } from './types';
 import { tintColor, visualRng } from './visual-seed';
 
@@ -162,7 +163,7 @@ export function createInstancedCrowd(
               mesh,
               capacity,
               instanceToGroup: [],
-              majorBodyPart: /^p\d+_(body|head)_mesh$/.test(part.name),
+              majorBodyPart: isShadowCastingPiece(part.name),
             };
             applyShadow(pool);
             pools.set(key, pool);

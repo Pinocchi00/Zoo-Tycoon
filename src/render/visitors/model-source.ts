@@ -35,6 +35,10 @@ const partSchema = z.object({
   zooTint: z.enum(['skin', 'hair', 'shirt', 'pants', 'none']),
 });
 
+export function isShadowCastingPiece(name: string): boolean {
+  return /^p\d+_(body|head)_mesh$/.test(name);
+}
+
 export async function loadVisitorSource(
   archetypeId: string,
   url: string,

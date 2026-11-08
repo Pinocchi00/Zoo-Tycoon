@@ -14,7 +14,7 @@ import type { VisitorState } from '@/sim';
 import { createVisitorCrowd } from './crowd';
 import { createInstancedCrowd } from './instanced-crowd';
 import { prototype, source, unwrap, visitor } from './test-fixtures';
-import { prepareVisitorSource } from './model-source';
+import { isShadowCastingPiece, prepareVisitorSource } from './model-source';
 import type { VisitorCrowd, VisitorModelProblem, VisitorSource } from './types';
 
 const grid = { columns: 3, rows: 3 };
@@ -76,6 +76,20 @@ async function loaded(
 }
 
 describe('instanced visitor runtime', () => {
+  it.each([
+    ['p0_body_mesh', true],
+    ['p3_head_mesh', true],
+    ['p12_body_mesh', true],
+    ['p0_arm_mesh', false],
+    ['p0_hair_mesh', false],
+    ['p0_body', false],
+    ['p_body_mesh', false],
+    ['couple:p0_body_mesh', false],
+    ['p0_head_mesh_extra', false],
+    ['', false],
+  ] as const)('classifies medium-quality shadow piece %s as %s', (name, expected) => {
+    expect(isShadowCastingPiece(name)).toBe(expected);
+  });
   it('counts exactly 100 people across five archetypes without cross-archetype ghosts', async () => {
     const list: VisitorState[] = [];
     for (let cycle = 0; cycle < 9; cycle += 1) {
@@ -243,7 +257,7 @@ describe('instanced visitor runtime', () => {
     expect(out.x).toBe(stoppedX);
     crowd.dispose();
   });
-  it('reuses frame buffers without map or array iterators in update, pick and project', async () => {
+  it('keeps instance matrix buffers and avoids map values and array iterators across frames, including after setQuality', async () => {
     const item = visitor();
     const { crowd, parent, world } = await loaded([item, visitor(2)]);
     world.visitors.list.splice(1, 1);
@@ -258,10 +272,16 @@ describe('instanced visitor runtime', () => {
     let valueCalls: number;
     let iteratorCalls: number;
     try {
-      for (let frame = 0; frame < 3; frame += 1) {
-        crowd.update(100);
-        crowd.pick(view, 200, 200, 400, 400);
-        crowd.project(item.id, view, 400, 400, out);
+      for (let qualityIndex = 0; qualityIndex < 3; qualityIndex += 1) {
+        if (qualityIndex === 1) crowd.setQuality('medium');
+        if (qualityIndex === 2) crowd.setQuality('high');
+        for (let frame = 0; frame < 3; frame += 1) {
+          crowd.update(100);
+          crowd.pick(view, 200, 200, 400, 400);
+          crowd.project(item.id, view, 400, 400, out);
+          if (object.instanceMatrix !== matrices || object.instanceMatrix.array !== matrixArray)
+            throw new Error('Instance matrix buffers were reallocated.');
+        }
       }
       valueCalls = values.mock.calls.length;
       iteratorCalls = iterators.mock.calls.length;

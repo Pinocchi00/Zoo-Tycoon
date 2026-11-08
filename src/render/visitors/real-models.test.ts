@@ -2,7 +2,7 @@ import { Group, InstancedMesh } from 'three';
 import { expect, it, vi } from 'vitest';
 import { ok } from '@/shared';
 import { createVisitorCrowd } from './crowd';
-import { parseVisitorSource } from './model-source';
+import { isShadowCastingPiece, parseVisitorSource } from './model-source';
 import { unwrap, visitor } from './test-fixtures';
 import type { VisitorSource } from './types';
 
@@ -43,7 +43,11 @@ async function loadModels(): Promise<VisitorSource[]> {
   return models;
 }
 
-for (const quality of ['low', 'medium', 'high'] as const) {
+for (const [quality, expectedDrawCalls] of [
+  ['low', 160],
+  ['medium', 182],
+  ['high', 320],
+] as const) {
   const models = await loadModels();
   const parent = new Group();
   const crowd = createVisitorCrowd({
@@ -68,13 +72,16 @@ for (const quality of ['low', 'medium', 'high'] as const) {
   crowd.update(100);
   const draws = crowd.stats().drawCalls;
   it(`five real GLBs, ${quality}: stats().drawCalls = ${String(draws)} for 100 people`, () => {
+    expect(draws).toBe(expectedDrawCalls);
     expect(crowd.stats().groups).toBe(46);
     const meshes = parent.children.filter((child) => child instanceof InstancedMesh);
     expect(meshes.length).toBe(models.reduce((sum, model) => sum + model.parts.length, 0));
     const casters = meshes.filter((mesh) => mesh.castShadow);
     if (quality === 'low') expect(casters).toHaveLength(0);
     else if (quality === 'medium') {
-      const expected = meshes.filter((mesh) => /:p\d+_(body|head)_mesh$/.test(mesh.name));
+      const expected = meshes.filter((mesh) =>
+        isShadowCastingPiece(mesh.name.slice(mesh.name.indexOf(':') + 1)),
+      );
       expect(expected).toHaveLength(22);
       expect(casters).toEqual(expected);
       expect(casters.length).toBeLessThan(meshes.length);
@@ -84,7 +91,9 @@ for (const quality of ['low', 'medium', 'high'] as const) {
     expect(meshes.every((mesh) => !mesh.castShadow)).toBe(true);
     crowd.setQuality('medium');
     expect(meshes.filter((mesh) => mesh.castShadow).map((mesh) => mesh.name)).toEqual(
-      meshes.filter((mesh) => /:p\d+_(body|head)_mesh$/.test(mesh.name)).map((mesh) => mesh.name),
+      meshes
+        .filter((mesh) => isShadowCastingPiece(mesh.name.slice(mesh.name.indexOf(':') + 1)))
+        .map((mesh) => mesh.name),
     );
     crowd.dispose();
   });
