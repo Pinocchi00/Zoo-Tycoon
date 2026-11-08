@@ -14,7 +14,7 @@ Depuis D-027, tu **supervises** et **OpenCode écrit tout le code**.
 
 ## Économie du quota
 
-- Une seule tâche par session. Quand elle est terminée, la session suivante repart de zéro.
+- Une seule tâche par session. Quand elle est terminée, la session suivante repart de zéro. Les lancements OpenCode en parallèle (jusqu'à 5) servent les morceaux de cette tâche ou des tâches indépendantes déjà validées par le propriétaire.
 - **Modèle du chef :** Opus seulement pour les tâches critiques (simulation, gacha, économie, sauvegarde, schémas de données) et pour les plans de phase. Pour les autres tâches (outillage, rendu, interface, audio technique, Android, pipeline Blender), le chef ne fait que planifier et déléguer : Sonnet suffit. Si tu tournes sur Opus pour une tâche non critique, dis-le au propriétaire dans ton premier message et propose-lui de passer la session en Sonnet avant de commencer.
 - Ne lis que les fichiers nécessaires à la tâche. Ne parcours jamais tout le dépôt.
 - Pour toute tâche qui touche plus de trois fichiers, commence par un plan et attends la validation.
@@ -43,7 +43,7 @@ OpenCode ne voit pas ta conversation. Il reçoit seulement ta consigne. Écris d
 
 **Modèles** (D-027) : `openai/gpt-6.1-sol --variant high` pour le cœur critique, `openai/gpt-6.1-sol` pour le reste du code et les corrections, `opencode-go/kimi-k3` pour le contenu répétitif, `opencode-go/gpt-6-luna` en secours si le quota ChatGPT est épuisé.
 
-**Lancement**, toujours en arrière-plan (`run_in_background`), depuis le worktree de la tâche, seule sur sa ligne (la règle de permission ne couvre que `opencode run`), le message **avant** `-f` (sinon `-f` le prend pour un fichier). Lis seulement la fin de la sortie :
+**Lancement**, toujours en arrière-plan (`run_in_background`), avec `--dir` vers le worktree de la tâche, seule sur sa ligne (la règle de permission ne couvre que `opencode run`), le message **avant** `-f` (sinon `-f` le prend pour un fichier). Lis seulement la fin de la sortie :
 
 ```bash
 opencode run "Suis exactement la consigne jointe." --dir "<worktree>" -m openai/gpt-6.1-sol --title "<tâche>" -f "<chemin absolu>/docs/briefs/opencode/<tâche>.md"
@@ -55,6 +55,56 @@ opencode run "Suis exactement la consigne jointe." --dir "<worktree>" -m openai/
 - **Fin de chaque tâche :** `relecteur` relit la branche une seule fois. Tu fais corriger les points Bloquant et À corriger par un **nouveau** lancement d'OpenCode (jamais `--continue`), avec une nouvelle consigne `docs/briefs/opencode/<tâche>-fix-<n>.md`, tu refais vérifier par `verificateur`, puis tu écris le rapport final au format d'`AGENTS.md`. Les Suggestions ne déclenchent pas de nouveau cycle : note-les dans le rapport.
 - **Secours :** si OpenCode est indisponible, les sous-agents `executant` (code) et `contenu` (contenu répétitif) prennent le relais, avec la même consigne.
 - **Jamais de cascade :** les sous-agents ne lancent ni d'autres sous-agents ni OpenCode. Seul le chef délègue.
+
+## Règles du superviseur et de l'architecte
+
+Ces règles viennent des erreurs déjà commises. Elles s'appliquent à chaque tâche, sans exception.
+
+### 1. Avant de planifier : constater, ne jamais supposer
+
+- `git worktree list`, puis `git -C <worktree> status --short` et `git log --oneline main..<branche>` pour **chaque** worktree de la tâche. Du travail non commité peut exister (la tâche 1.9 était presque finie alors que sa branche n'avait aucun commit).
+- Chercher un contrat ou une consigne déjà écrits : `docs/briefs/task-*-contract.md`, `docs/briefs/opencode/`. Un contrat approuvé par le propriétaire se reprend tel quel.
+- Numéro de la prochaine décision : regarder `grep -n '^## D-' docs/decisions.md | tail -n 3` sur `main` **et** sur toutes les branches non fusionnées, y compris dans les fichiers non commités. Ne jamais réutiliser un numéro.
+- OpenCode prêt : `opencode auth list` doit montrer OpenAI et OpenCode Go. En cas d'erreur `401` ou `Token refresh failed`, seul le propriétaire peut se reconnecter, dans une Invite de commandes Windows hors de l'app, avec le chemin réel : `"%LOCALAPPDATA%\Packages\Claude_pzs8sxrjxfjjc\LocalCache\Roaming\npm\node_modules\opencode-ai\bin\opencode.exe" auth login -p openai`. Le chemin `%APPDATA%\npm` n'existe que vu depuis l'app.
+
+### 2. Architecte : un contrat avant tout code
+
+- Pour toute tâche qui touche plus de trois fichiers, écrire `docs/briefs/task-<n>-contract.md` avant de lancer OpenCode. Il contient : le partage des fichiers entre agents (aucun fichier à deux agents), les API publiques (signatures exactes), les événements et commandes de la simulation utilisés, les tests attendus (cas d'échec compris), les budgets de performance, et ce qui reste au chef (intégration dans `src/app`, `park-view.ts`, `i18n`, dépendances, décisions).
+- Le contrat est soumis au propriétaire. Aucun lancement avant son accord, sauf corrections de relecture d'un contrat déjà approuvé.
+- Une règle de jeu absente du GDD n'est jamais inventée : la question va au propriétaire.
+
+### 3. Lancer : jusqu'à 5 OpenCode en parallèle
+
+- Au plus **5** lancements OpenCode en même temps, uniquement sur des morceaux **indépendants** : aucun fichier commun, aucun morceau qui attend le résultat d'un autre.
+- Un worktree et une branche par lancement : `git worktree add .claude/worktrees/<tâche>-<morceau> -b <type>/<tâche>-<morceau> <branche de base>`. Le chef ne modifie jamais les fichiers d'un autre worktree (un hook l'interdit) ; c'est OpenCode qui y écrit.
+- La consigne est écrite dans le worktree du chef (`docs/briefs/opencode/`) et passée par chemin absolu. Elle liste les fichiers autorisés : tout fichier modifié hors de cette liste est un refus.
+- Commande seule sur sa ligne, en arrière-plan, message avant `-f`. Noter pour chaque lancement : worktree, branche, commit de départ, modèle, consigne.
+- Le chef intègre lui-même les branches des morceaux dans la branche de la tâche (`git merge --no-ff`), dans l'ordre du contrat, puis fait vérifier l'ensemble.
+
+### 4. Garder un œil : à chaque fin de lancement
+
+- Lire au plus les 40 dernières lignes de la sortie. Chercher : erreur (`Error:`, `401`, `exited with code`), rapport final présent ou absent.
+- `git -C <worktree> log --oneline <départ>..HEAD`, `git -C <worktree> status --short`, `git -C <worktree> diff --name-only <départ>..HEAD` : comparer à la liste des fichiers autorisés. Un fichier interdit modifié (configuration, `sim`, `save`, `data`, tests affaiblis) bloque la suite.
+- Rien de commité alors que des fichiers sont modifiés : le lancement est incomplet. Ne pas commiter à sa place sans vérification ; relancer avec une consigne « termine et commite ».
+- `verificateur` sur le worktree. S'il échoue sur un test sans rapport avec la tâche (délai dépassé, veille du PC), le relancer une fois avant de conclure.
+- Ne jamais attendre avec `sleep` ni interroger en boucle : la notification de fin suffit.
+
+### 5. Qualité : la boucle fermée
+
+- Ordre fixe : `verificateur` → `relecteur` (une seule relecture complète) → consigne de correction → nouveau lancement OpenCode → `verificateur` → relecture limitée au diff des corrections.
+- Au bout de **deux** cycles de correction sans succès sur un même point, s'arrêter et exposer le problème au propriétaire.
+- Le chef ne déclare jamais une performance acquise sans mesure : les 30 i/s sur Android et le rendu visuel se prouvent sur appareil, par le propriétaire.
+
+### 6. Optimiser le quota
+
+- Modèle selon D-027. Un lancement OpenCode ne coûte pas de quota Claude : déléguer large à OpenCode, garder `relecteur` et `verificateur` pour le contrôle.
+- Ne jamais lire un diff entier soi-même : `--stat`, puis les fichiers ciblés par la relecture.
+- Regrouper les retours visuels du propriétaire en une seule consigne.
+
+### 7. Rendre compte au propriétaire
+
+- À chaque étape : ce qui tourne (avec la branche), ce qui est fini, ce qui attend sa décision. Toute erreur ou tout contournement est signalé, jamais caché.
+- Pousser, fusionner dans `main`, ou modifier les réglages de permission : seulement sur demande explicite du propriétaire.
 
 ## Relire une branche
 
