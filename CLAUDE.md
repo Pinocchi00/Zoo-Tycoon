@@ -88,6 +88,7 @@ Ces règles viennent des erreurs déjà commises. Elles s'appliquent à chaque t
 - Rien de commité alors que des fichiers sont modifiés : le lancement est incomplet. Ne pas commiter à sa place sans vérification ; relancer avec une consigne « termine et commite ».
 - `verificateur` sur le worktree. S'il échoue sur un test sans rapport avec la tâche (délai dépassé, veille du PC), le relancer une fois avant de conclure.
 - Ne jamais attendre avec `sleep` ni interroger en boucle : la notification de fin suffit.
+- **Arrêter un lancement** : arrêter la tâche de fond ne suffit pas, `opencode.exe` continue. Retrouver son identifiant (`Get-CimInstance Win32_Process -Filter "Name='opencode.exe'"`, vérifier la ligne de commande), l'arrêter, puis noter l'état du worktree (fichiers modifiés non commités) sans rien commiter.
 
 ### 5. Qualité : la boucle fermée
 
