@@ -59,7 +59,7 @@ Ces règles complètent le GDD. Elles sont reportées dans `docs/decisions.md` p
 
 ## Outil et relecture
 
-Depuis D-026, **Claude Code supervise et OpenCode écrit le code**. Le chef (Claude Code) planifie, écrit la consigne `docs/briefs/opencode/<tâche>.md`, lance OpenCode selon la section « Délégation à OpenCode » de `CLAUDE.md`, fait vérifier par `verificateur`, puis fait relire la branche par `relecteur` avant le rapport final. Les tâches 1.0 à 1.8 ont été faites avec Claude Code seul, avant D-026.
+Depuis D-027, **Claude Code supervise et OpenCode écrit le code**. Le chef (Claude Code) planifie, écrit la consigne `docs/briefs/opencode/<tâche>.md`, lance OpenCode selon la section « Délégation à OpenCode » de `CLAUDE.md`, fait vérifier par `verificateur`, puis fait relire la branche par `relecteur` avant le rapport final. Les tâches 1.0 à 1.8 ont été faites avec Claude Code seul, avant D-027.
 
 Les « Prompts à coller » des tâches restent valables pour une session Claude Code : le chef en tire la consigne OpenCode.
 
@@ -67,7 +67,7 @@ Les « Prompts à coller » des tâches restent valables pour une session Claude
 
 | Tâche | Qui écrit le code |
 | --- | --- |
-| 1.0 à 1.8 | faites (Claude Code, avant D-026) |
+| 1.0 à 1.8 | faites (Claude Code, avant D-027) |
 | 1.9 Visiteurs en 3D | OpenCode, `openai/gpt-6.1-sol` |
 | 1.10 Rendu de la construction | OpenCode, `openai/gpt-6.1-sol` |
 | 1.11 Interface | OpenCode, `openai/gpt-6.1-sol` |

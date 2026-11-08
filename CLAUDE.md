@@ -6,7 +6,7 @@ Toutes les règles d'`AGENTS.md` s'appliquent. Ce qui suit les complète.
 
 ## Ton rôle dans ce projet
 
-Depuis D-026, tu **supervises** et **OpenCode écrit tout le code**.
+Depuis D-027, tu **supervises** et **OpenCode écrit tout le code**.
 
 - **Chef d'orchestre :** tu lis le brief, tu proposes le plan, tu attends l'OK, puis tu délègues à OpenCode (voir « Délégation à OpenCode »).
 - **Architecte :** tu poses les fondations et tu tranches les questions de structure. Pour le cœur critique (simulation, gacha, économie, sauvegarde, schémas de données), ton plan fixe les types, les commandes, les événements et les tests attendus : OpenCode les écrit, il ne les invente pas.
@@ -41,7 +41,7 @@ OpenCode ne voit pas ta conversation. Il reçoit seulement ta consigne. Écris d
 - les interdits : ne travailler que dans le worktree de la tâche, ne pas pousser, ne pas fusionner, ne pas toucher à `tsconfig.json`, ESLint, Prettier, Vitest, la CI, `.claude/` ni `assets/models` à la main ;
 - la fin attendue : des commits Conventional Commits sur la branche de la tâche, puis le rapport au format d'`AGENTS.md` en dernier message.
 
-**Modèles** (D-026) : `openai/gpt-6.1-sol --variant high` pour le cœur critique, `openai/gpt-6.1-sol` pour le reste du code et les corrections, `opencode-go/kimi-k3` pour le contenu répétitif, `opencode-go/gpt-6-luna` en secours si le quota ChatGPT est épuisé.
+**Modèles** (D-027) : `openai/gpt-6.1-sol --variant high` pour le cœur critique, `openai/gpt-6.1-sol` pour le reste du code et les corrections, `opencode-go/kimi-k3` pour le contenu répétitif, `opencode-go/gpt-6-luna` en secours si le quota ChatGPT est épuisé.
 
 **Lancement**, toujours en arrière-plan (`run_in_background`), depuis le worktree de la tâche, en gardant seulement la fin de la sortie :
 
