@@ -43,10 +43,10 @@ OpenCode ne voit pas ta conversation. Il reçoit seulement ta consigne. Écris d
 
 **Modèles** (D-027) : `openai/gpt-6.1-sol --variant high` pour le cœur critique, `openai/gpt-6.1-sol` pour le reste du code et les corrections, `opencode-go/kimi-k3` pour le contenu répétitif, `opencode-go/gpt-6-luna` en secours si le quota ChatGPT est épuisé.
 
-**Lancement**, toujours en arrière-plan (`run_in_background`), depuis le worktree de la tâche, en gardant seulement la fin de la sortie :
+**Lancement**, toujours en arrière-plan (`run_in_background`), depuis le worktree de la tâche, seule sur sa ligne (la règle de permission ne couvre que `opencode run`), le message **avant** `-f` (sinon `-f` le prend pour un fichier). Lis seulement la fin de la sortie :
 
 ```bash
-opencode run --dir "<worktree>" -m openai/gpt-6.1-sol --title "<tâche>" -f docs/briefs/opencode/<tâche>.md "Suis exactement la consigne jointe." 2>&1 | tail -n 60
+opencode run "Suis exactement la consigne jointe." --dir "<worktree>" -m openai/gpt-6.1-sol --title "<tâche>" -f "<chemin absolu>/docs/briefs/opencode/<tâche>.md"
 ```
 
 - **Recherche dans le dépôt** : tu la délègues à `Explore`.
