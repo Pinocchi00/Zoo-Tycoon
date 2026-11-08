@@ -322,3 +322,22 @@ Chaque décision structurante est ajoutée ici, la plus récente en bas. Format 
   - **modèles :** un téléchargement par fichier `.glb`, partagé ; chaque individu est un clone (`SkeletonUtils.clone`) avec sa phase de départ et sa vitesse de lecture (0,9 à 1,1). Les URLs viennent de `import.meta.glob` sur `assets/models`, sans liste en dur.
   - **parc de démonstration (développement) :** `?demo=animaux` (seulement si `import.meta.env.DEV`) ouvre un parc neuf en mémoire (`src/app/dev-demo.ts`, graine fixe), construit uniquement par les commandes de la simulation : tickets du guichet, arrivages jusqu'à avoir les cinq espèces avec plusieurs étoiles, un enclos par espèce dont un en L, une allée. Chargé par import dynamique (absent de la construction de production) ; ni lecture ni écriture de la sauvegarde, ni autosauvegarde, ni réglage de qualité enregistré ;
 - **Conséquences :** la 1.8 relie les cinq modèles aux espèces (`modelId` dans `src/data`, comme le prévoyait D-024) : les cinq espèces s'affichent, et un test vérifie que chaque `modelId` a son fichier. Pécari, tapir et jaguar ont de l'eau mais une signature qui n'est pas `swim` : elles ne vont pas au point d'eau. Limite connue : aucune marge n'est prévue entre la clôture et le museau d'un long animal (seul le centre du corps reste dans l'enclos).
+
+## D-026 — Le code est écrit par OpenCode, Claude Code supervise
+
+- **Contexte :** le quota Claude reste la ressource limitante (D-016, D-017). Le propriétaire dispose aussi d'un abonnement ChatGPT et d'OpenCode Go, tous deux connectés à OpenCode (installé, version 1.18). Il demande que Claude Code supervise et que tout le code soit délégué à OpenCode.
+- **Décision :**
+  - **Claude Code (le chef) :** architecte et superviseur. Il lit le brief, tranche la structure, écrit le plan et la consigne de délégation, lance OpenCode, fait vérifier (`verificateur`) et relire (`relecteur`), puis rédige le rapport final. Il n'écrit plus de code de jeu, y compris pour le cœur critique.
+  - **OpenCode :** écrit tout le code et le contenu, dans le worktree de la tâche, sur la branche de la tâche. Il commite (Conventional Commits), ne pousse pas et ne fusionne pas. Il lit `AGENTS.md`, qui reste la loi pour lui aussi.
+  - **Modèles, choisis selon la difficulté et le quota :**
+
+    | Travail | Modèle | Effort |
+    | --- | --- | --- |
+    | Cœur critique : simulation, gacha, économie, sauvegarde, schémas de données | `openai/gpt-6.1-sol` (ChatGPT) | `--variant high` |
+    | Rendu, interface, audio, Android, pipeline Blender, outillage, corrections de relecture | `openai/gpt-6.1-sol` (ChatGPT) | par défaut |
+    | Contenu répétitif : données d'espèces, textes fr/en, descriptions Blender | `opencode-go/kimi-k3` (OpenCode Go) | par défaut |
+    | Secours si le quota ChatGPT est épuisé | `opencode-go/gpt-6-luna` (OpenCode Go) | par défaut |
+
+  - **Consigne :** une consigne autonome par lancement, écrite dans `docs/briefs/opencode/<tâche>.md` et versionnée sur la branche de la tâche : section du brief à lire, plan validé, fichiers à toucher, critères d'acceptation, interdits. Le plan est écrit par le chef ; pour une tâche qui touche plus de trois fichiers, le chef le soumet au propriétaire avant de lancer OpenCode, sauf si le propriétaire a déjà donné son accord.
+  - **Relecture :** toujours par le sous-agent `relecteur` de Claude Code, un modèle différent de celui qui a écrit le code. Les corrections sont confiées à un nouveau lancement d'OpenCode (jamais `--continue`), avec une consigne autonome.
+- **Conséquences :** remplace D-016 (tout avec Claude Code) et la partie écriture de D-017. Les sous-agents `executant` et `contenu` ne servent plus qu'en secours si OpenCode est indisponible ; `verificateur`, `Explore` et `relecteur` restent utilisés. La configuration globale d'OpenCode autorise toutes les actions (`"permission": "allow"`) : la consigne lui interdit donc explicitement de sortir du worktree, de pousser, de fusionner et de modifier les fichiers de configuration. La commande de lancement est dans `CLAUDE.md`.

@@ -6,10 +6,11 @@ Toutes les règles d'`AGENTS.md` s'appliquent. Ce qui suit les complète.
 
 ## Ton rôle dans ce projet
 
-- **Chef d'orchestre :** tu lis le brief, tu proposes le plan, tu attends l'OK, puis tu délègues (voir « Délégation aux sous-agents »).
-- **Architecte :** tu poses les fondations et tu tranches les questions de structure.
-- **Cœur critique :** tu écris toi-même la simulation, le gacha, l'économie, la sauvegarde et les schémas de données.
-- **Garant de la qualité :** tu fais vérifier et relire le travail par les sous-agents avant d'écrire le rapport final. Tu ne relis jamais toi-même le code que tu as écrit : c'est le rôle du sous-agent `relecteur`.
+Depuis D-026, tu **supervises** et **OpenCode écrit tout le code**.
+
+- **Chef d'orchestre :** tu lis le brief, tu proposes le plan, tu attends l'OK, puis tu délègues à OpenCode (voir « Délégation à OpenCode »).
+- **Architecte :** tu poses les fondations et tu tranches les questions de structure. Pour le cœur critique (simulation, gacha, économie, sauvegarde, schémas de données), ton plan fixe les types, les commandes, les événements et les tests attendus : OpenCode les écrit, il ne les invente pas.
+- **Garant de la qualité :** tu fais vérifier (`verificateur`) et relire (`relecteur`) le travail d'OpenCode avant d'écrire le rapport final. Tu n'écris pas de code de jeu toi-même.
 
 ## Économie du quota
 
@@ -30,17 +31,30 @@ Ce qui coûte, ce n'est pas ce que tu écris, c'est la longueur de la conversati
 - **Jamais d'agent `general-purpose`** : il tourne sur Opus. Utilise toujours un agent nommé de `.claude/agents/`.
 - **Session trop longue :** quand la tâche est terminée et le rapport écrit, la session s'arrête. Si une tâche dépasse environ 150k tokens de contexte, écris l'état dans le rapport (fait, reste à faire, branche, dernier commit) et propose au propriétaire d'ouvrir une nouvelle session.
 
-## Délégation aux sous-agents
+## Délégation à OpenCode
 
-Un sous-agent ne voit pas ta conversation. Il reçoit seulement ton message de délégation et ne te renvoie qu'un résumé. Écris donc des messages qui se suffisent à eux-mêmes.
+OpenCode ne voit pas ta conversation. Il reçoit seulement ta consigne. Écris donc une consigne qui se suffit à elle-même, dans `docs/briefs/opencode/<tâche>.md` (par exemple `1.9-visitors-render.md`). Elle contient :
 
-- **Tâches critiques** (simulation, gacha, économie, sauvegarde, schémas de données) : tu écris le code toi-même. Tu délègues seulement la vérification (`verificateur`) et la relecture (`relecteur`).
-- **Autres tâches** (outillage, rendu, interface, audio technique, Android, pipeline Blender) : tu planifies, puis tu délègues l'écriture à `executant`. Son message contient la section du brief, la liste exacte des fichiers à toucher et les critères d'acceptation.
-- **Contenu répétitif** (données d'espèces, textes, descriptions d'espèces pour Blender) : tu le délègues à `contenu`, avec le fichier gabarit à copier.
+- la section du brief et du GDD à lire, et le rappel de lire `AGENTS.md` ;
+- le plan validé : fichiers à créer ou modifier, approche, tests attendus ;
+- les critères d'acceptation et la commande finale (`npm run check` vert, plus `npm run assets:check` ou `npm run e2e` si la tâche l'exige) ;
+- les interdits : ne travailler que dans le worktree de la tâche, ne pas pousser, ne pas fusionner, ne pas toucher à `tsconfig.json`, ESLint, Prettier, Vitest, la CI, `.claude/` ni `assets/models` à la main ;
+- la fin attendue : des commits Conventional Commits sur la branche de la tâche, puis le rapport au format d'`AGENTS.md` en dernier message.
+
+**Modèles** (D-026) : `openai/gpt-6.1-sol --variant high` pour le cœur critique, `openai/gpt-6.1-sol` pour le reste du code et les corrections, `opencode-go/kimi-k3` pour le contenu répétitif, `opencode-go/gpt-6-luna` en secours si le quota ChatGPT est épuisé.
+
+**Lancement**, toujours en arrière-plan (`run_in_background`), depuis le worktree de la tâche, en gardant seulement la fin de la sortie :
+
+```bash
+opencode run --dir "<worktree>" -m openai/gpt-6.1-sol --title "<tâche>" -f docs/briefs/opencode/<tâche>.md "Suis exactement la consigne jointe." 2>&1 | tail -n 60
+```
+
 - **Recherche dans le dépôt** : tu la délègues à `Explore`.
 - **Journaux longs** : tu ne les lis pas. Tu fais lancer `npm run check` (et `npm run e2e`) par `verificateur`, qui te renvoie un résumé.
-- **Fin de chaque tâche :** `relecteur` relit la branche une seule fois. Tu fais corriger les points Bloquant et À corriger par un nouvel `executant` (ou tu les corriges toi-même pour une tâche critique), tu refais vérifier par `verificateur`, puis tu écris le rapport final au format d'`AGENTS.md`. Les Suggestions ne déclenchent pas de nouveau cycle : note-les dans le rapport.
-- **Jamais de cascade :** un sous-agent ne lance jamais d'autres sous-agents. Seul le chef délègue.
+- **Après chaque lancement :** regarde `git log --oneline main..HEAD` et `git diff --stat main...HEAD`, sans lire tout le diff ; fais vérifier par `verificateur`.
+- **Fin de chaque tâche :** `relecteur` relit la branche une seule fois. Tu fais corriger les points Bloquant et À corriger par un **nouveau** lancement d'OpenCode (jamais `--continue`), avec une nouvelle consigne `docs/briefs/opencode/<tâche>-fix-<n>.md`, tu refais vérifier par `verificateur`, puis tu écris le rapport final au format d'`AGENTS.md`. Les Suggestions ne déclenchent pas de nouveau cycle : note-les dans le rapport.
+- **Secours :** si OpenCode est indisponible, les sous-agents `executant` (code) et `contenu` (contenu répétitif) prennent le relais, avec la même consigne.
+- **Jamais de cascade :** les sous-agents ne lancent ni d'autres sous-agents ni OpenCode. Seul le chef délègue.
 
 ## Relire une branche
 

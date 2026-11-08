@@ -59,27 +59,21 @@ Ces règles complètent le GDD. Elles sont reportées dans `docs/decisions.md` p
 
 ## Outil et relecture
 
-Toutes les tâches se font avec **Claude Code**, dans une session Opus par tâche : le chef planifie et délègue selon la section « Délégation aux sous-agents » de `CLAUDE.md`, fait vérifier, puis fait relire la branche par le sous-agent `relecteur` avant le rapport final.
+Depuis D-026, **Claude Code supervise et OpenCode écrit le code**. Le chef (Claude Code) planifie, écrit la consigne `docs/briefs/opencode/<tâche>.md`, lance OpenCode selon la section « Délégation à OpenCode » de `CLAUDE.md`, fait vérifier par `verificateur`, puis fait relire la branche par `relecteur` avant le rapport final. Les tâches 1.0 à 1.8 ont été faites avec Claude Code seul, avant D-026.
+
+Les « Prompts à coller » des tâches restent valables pour une session Claude Code : le chef en tire la consigne OpenCode.
 
 ### Qui écrit le code
 
 | Tâche | Qui écrit le code |
 | --- | --- |
-| 1.0 Mise à jour du brief | le chef |
-| 1.1 Schémas de données | le chef |
-| 1.2 Contenu des 4 autres espèces | `contenu` (Haiku) |
-| 1.3 Gacha | le chef |
-| 1.4 Construction du parc | le chef |
-| 1.5 Visiteurs, simulation | le chef |
-| 1.6 Économie et équilibrage | le chef |
-| 1.7 Modèles des 4 espèces | `executant` (Sonnet) |
-| 1.8 Comportements des animaux | `executant` |
-| 1.9 Visiteurs en 3D | `executant` |
-| 1.10 Rendu de la construction | `executant` |
-| 1.11 Interface | `executant` |
-| 1.12 Audio de base | le chef pour la composition musicale, `executant` pour le mixeur |
-| 1.13 Scène d'arrivage | `executant` |
-| 1.14 Premières minutes et passe finale | le chef, `executant` pour les corrections |
+| 1.0 à 1.8 | faites (Claude Code, avant D-026) |
+| 1.9 Visiteurs en 3D | OpenCode, `openai/gpt-6.1-sol` |
+| 1.10 Rendu de la construction | OpenCode, `openai/gpt-6.1-sol` |
+| 1.11 Interface | OpenCode, `openai/gpt-6.1-sol` |
+| 1.12 Audio de base | OpenCode, `openai/gpt-6.1-sol` ; le chef fixe la direction musicale dans la consigne |
+| 1.13 Scène d'arrivage | OpenCode, `openai/gpt-6.1-sol` |
+| 1.14 Premières minutes et passe finale | OpenCode, `openai/gpt-6.1-sol` (effort `high` pour l'équilibrage) |
 
 Une tâche par session, toujours.
 
