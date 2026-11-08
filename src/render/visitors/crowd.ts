@@ -22,7 +22,7 @@ import {
   type VisitorSource,
   type VisitorWorld,
 } from './types';
-import { pickViewingClip, visualRng } from './visual-seed';
+import { memberPhaseOffset, pickViewingClip, visualRng } from './visual-seed';
 
 const MS_PER_SECOND = 1000;
 const STEP_MS = 100;
@@ -44,6 +44,7 @@ async function defaultLoadSource(
 interface GroupState {
   readonly id: VisitorId;
   readonly rng: RngState;
+  readonly memberPhases: number[];
   visitor: VisitorState;
   x: number;
   z: number;
@@ -70,8 +71,9 @@ export function createVisitorCrowd(options: VisitorCrowdOptions): VisitorCrowd {
   const sources = new Map<string, VisitorSource>();
   const attempted = new Set<string>();
   const states = new Map<VisitorId, GroupState>();
+  const activeStates: GroupState[] = [];
   const material = new MeshStandardMaterial({ color: 0xffffff });
-  const crowd = createInstancedCrowd(parent, material);
+  const crowd = createInstancedCrowd(parent, material, options.quality);
   const pose: Matrix4[] = [];
   const groupMatrix = new Matrix4();
   const position = new Vector3();
@@ -142,6 +144,7 @@ export function createVisitorCrowd(options: VisitorCrowdOptions): VisitorCrowd {
     const state: GroupState = {
       id: visitor.id,
       rng,
+      memberPhases: [],
       visitor,
       x,
       z,
@@ -162,6 +165,7 @@ export function createVisitorCrowd(options: VisitorCrowdOptions): VisitorCrowd {
       viewClip: pickViewingClip(rng),
     };
     states.set(visitor.id, state);
+    activeStates.push(state);
     return state;
   }
   function synchronize(nextWorld: VisitorWorld): void {
@@ -183,6 +187,10 @@ export function createVisitorCrowd(options: VisitorCrowdOptions): VisitorCrowd {
         cellCenterX(grid, visitor.column) + (visitor.nextColumn - visitor.column) * progress;
       const z = cellCenterZ(grid, visitor.row) + (visitor.nextRow - visitor.row) * progress;
       const state = states.get(visitor.id) ?? createState(visitor, x, z);
+      while (state.memberPhases.length < visitor.groupSize) {
+        const member = state.memberPhases.length;
+        state.memberPhases.push(memberPhaseOffset(visualRng(visitor.id), member));
+      }
       state.visitor = visitor;
       if (visitor.updatedAtMs !== state.snapshotMs || x !== state.targetX || z !== state.targetZ) {
         state.interpolationDurationMs = Math.max(STEP_MS, visitor.updatedAtMs - state.snapshotMs);
@@ -213,6 +221,10 @@ export function createVisitorCrowd(options: VisitorCrowdOptions): VisitorCrowd {
       }));
       const active = new Set(layout.map((group) => group.id));
       for (const id of states.keys()) if (!active.has(id)) states.delete(id);
+      for (let index = activeStates.length - 1; index >= 0; index -= 1) {
+        const state = activeStates[index];
+        if (state !== undefined && !active.has(state.id)) activeStates.splice(index, 1);
+      }
       rebuild();
     }
   }
@@ -278,9 +290,18 @@ export function createVisitorCrowd(options: VisitorCrowdOptions): VisitorCrowd {
     }
   }
   function draw(elapsedMs: number): void {
-    for (const state of states.values()) advanceGroup(state, elapsedMs);
+    let stateIndex = 0;
+    while (stateIndex < activeStates.length) {
+      const state = activeStates[stateIndex];
+      stateIndex += 1;
+      if (state !== undefined) advanceGroup(state, elapsedMs);
+    }
     let previousState: GroupState | undefined;
-    for (const slot of crowd.slots) {
+    let slotIndex = 0;
+    while (slotIndex < crowd.slots.length) {
+      const slot = crowd.slots[slotIndex];
+      slotIndex += 1;
+      if (slot === undefined) continue;
       const state = states.get(slot.visitorId);
       if (state === undefined) continue;
       if (state !== previousState) {
@@ -292,6 +313,7 @@ export function createVisitorCrowd(options: VisitorCrowdOptions): VisitorCrowd {
           state.nextPhase,
           state.blend,
           pose,
+          state.memberPhases,
         );
         position.set(state.x, 0, state.z);
         rotation.setFromAxisAngle(up, state.yaw);
@@ -304,6 +326,9 @@ export function createVisitorCrowd(options: VisitorCrowdOptions): VisitorCrowd {
     crowd.markMatricesUpdated();
   }
   return {
+    setQuality(level) {
+      crowd.setQuality(level);
+    },
     syncAll: synchronize,
     handleEvents(_events, nextWorld) {
       synchronize(nextWorld);
@@ -355,6 +380,7 @@ export function createVisitorCrowd(options: VisitorCrowdOptions): VisitorCrowd {
       for (const source of sources.values()) disposeVisitorObjects(source.root, palette);
       sources.clear();
       states.clear();
+      activeStates.length = 0;
       material.dispose();
       palette?.dispose();
       palette = null;

@@ -243,6 +243,65 @@ describe('instanced visitor runtime', () => {
     expect(out.x).toBe(stoppedX);
     crowd.dispose();
   });
+  it('reuses frame buffers without map or array iterators in update, pick and project', async () => {
+    const item = visitor();
+    const { crowd, parent, world } = await loaded([item, visitor(2)]);
+    world.visitors.list.splice(1, 1);
+    crowd.syncAll(world);
+    const object = mesh(parent, 'couple:p0_arm');
+    const matrices = object.instanceMatrix;
+    const matrixArray = matrices.array;
+    const view = camera();
+    const out = { x: 0, y: 0 };
+    const values = vi.spyOn(Map.prototype, 'values');
+    const iterators = vi.spyOn(Array.prototype, Symbol.iterator);
+    let valueCalls: number;
+    let iteratorCalls: number;
+    try {
+      for (let frame = 0; frame < 3; frame += 1) {
+        crowd.update(100);
+        crowd.pick(view, 200, 200, 400, 400);
+        crowd.project(item.id, view, 400, 400, out);
+      }
+      valueCalls = values.mock.calls.length;
+      iteratorCalls = iterators.mock.calls.length;
+    } finally {
+      values.mockRestore();
+      iterators.mockRestore();
+    }
+    expect(valueCalls).toBe(0);
+    expect(iteratorCalls).toBe(0);
+    expect(object.instanceMatrix).toBe(matrices);
+    expect(object.instanceMatrix.array).toBe(matrixArray);
+    expect(crowd.stats().people).toBe(2);
+    crowd.dispose();
+  });
+  it('offsets walking members independently and repeats the same pose for the same group id', async () => {
+    async function walkingGroup(): ReturnType<typeof loaded> {
+      const fixture = prototype();
+      const walk = fixture.clips.find((clip) => clip.name === 'walk');
+      if (walk === undefined) throw new Error('Missing walking fixture.');
+      walk.tracks.push(new NumberKeyframeTrack('p1_arm_pivot.rotation[z]', [0, 0.5, 1], [0, 1, 0]));
+      const item = visitor();
+      item.nextRow = 2;
+      const result = await loaded(
+        [item],
+        [unwrap(prepareVisitorSource('couple', fixture.root, fixture.clips))],
+      );
+      result.crowd.update(400);
+      return result;
+    }
+    const first = await walkingGroup();
+    const second = await walkingGroup();
+    const a = matrixOf(mesh(first.parent, 'couple:p0_arm'));
+    const b = matrixOf(mesh(first.parent, 'couple:p1_arm'));
+    // Ignore formation translation: different rotations prove the members walk out of phase.
+    expect(a.elements.slice(0, 12)).not.toEqual(b.elements.slice(0, 12));
+    expect(matrixOf(mesh(second.parent, 'couple:p0_arm')).elements).toEqual(a.elements);
+    expect(matrixOf(mesh(second.parent, 'couple:p1_arm')).elements).toEqual(b.elements);
+    first.crowd.dispose();
+    second.crowd.dispose();
+  });
   it('picks visible persons only and clears picking/projection on removal, hiding and disposal', async () => {
     const item = visitor(1, 'teen-photographer', 1);
     const { crowd, parent, world } = await loaded([item]);

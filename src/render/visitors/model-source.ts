@@ -106,9 +106,11 @@ export function prepareVisitorSource(
   const parts: VisitorPart[] = [];
   const names = new Set<string>();
   const invalid: string[] = [];
-  function visit(object: Object3D, parentIndex: number): void {
+  function visit(object: Object3D, parentIndex: number, inheritedPerson = -1): void {
     const index = nodes.length;
-    nodes.push({ name: object.name, object, parentIndex, children: [] });
+    const personRoot = /^p(\d+)_root$/.exec(object.name);
+    const personIndex = personRoot === null ? inheritedPerson : Number(personRoot[1]);
+    nodes.push({ name: object.name, object, parentIndex, personIndex, children: [] });
     if (names.has(object.name)) invalid.push(object.name);
     names.add(object.name);
     if (isVisitorMesh(object)) {
@@ -133,7 +135,7 @@ export function prepareVisitorSource(
         });
       }
     }
-    for (const child of object.children) visit(child, index);
+    for (const child of object.children) visit(child, index, personIndex);
   }
   visit(root, -1);
   if (

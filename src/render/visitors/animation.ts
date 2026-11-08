@@ -6,6 +6,7 @@ const positionA = new Vector3();
 const positionB = new Vector3();
 const quaternionA = new Quaternion();
 const quaternionB = new Quaternion();
+const targetQuaternion = new Quaternion();
 const scaleA = new Vector3();
 const scaleB = new Vector3();
 const local = new Matrix4();
@@ -33,7 +34,7 @@ export function sampleNodeLocal(
   const q = first * 4;
   const nextP = second * 3;
   const nextQ = second * 4;
-  // Read directly into outputs: scratch vectors must never alias these outputs.
+  // Write directly to the outputs so sampling the next pose cannot overwrite the previous pose.
   position.set(
     (positions[p] ?? 0) * (1 - blend) + (positions[nextP] ?? 0) * blend,
     (positions[p + 1] ?? 0) * (1 - blend) + (positions[nextP + 1] ?? 0) * blend,
@@ -58,7 +59,6 @@ export function sampleNodeLocal(
     (scales[p + 2] ?? 1) * (1 - blend) + (scales[nextP + 2] ?? 1) * blend,
   );
 }
-const targetQuaternion = new Quaternion();
 
 export function computePoseMatrices(
   source: VisitorSource,
@@ -77,6 +77,7 @@ export function computeBlendedPoseMatrices(
   nextPhase: number,
   blend: number,
   out: readonly Matrix4[],
+  memberPhases?: readonly number[],
 ): void {
   for (let index = 0; index < source.nodes.length; index += 1) {
     const node = source.nodes[index];
@@ -87,7 +88,7 @@ export function computeBlendedPoseMatrices(
     sampleNodeLocal(
       source.bakedClips[currentClip],
       index,
-      currentPhase,
+      currentPhase + (currentClip === 'walk' ? (memberPhases?.[node.personIndex] ?? 0) : 0),
       positionA,
       quaternionA,
       scaleA,
@@ -96,7 +97,7 @@ export function computeBlendedPoseMatrices(
       sampleNodeLocal(
         source.bakedClips[nextClip],
         index,
-        nextPhase,
+        nextPhase + (nextClip === 'walk' ? (memberPhases?.[node.personIndex] ?? 0) : 0),
         positionB,
         quaternionB,
         scaleB,

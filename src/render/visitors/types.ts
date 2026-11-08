@@ -1,6 +1,7 @@
 import type { AnimationClip, Camera, Mesh, Object3D, Texture } from 'three';
 import type { GridSize, Result, VisitorId } from '@/shared';
 import type { GameEvent, VisitorState } from '@/sim';
+import type { QualityLevel } from '../quality/quality';
 
 /** The subset of the simulation world the crowd reads. */
 export interface VisitorWorld {
@@ -23,11 +24,13 @@ export const VISITOR_CLIPS: readonly VisitorClip[] = [
 export interface VisitorCrowdStats {
   people: number;
   groups: number;
+  /** Piece draws, including one directional shadow pass for shadow-casting pieces. */
   drawCalls: number;
 }
 
 /** Public API exposed by `src/render/visitors/index.ts`. */
 export interface VisitorCrowd {
+  setQuality(level: QualityLevel): void;
   syncAll(world: VisitorWorld): void;
   handleEvents(events: readonly GameEvent[], world: VisitorWorld): void;
   update(elapsedMs: number): void;
@@ -47,6 +50,7 @@ export interface VisitorCrowd {
 export interface VisitorCrowdOptions {
   readonly parent: Object3D;
   readonly grid: GridSize;
+  readonly quality?: QualityLevel;
   /**
    * Optional source loader, mainly for tests. Defaults to loading
    * `assets/models/visitors/*.glb` via Vite's `import.meta.glob`.
@@ -96,6 +100,7 @@ export interface VisitorSource {
 
 /** One node in the prototype hierarchy. */
 export interface VisitorNode {
+  readonly personIndex: number;
   readonly name: string;
   readonly object: Object3D;
   readonly parentIndex: number;
@@ -127,22 +132,3 @@ export type VisitorModelProblem =
       readonly archetypeId: string;
       readonly personIndex: number;
     };
-
-/** Internal state for one displayed group. */
-export interface GroupRenderState {
-  readonly id: VisitorId;
-  readonly archetypeId: string;
-  /** Current interpolated transform of the group root. */
-  x: number;
-  z: number;
-  yaw: number;
-  currentClip: VisitorClip;
-  nextClip: VisitorClip;
-  blend: number;
-  /** Master phase of the group animation, wraps around each clip's duration. */
-  phase: number;
-  /** Stable visual seed derived from the visitor id. */
-  visualSeed: number;
-  /** Seconds allocated to the current transition. */
-  transitionSeconds: number;
-}

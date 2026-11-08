@@ -18,7 +18,7 @@ export function visualRng(id: string): RngState {
 /** Returns a deterministic per-member phase offset from the group seed. */
 export function memberPhaseOffset(rng: RngState, memberIndex: number): number {
   // Mix the member index into the sequence without changing the group seed itself.
-  const mixed = Math.imul(memberIndex, 0x9e37_79b9);
+  const mixed = Math.imul(memberIndex, 0x9e37_79b9) >>> 0;
   const base = randomFloat(rng);
   return (base + mixed / 0x1_0000_0000) % 1;
 }

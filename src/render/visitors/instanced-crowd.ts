@@ -6,9 +6,11 @@ import {
   type Material,
   type Object3D,
   type Raycaster,
+  type Intersection,
 } from 'three';
 import type { VisitorId } from '@/shared';
 import { randomFloat } from '@/sim/rng';
+import type { QualityLevel } from '../quality/quality';
 import type { VisitorSource, VisitorTint } from './types';
 import { tintColor, visualRng } from './visual-seed';
 
@@ -32,11 +34,13 @@ export interface GroupRenderData {
   readonly groupSize: number;
 }
 interface MeshPool {
+  readonly majorBodyPart: boolean;
   readonly mesh: InstancedMesh;
   readonly capacity: number;
   readonly instanceToGroup: VisitorId[];
 }
 export interface InstancedCrowd {
+  setQuality(level: QualityLevel): void;
   readonly slots: readonly PersonSlot[];
   sync(groups: readonly GroupRenderData[], sources: ReadonlyMap<string, VisitorSource>): void;
   writeSlot(slot: PersonSlot, pose: readonly Matrix4[], group: Matrix4): void;
@@ -47,12 +51,23 @@ export interface InstancedCrowd {
   dispose(): void;
 }
 
-export function createInstancedCrowd(parent: Object3D, material: Material): InstancedCrowd {
+export function createInstancedCrowd(
+  parent: Object3D,
+  material: Material,
+  initialQuality: QualityLevel = 'low',
+): InstancedCrowd {
   const pools = new Map<string, MeshPool>();
+  const poolList: MeshPool[] = [];
+  const hits: Intersection[] = [];
+  let quality = initialQuality;
   const identities = new Map<VisitorId, Map<number, PersonSlot>>();
   const slots: PersonSlot[] = [];
   const groups = new Set<VisitorId>();
   const matrix = new Matrix4();
+
+  function applyShadow(pool: MeshPool): void {
+    pool.mesh.castShadow = quality === 'high' || (quality === 'medium' && pool.majorBodyPart);
+  }
 
   function release(): void {
     for (const pool of pools.values()) {
@@ -60,12 +75,23 @@ export function createInstancedCrowd(parent: Object3D, material: Material): Inst
       pool.mesh.dispose();
     }
     pools.clear();
+    poolList.length = 0;
+    hits.length = 0;
     slots.length = 0;
     identities.clear();
     groups.clear();
   }
   return {
     slots,
+    setQuality(level) {
+      quality = level;
+      let index = 0;
+      while (index < poolList.length) {
+        const pool = poolList[index];
+        index += 1;
+        if (pool !== undefined) applyShadow(pool);
+      }
+    },
     sync(data, sources) {
       slots.length = 0;
       groups.clear();
@@ -122,18 +148,26 @@ export function createInstancedCrowd(parent: Object3D, material: Material): Inst
           const key = `${source.archetypeId}:${part.name}`;
           let pool = pools.get(key);
           if (pool === undefined || pool.capacity < visible.length) {
+            const previousIndex = pool === undefined ? -1 : poolList.indexOf(pool);
             pool?.mesh.removeFromParent();
             pool?.mesh.dispose();
             const capacity = 2 ** Math.ceil(Math.log2(visible.length));
             const mesh = new InstancedMesh(part.mesh.geometry, material, capacity);
             mesh.name = key;
             mesh.instanceMatrix.setUsage(DynamicDrawUsage);
-            mesh.castShadow = true;
             mesh.receiveShadow = true;
             // Bounds change with every group; avoid stale bounds hiding or rejecting instances.
             mesh.frustumCulled = false;
-            pool = { mesh, capacity, instanceToGroup: [] };
+            pool = {
+              mesh,
+              capacity,
+              instanceToGroup: [],
+              majorBodyPart: /^p\d+_(body|head)_mesh$/.test(part.name),
+            };
+            applyShadow(pool);
             pools.set(key, pool);
+            if (previousIndex < 0) poolList.push(pool);
+            else poolList[previousIndex] = pool;
             parent.add(mesh);
           }
           pool.mesh.count = visible.length;
@@ -149,7 +183,11 @@ export function createInstancedCrowd(parent: Object3D, material: Material): Inst
       }
     },
     writeSlot(slot, pose, group) {
-      for (const part of slot.parts) {
+      let index = 0;
+      while (index < slot.parts.length) {
+        const part = slot.parts[index];
+        index += 1;
+        if (part === undefined) continue;
         const node = pose[part.node];
         if (node === undefined) throw new Error('Missing preallocated visitor pose.');
         matrix.multiplyMatrices(group, node);
@@ -157,18 +195,26 @@ export function createInstancedCrowd(parent: Object3D, material: Material): Inst
       }
     },
     markMatricesUpdated() {
-      for (const pool of pools.values())
-        if (pool.mesh.count > 0) {
+      let index = 0;
+      while (index < poolList.length) {
+        const pool = poolList[index];
+        index += 1;
+        if (pool !== undefined && pool.mesh.count > 0) {
           pool.mesh.instanceMatrix.needsUpdate = true;
           pool.mesh.boundingSphere = null;
           pool.mesh.boundingBox = null;
         }
+      }
     },
     pick(raycaster, out) {
       out.id = null;
       out.distance = Number.POSITIVE_INFINITY;
       parent.updateWorldMatrix(true, true);
-      for (const pool of pools.values()) {
+      let index = 0;
+      while (index < poolList.length) {
+        const pool = poolList[index];
+        index += 1;
+        if (pool === undefined) continue;
         if (!pool.mesh.visible || pool.mesh.count === 0) continue;
         let ancestor: Object3D | null = pool.mesh.parent;
         let visible = true;
@@ -177,7 +223,13 @@ export function createInstancedCrowd(parent: Object3D, material: Material): Inst
           ancestor = ancestor.parent;
         }
         if (!visible) continue;
-        for (const hit of raycaster.intersectObject(pool.mesh)) {
+        hits.length = 0;
+        raycaster.intersectObject(pool.mesh, false, hits);
+        let hitIndex = 0;
+        while (hitIndex < hits.length) {
+          const hit = hits[hitIndex];
+          hitIndex += 1;
+          if (hit === undefined) continue;
           if (hit.instanceId !== undefined && hit.distance < out.distance) {
             const id = pool.instanceToGroup[hit.instanceId];
             if (id !== undefined && groups.has(id)) {
@@ -187,6 +239,7 @@ export function createInstancedCrowd(parent: Object3D, material: Material): Inst
           }
         }
       }
+      hits.length = 0;
     },
     hasGroup(id) {
       return groups.has(id);
@@ -194,7 +247,7 @@ export function createInstancedCrowd(parent: Object3D, material: Material): Inst
     stats() {
       let drawCalls = 0;
       for (const pool of pools.values())
-        if (pool.mesh.count > 0 && pool.mesh.visible) drawCalls += 1;
+        if (pool.mesh.count > 0 && pool.mesh.visible) drawCalls += pool.mesh.castShadow ? 2 : 1;
       return { people: slots.length, groups: groups.size, drawCalls };
     },
     dispose: release,

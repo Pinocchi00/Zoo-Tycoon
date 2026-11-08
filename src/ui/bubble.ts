@@ -96,32 +96,49 @@ export function createVisitorThoughtBubble(
   parent.appendChild(container);
 
   let disposed = false;
+  let previousText: string | null = null;
+  let previousCloseLabel: string | null = null;
+  let parentRect: Rect | null = null;
+  let bubbleRect: Rect | null = null;
+  const observer = new ResizeObserver(() => {
+    parentRect = null;
+    bubbleRect = null;
+  });
+  observer.observe(parent);
 
   const hide = (): void => {
     if (disposed) {
       return;
     }
     render(null, container);
+    previousText = null;
+    previousCloseLabel = null;
+    bubbleRect = null;
   };
 
   const show = (text: string, x: number, y: number, closeLabel: string): void => {
     if (disposed) {
       return;
     }
-    render(visitorThoughtBubbleVNode(text, closeLabel, onClose), container);
+    if (text !== previousText || closeLabel !== previousCloseLabel) {
+      render(visitorThoughtBubbleVNode(text, closeLabel, onClose), container);
+      previousText = text;
+      previousCloseLabel = closeLabel;
+      bubbleRect = null;
+    }
 
     const root = container.firstElementChild;
     if (root instanceof HTMLElement) {
-      const parentRect = parent.getBoundingClientRect();
-      const bubbleRect = root.getBoundingClientRect();
+      parentRect ??= parent.getBoundingClientRect();
+      bubbleRect ??= root.getBoundingClientRect();
       const position = bubblePosition(x, y, parentRect, bubbleRect);
-      root.style.left = `${String(position.left)}px`;
-      root.style.top = `${String(position.top)}px`;
+      root.style.transform = `translate(${String(position.left)}px, ${String(position.top)}px)`;
     }
   };
 
   const dispose = (): void => {
     hide();
+    observer.disconnect();
     container.remove();
     disposed = true;
   };

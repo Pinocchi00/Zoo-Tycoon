@@ -43,9 +43,11 @@ export interface ParkView {
   writeFocusArea: (out: FocusArea) => void;
   /** Puts the animals of the state in their enclosures, e.g. after loading a save. */
   syncAnimals: (world: HerdWorld) => void;
+  /** Restores the visitor crowd, e.g. after loading a save. */
   syncVisitors: (world: VisitorWorld) => void;
-  /** Updates the animals of the enclosures the events talk about. */
+  /** Updates the animals and visitors affected by the events. */
   handleEvents: (events: readonly GameEvent[], world: HerdWorld & VisitorWorld) => void;
+  /** Writes a visible visitor's screen position into `out` without allocating. */
   projectVisitor: (id: VisitorId, out: { x: number; y: number }) => boolean;
   dispose: () => void;
 }
@@ -124,7 +126,7 @@ export function createParkView(
     lookupSpecies,
     loadSource: loadSpeciesModel,
   });
-  const crowd = createVisitorCrowd({ parent: scene, grid });
+  const crowd = createVisitorCrowd({ parent: scene, grid, quality: initialLevel });
   const detachControls = attachCameraControls(canvas, rig, viewport, (x, y) => {
     interaction.onVisitorTap?.(crowd.pick(camera, x, y, viewport.width, viewport.height));
   });
@@ -141,6 +143,7 @@ export function createParkView(
     level = next;
     const settings = qualitySettings(next);
     renderer.shadowMap.enabled = settings.shadows;
+    crowd.setQuality(next);
     applyShadowQuality(lighting, settings);
     applySize();
   };
