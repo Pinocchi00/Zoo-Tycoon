@@ -3,6 +3,7 @@ import type { Messages } from './messages';
 export const en: Messages = {
   'app.title': 'Zoo Refuge',
   'app.loading': 'Getting the park ready…',
+  'visitor.closeThought': 'Close visitor thought',
   'dev.fpsUnit': 'fps',
   'species.capybara.name': 'Capybara',
   'species.capybara.signature': 'Square muzzle, barrel body, zen in the water',

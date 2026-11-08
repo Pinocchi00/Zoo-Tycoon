@@ -59,7 +59,7 @@ Ces règles complètent le GDD. Elles sont reportées dans `docs/decisions.md` p
 
 ## Outil et relecture
 
-Toutes les tâches se font avec **Claude Code**, dans une session Opus par tâche : le chef planifie et délègue selon la section « Délégation aux sous-agents » de `CLAUDE.md`, fait vérifier, puis fait relire la branche par le sous-agent `relecteur` avant le rapport final.
+Pour la reprise de la tâche 1.9, la décision D-026 remplace les anciennes obligations d'outil et de modèle : le chef supervise et délègue des missions délimitées sur OpenCode Go, fait vérifier puis relire par un contexte distinct avant le rapport final. Les mentions Claude Code et Opus des prompts historiques ci-dessous restent des repères de l'ancienne méthode ; elles n'imposent plus ces outils pour cette reprise. Le propriétaire valide les plans, les responsabilités de fichiers ne se chevauchent pas et le chef conserve l'intégration.
 
 ### Qui écrit le code
 

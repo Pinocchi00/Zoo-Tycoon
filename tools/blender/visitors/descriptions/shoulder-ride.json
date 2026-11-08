@@ -1,0 +1,46 @@
+{
+  "id": "shoulder-ride",
+  "archetypeId": "shoulder-ride",
+  "version": 1,
+  "memberCount": 2,
+  "persons": [
+    {
+      "index": 0,
+      "position": [0, 0, 0],
+      "height": 1.76,
+      "width": 1.05,
+      "headScale": 1.0,
+      "legRatio": 0.46,
+      "torsoRatio": 0.34,
+      "hair": "short",
+      "glasses": false,
+      "camera": false,
+      "shoulderChild": 1,
+      "tints": {
+        "skin": "fur_capybara_light",
+        "hair": "fur_capybara_dark",
+        "shirt": "fur_otter",
+        "pants": "fur_tapir_dark"
+      }
+    },
+    {
+      "index": 1,
+      "position": [0, 0, 0],
+      "height": 1.0,
+      "posture": "shoulders",
+      "width": 0.8,
+      "headScale": 1.05,
+      "legRatio": 0.44,
+      "torsoRatio": 0.34,
+      "hair": "cap_backwards",
+      "glasses": false,
+      "camera": false,
+      "tints": {
+        "skin": "fur_capybara_light",
+        "hair": "fur_jaguar",
+        "shirt": "fur_jaguar_light",
+        "pants": "otter_throat"
+      }
+    }
+  ]
+}

@@ -27,15 +27,19 @@ import {
   drain,
   type FocusArea,
   type GameState,
+  visitorThoughtKey,
 } from '@/sim';
+import { createVisitorThoughtBubble } from '@/ui';
 import type { FpsCounter } from './dev-fps';
 import { entranceFocus, terrainGrid } from './entrance-focus';
 import { createGameLoop, type FrameScheduler } from './game-loop';
 import { createAutosaver, loadOrCreatePark } from './park-save';
+import { createVisitorSelection, type VisitorSelection } from './visitor-selection';
 
 /** Development only: `?demo=animaux` opens a ready-made park to look at the animals. */
 const DEMO_QUERY_PARAMETER = 'demo';
 const ANIMAL_DEMO = 'animaux';
+const VISITOR_DEMO = 'visiteurs';
 const QUALITY_STORAGE_KEY = 'settings.quality';
 /** `?quality=low|medium|high` forces a level, and keeps it, until an options screen exists. */
 const QUALITY_QUERY_PARAMETER = 'quality';
@@ -122,9 +126,10 @@ async function main(): Promise<void> {
   logStorage(opened);
   const { store } = opened;
   // The demo never writes to storage: not the park, not even the quality setting.
-  const demo =
-    import.meta.env.DEV &&
-    new URLSearchParams(window.location.search).get(DEMO_QUERY_PARAMETER) === ANIMAL_DEMO;
+  const requestedDemo = import.meta.env.DEV
+    ? new URLSearchParams(window.location.search).get(DEMO_QUERY_PARAMETER)
+    : null;
+  const demo = requestedDemo === ANIMAL_DEMO || requestedDemo === VISITOR_DEMO;
   const forced = parseQualityLevel(
     new URLSearchParams(window.location.search).get(QUALITY_QUERY_PARAMETER),
   );
@@ -133,6 +138,7 @@ async function main(): Promise<void> {
   }
   const known = forced ?? (await readStoredQuality(store));
   let sampler: FrameSampler | null = known === null ? createFrameSampler() : null;
+  let selection: VisitorSelection | null = null;
 
   const view = createParkView(
     canvas,
@@ -140,6 +146,7 @@ async function main(): Promise<void> {
     terrainGrid(data.terrain),
     entranceFocus(data.terrain),
     (id) => speciesLook(data, id),
+    { onVisitorTap: (id) => selection?.tap(id) },
   );
   const resize = (): void => {
     view.resize(root.clientWidth, root.clientHeight);
@@ -160,21 +167,35 @@ async function main(): Promise<void> {
   const saves = createSaveStorage(store, deserialize);
   let state: GameState;
   if (demo) {
-    const { buildAnimalDemo } = await import('./dev-demo');
-    state = buildAnimalDemo(data, events);
+    if (requestedDemo === VISITOR_DEMO) {
+      const { buildVisitorDemo } = await import('./dev-visitors-demo');
+      state = buildVisitorDemo(data, events);
+    } else {
+      const { buildAnimalDemo } = await import('./dev-demo');
+      state = buildAnimalDemo(data, events);
+    }
   } else {
     state = await loadOrCreatePark(saves, events, () => createNewGame(newParkSeed(), data));
   }
   const autosaver = demo ? null : createAutosaver(saves, state, () => Date.now());
   view.syncAnimals(state);
+  view.syncVisitors(state);
+  const bubble = createVisitorThoughtBubble(root, () => selection?.close());
+  selection = createVisitorSelection({
+    visitors: () => state.visitors.list,
+    thought: (visitor) => t(visitorThoughtKey(visitor, data)),
+    closeLabel: () => t('visitor.closeThought'),
+    project: view.projectVisitor,
+    bubble,
+  });
 
   const loop = createGameLoop(browserScheduler, (frameMs, simulationMs) => {
     view.writeFocusArea(focus);
     advance(state, simulationMs, context, events);
     autosaver?.record(simulationMs);
-    // Only the animals listen to the simulation so far; draining keeps the queue from growing.
     view.handleEvents(drain(events), state);
     view.frame(frameMs);
+    selection.update();
     fps?.record(frameMs);
     if (sampler !== null) {
       const chosen = recordFrame(sampler, frameMs);

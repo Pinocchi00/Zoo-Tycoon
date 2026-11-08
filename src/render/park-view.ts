@@ -7,7 +7,7 @@ import {
   Scene,
   WebGLRenderer,
 } from 'three';
-import { gridDepth, gridWidth, type GridSize, type SpeciesId } from '@/shared';
+import { gridDepth, gridWidth, type GridSize, type SpeciesId, type VisitorId } from '@/shared';
 import type { FocusArea, GameEvent } from '@/sim';
 import { createAnimalHerd, type HerdWorld, type SpeciesLook } from './animals/animal-herd';
 import { loadSpeciesModel } from './animals/model-urls';
@@ -24,6 +24,7 @@ import { applyCameraPose, createIsoCamera } from './camera/iso-camera';
 import { AFTERNOON, applyShadowQuality, createLighting } from './lighting/ambiance';
 import { qualitySettings, type QualityLevel } from './quality/quality';
 import { createDioramaBase } from './terrain/diorama-base';
+import { createVisitorCrowd, type VisitorWorld } from './visitors';
 
 /** Closest view: about one small enclosure (4 × 4 cells) with its surroundings. */
 const MIN_VIEW_HEIGHT_M = 6;
@@ -42,8 +43,10 @@ export interface ParkView {
   writeFocusArea: (out: FocusArea) => void;
   /** Puts the animals of the state in their enclosures, e.g. after loading a save. */
   syncAnimals: (world: HerdWorld) => void;
+  syncVisitors: (world: VisitorWorld) => void;
   /** Updates the animals of the enclosures the events talk about. */
-  handleEvents: (events: readonly GameEvent[], world: HerdWorld) => void;
+  handleEvents: (events: readonly GameEvent[], world: HerdWorld & VisitorWorld) => void;
+  projectVisitor: (id: VisitorId, out: { x: number; y: number }) => boolean;
   dispose: () => void;
 }
 
@@ -51,6 +54,10 @@ export interface ParkView {
 export interface ViewFocus {
   readonly x: number;
   readonly z: number;
+}
+
+export interface ParkInteraction {
+  readonly onVisitorTap?: (id: VisitorId | null) => void;
 }
 
 function cameraLimits(grid: GridSize): CameraLimits {
@@ -91,6 +98,7 @@ export function createParkView(
   grid: GridSize,
   focus: ViewFocus,
   lookupSpecies: (id: SpeciesId) => SpeciesLook | undefined,
+  interaction: ParkInteraction = {},
 ): ParkView {
   const renderer = new WebGLRenderer({
     canvas,
@@ -109,13 +117,16 @@ export function createParkView(
   const rig = createCameraRig(cameraLimits(grid), startPose(focus));
   const viewport = { width: 1, height: 1 };
   const visibleCells: FocusArea = { minColumn: 0, minRow: 0, maxColumn: 0, maxRow: 0 };
-  const detachControls = attachCameraControls(canvas, rig, viewport);
 
   const herd = createAnimalHerd({
     parent: scene,
     grid,
     lookupSpecies,
     loadSource: loadSpeciesModel,
+  });
+  const crowd = createVisitorCrowd({ parent: scene, grid });
+  const detachControls = attachCameraControls(canvas, rig, viewport, (x, y) => {
+    interaction.onVisitorTap?.(crowd.pick(camera, x, y, viewport.width, viewport.height));
   });
 
   let level = initialLevel;
@@ -148,16 +159,25 @@ export function createParkView(
       writeFocusArea(rig.current, viewport.width / viewport.height, grid, visibleCells);
       herd.update(elapsedMs, viewport.height / rig.current.viewHeight, visibleCells);
       applyCameraPose(camera, rig.current, viewport.width / viewport.height);
+      crowd.update(elapsedMs);
       renderer.render(scene, camera);
     },
     writeFocusArea: (out) => {
       writeFocusArea(rig.current, viewport.width / viewport.height, grid, out);
     },
     syncAnimals: herd.syncAll,
-    handleEvents: herd.handleEvents,
+    syncVisitors: (world) => {
+      crowd.syncAll(world);
+    },
+    handleEvents: (events, world) => {
+      herd.handleEvents(events, world);
+      crowd.handleEvents(events, world);
+    },
+    projectVisitor: (id, out) => crowd.project(id, camera, viewport.width, viewport.height, out),
     dispose: () => {
       detachControls();
       herd.dispose();
+      crowd.dispose();
       disposeScene(scene);
       renderer.dispose();
     },

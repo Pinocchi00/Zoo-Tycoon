@@ -1,0 +1,44 @@
+{
+  "id": "couple",
+  "archetypeId": "couple",
+  "version": 1,
+  "memberCount": 2,
+  "persons": [
+    {
+      "index": 0,
+      "position": [0, 0, 0],
+      "height": 1.72,
+      "width": 1.0,
+      "headScale": 1.0,
+      "legRatio": 0.46,
+      "torsoRatio": 0.34,
+      "hair": "short",
+      "glasses": true,
+      "camera": false,
+      "tints": {
+        "skin": "fur_capybara_light",
+        "hair": "fur_tapir_dark",
+        "shirt": "fur_otter",
+        "pants": "fur_tapir_dark"
+      }
+    },
+    {
+      "index": 1,
+      "position": [0.6, 0, 0],
+      "height": 1.6,
+      "width": 0.9,
+      "headScale": 0.95,
+      "legRatio": 0.46,
+      "torsoRatio": 0.34,
+      "hair": "long",
+      "glasses": false,
+      "camera": true,
+      "tints": {
+        "skin": "fur_capybara_light",
+        "hair": "fur_capybara_dark",
+        "shirt": "otter_throat",
+        "pants": "fur_tapir_dark"
+      }
+    }
+  ]
+}

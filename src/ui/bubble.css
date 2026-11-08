@@ -1,0 +1,62 @@
+.visitor-thought-bubble-host {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 10;
+}
+
+.visitor-thought-bubble {
+  position: absolute;
+  min-width: 120px;
+  box-sizing: border-box;
+  max-width: min(280px, 100%);
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.95);
+  border-radius: 12px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  font-family:
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    Roboto,
+    sans-serif;
+  font-size: 14pt;
+  line-height: 1.4;
+  color: #333;
+  pointer-events: auto;
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  z-index: 10;
+}
+
+.visitor-thought-bubble__text {
+  margin: 0;
+  flex: 1;
+}
+
+.visitor-thought-bubble__close {
+  flex-shrink: 0;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: none;
+  background: #eee;
+  border-radius: 50%;
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  color: #555;
+  display: grid;
+  place-items: center;
+}
+
+.visitor-thought-bubble__close:hover {
+  background: #ddd;
+}
+
+.visitor-thought-bubble__close:focus-visible {
+  outline: 2px solid #555;
+  outline-offset: 2px;
+}

@@ -1,0 +1,44 @@
+{
+  "id": "retirees",
+  "archetypeId": "retirees",
+  "version": 1,
+  "memberCount": 2,
+  "persons": [
+    {
+      "index": 0,
+      "position": [0, 0, 0],
+      "height": 1.66,
+      "width": 1.0,
+      "headScale": 1.0,
+      "legRatio": 0.45,
+      "torsoRatio": 0.35,
+      "hair": "sunhat",
+      "glasses": true,
+      "camera": false,
+      "tints": {
+        "skin": "fur_capybara_light",
+        "hair": "fur_capybara_dark",
+        "shirt": "fur_jaguar_light",
+        "pants": "fur_tapir_dark"
+      }
+    },
+    {
+      "index": 1,
+      "position": [0.55, 0, 0],
+      "height": 1.58,
+      "width": 0.95,
+      "headScale": 0.96,
+      "legRatio": 0.45,
+      "torsoRatio": 0.35,
+      "hair": "short",
+      "glasses": true,
+      "camera": false,
+      "tints": {
+        "skin": "fur_capybara_light",
+        "hair": "fur_tapir_dark",
+        "shirt": "otter_throat",
+        "pants": "fur_tapir_dark"
+      }
+    }
+  ]
+}
