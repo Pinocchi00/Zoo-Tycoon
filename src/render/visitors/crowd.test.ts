@@ -13,6 +13,7 @@ import { ok, type Result } from '@/shared';
 import type { VisitorState } from '@/sim';
 import { createVisitorCrowd } from './crowd';
 import { createInstancedCrowd } from './instanced-crowd';
+import { MAX_SMOOTH_YAW_RAD_PER_SECOND, smoothTurnTowards } from './animation';
 import { prototype, source, unwrap, visitor } from './test-fixtures';
 import { isShadowCastingPiece, prepareVisitorSource } from './model-source';
 import type { VisitorCrowd, VisitorModelProblem, VisitorSource } from './types';
@@ -22,6 +23,14 @@ function camera(): OrthographicCamera {
   const view = new OrthographicCamera(-3, 3, 3, -3, 0.1, 100);
   view.position.set(0, 1, 10);
   view.lookAt(0, 1, 0);
+  view.updateMatrixWorld(true);
+  return view;
+}
+function topDownCamera(): OrthographicCamera {
+  const view = new OrthographicCamera(-5, 5, 5, -5, 0.1, 100);
+  view.position.set(0, 10, 0);
+  view.up.set(0, 0, -1);
+  view.lookAt(0, 0, 0);
   view.updateMatrixWorld(true);
   return view;
 }
@@ -38,6 +47,19 @@ function matrixOf(object: InstancedMesh, index = 0): Matrix4 {
   const matrix = new Matrix4();
   object.getMatrixAt(index, matrix);
   return matrix;
+}
+function yawOf(object: InstancedMesh): number {
+  const matrix = matrixOf(object);
+  return Math.atan2(-matrix.elements[2], matrix.elements[0]);
+}
+function screenPosition(
+  crowd: VisitorCrowd,
+  id: VisitorState['id'],
+  view: OrthographicCamera,
+): { x: number; y: number } {
+  const out = { x: 0, y: 0 };
+  if (!crowd.project(id, view, 1000, 1000, out)) throw new Error('Visitor projection failed.');
+  return out;
 }
 async function loaded(
   list: VisitorState[],
@@ -76,6 +98,186 @@ async function loaded(
 }
 
 describe('instanced visitor runtime', () => {
+  it.each([1, 5, 20])(
+    'assigns separate deterministic stopping places to %i visitors',
+    async (count) => {
+      const list = Array.from({ length: count }, (_, index) => {
+        const item = visitor(index + 1, 'teen-photographer', 1);
+        item.activity = 'viewing';
+        return item;
+      });
+      const { crowd, parent } = await loaded(list);
+      crowd.update(5000);
+      const view = topDownCamera();
+      const positions = list.map((item) => screenPosition(crowd, item.id, view));
+      for (let first = 0; first < positions.length; first += 1) {
+        for (let second = first + 1; second < positions.length; second += 1) {
+          const a = positions[first];
+          const b = positions[second];
+          if (a === undefined || b === undefined) throw new Error('Missing visitor position.');
+          expect(Math.hypot(a.x - b.x, a.y - b.y)).toBeGreaterThanOrEqual(50 - 1e-4);
+        }
+      }
+      expect(crowd.stats().groups).toBe(count);
+      expect(parent.children.length).toBeGreaterThan(0);
+      crowd.dispose();
+    },
+  );
+  it('assigns places deterministically and keeps existing places when groups join or leave', async () => {
+    async function positionsFor(
+      order: readonly number[],
+    ): Promise<Map<number, { x: number; y: number }>> {
+      const list = order.map((number) => {
+        const item = visitor(number, 'teen-photographer', 1);
+        item.activity = 'viewing';
+        return item;
+      });
+      const { crowd } = await loaded(list);
+      crowd.update(5000);
+      const view = topDownCamera();
+      const positions = new Map<number, { x: number; y: number }>();
+      list.forEach((item) =>
+        positions.set(Number(item.id.slice(-1)), screenPosition(crowd, item.id, view)),
+      );
+      crowd.dispose();
+      return positions;
+    }
+    const forward = await positionsFor([1, 2]);
+    const reversed = await positionsFor([2, 1]);
+    expect(forward.get(1)).toEqual(reversed.get(1));
+    expect(forward.get(2)).toEqual(reversed.get(2));
+
+    const first = visitor(1, 'teen-photographer', 1);
+    const second = visitor(2, 'teen-photographer', 1);
+    first.activity = 'viewing';
+    second.activity = 'viewing';
+    const { crowd, world } = await loaded([first, second]);
+    crowd.update(5000);
+    const view = topDownCamera();
+    const firstPlace = screenPosition(crowd, first.id, view);
+    const secondPlace = screenPosition(crowd, second.id, view);
+    const newcomer = visitor(3, 'teen-photographer', 1);
+    newcomer.activity = 'viewing';
+    world.visitors.list.push(newcomer);
+    crowd.syncAll(world);
+    crowd.update(0);
+    expect(screenPosition(crowd, first.id, view)).toEqual(firstPlace);
+    expect(screenPosition(crowd, second.id, view)).toEqual(secondPlace);
+
+    world.visitors.list.splice(1, 2);
+    crowd.syncAll(world);
+    crowd.update(0);
+    expect(screenPosition(crowd, first.id, view)).toEqual(firstPlace);
+    const replacement = visitor(4, 'teen-photographer', 1);
+    replacement.activity = 'viewing';
+    world.visitors.list.splice(1, 0, replacement);
+    crowd.syncAll(world);
+    crowd.update(5000);
+    const reusedPlace = screenPosition(crowd, replacement.id, view);
+    expect(reusedPlace.x).toBeCloseTo(secondPlace.x, 5);
+    expect(reusedPlace.y).toBeCloseTo(secondPlace.y, 5);
+    crowd.dispose();
+  });
+  it('eases into and out of a stopping place without a position jump', async () => {
+    const anchor = visitor(1, 'teen-photographer', 1);
+    const item = visitor(2, 'teen-photographer', 1);
+    anchor.activity = 'viewing';
+    item.activity = 'viewing';
+    const { crowd, world } = await loaded([anchor]);
+    world.visitors.list.push(item);
+    crowd.syncAll(world);
+    const view = topDownCamera();
+    const beforeArrival = screenPosition(crowd, item.id, view);
+    crowd.update(50);
+    const arriving = screenPosition(crowd, item.id, view);
+    expect(Math.hypot(arriving.x - beforeArrival.x, arriving.y - beforeArrival.y)).toBeLessThan(20);
+    crowd.update(5000);
+    const stopped = screenPosition(crowd, item.id, view);
+
+    item.activity = 'walking';
+    item.nextColumn = 2;
+    item.updatedAtMs = 100;
+    crowd.handleEvents([], world);
+    crowd.update(50);
+    const departing = screenPosition(crowd, item.id, view);
+    expect(Math.hypot(departing.x - stopped.x, departing.y - stopped.y)).toBeLessThan(20);
+    crowd.dispose();
+  });
+  it('keeps walking pauses below the stop threshold and resets the dwell on movement', async () => {
+    const fixture = prototype('teen-photographer', 1);
+    for (const clip of fixture.clips) {
+      const value = clip.name === 'walk' ? 0 : clip.name === 'stop' ? 0.6 : 0.2;
+      clip.tracks.push(new NumberKeyframeTrack('p0_arm_pivot.rotation[x]', [0, 1], [value, value]));
+    }
+    const model = unwrap(prepareVisitorSource('teen-photographer', fixture.root, fixture.clips));
+    const item = visitor(1, 'teen-photographer', 1);
+    item.nextColumn = 2;
+    const { crowd, parent, world } = await loaded([item], [model]);
+    const arm = mesh(parent, 'teen-photographer:p0_arm');
+
+    for (let step = 1; step <= 4; step += 1) {
+      item.progressMm = step * 100;
+      item.updatedAtMs = step * 100;
+      crowd.handleEvents([], world);
+      crowd.update(100);
+    }
+    const walkingPose = matrixOf(arm).elements;
+    item.updatedAtMs = 500;
+    crowd.handleEvents([], world);
+    crowd.update(100);
+    expect(matrixOf(arm).elements).toEqual(walkingPose);
+
+    crowd.update(201);
+    crowd.update(149);
+    const stoppedPose = matrixOf(arm).elements;
+    expect(stoppedPose).not.toEqual(walkingPose);
+
+    for (let step = 5; step <= 8; step += 1) {
+      item.progressMm = step * 100;
+      item.updatedAtMs = step * 100;
+      crowd.handleEvents([], world);
+      crowd.update(100);
+    }
+    const resumedWalkingPose = matrixOf(arm).elements;
+    item.updatedAtMs = 900;
+    crowd.handleEvents([], world);
+    crowd.update(100);
+    expect(matrixOf(arm).elements).toEqual(resumedWalkingPose);
+    crowd.dispose();
+  });
+  it('smooths crowd orientation and initializes a walking visitor facing its route', async () => {
+    const item = visitor(1, 'teen-photographer', 1);
+    item.nextRow = 2;
+    const { crowd, parent, world } = await loaded([item]);
+    const arm = mesh(parent, 'teen-photographer:p0_arm');
+    expect(yawOf(arm)).toBeCloseTo(0);
+
+    item.nextColumn = 2;
+    item.nextRow = 1;
+    item.updatedAtMs = 100;
+    crowd.handleEvents([], world);
+    crowd.update(100);
+    const turned = yawOf(arm);
+    expect(turned).toBeGreaterThan(0);
+    expect(turned).toBeLessThan(Math.PI / 2);
+    expect(turned).toBeLessThanOrEqual((MAX_SMOOTH_YAW_RAD_PER_SECOND * 100) / 1000);
+    crowd.dispose();
+
+    const facing = visitor(2, 'teen-photographer', 1);
+    facing.nextColumn = 2;
+    const appearing = await loaded([facing]);
+    expect(yawOf(mesh(appearing.parent, 'teen-photographer:p0_arm'))).toBeCloseTo(Math.PI / 2);
+    appearing.crowd.dispose();
+  });
+  it('smoothly turns from positive 170 degrees to negative 170 by the short path', () => {
+    const start = (170 * Math.PI) / 180;
+    const target = (-170 * Math.PI) / 180;
+    const result = smoothTurnTowards(start, target, 100);
+    const signedTurn = Math.atan2(Math.sin(result - start), Math.cos(result - start));
+    expect(signedTurn).toBeGreaterThan(0);
+    expect(signedTurn).toBeLessThan((20 * Math.PI) / 180);
+    expect(signedTurn).toBeLessThanOrEqual((MAX_SMOOTH_YAW_RAD_PER_SECOND * 100) / 1000);
+  });
   it.each([
     ['p0_body_mesh', true],
     ['p3_head_mesh', true],

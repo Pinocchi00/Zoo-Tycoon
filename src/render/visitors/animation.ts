@@ -8,6 +8,10 @@ export const WALK_CYCLE_DISTANCE_M = 0.45;
 export const MIN_WALK_STOP_MS = 300;
 /** Limits turns to one full revolution per second, avoiding instantaneous corner snaps. */
 export const MAX_YAW_RAD_PER_SECOND = Math.PI * 2;
+/** Smooths visitor turns over a quarter second while keeping them responsive. */
+export const YAW_TIME_CONSTANT_S = 0.25;
+/** Keeps crowded-visitor turns gentle even when the target direction changes sharply. */
+export const MAX_SMOOTH_YAW_RAD_PER_SECOND = Math.PI;
 const positionA = new Vector3();
 const positionB = new Vector3();
 const quaternionA = new Quaternion();
@@ -31,6 +35,16 @@ export function turnTowards(current: number, target: number, elapsedMs: number):
   const maxRadians = (MAX_YAW_RAD_PER_SECOND * Math.max(0, elapsedMs)) / 1000;
   const change = Math.max(-maxRadians, Math.min(maxRadians, difference));
   return current + change;
+}
+
+/** Exponentially smooths orientation along the shortest path with a bounded turn speed. */
+export function smoothTurnTowards(current: number, target: number, elapsedMs: number): number {
+  const elapsedS = Math.max(0, elapsedMs) / 1000;
+  const difference = Math.atan2(Math.sin(target - current), Math.cos(target - current));
+  const smoothing = 1 - Math.exp(-elapsedS / YAW_TIME_CONSTANT_S);
+  const requestedChange = difference * smoothing;
+  const maxChange = MAX_SMOOTH_YAW_RAD_PER_SECOND * elapsedS;
+  return current + Math.max(-maxChange, Math.min(maxChange, requestedChange));
 }
 
 export function sampleNodeLocal(

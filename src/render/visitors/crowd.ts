@@ -14,7 +14,8 @@ import { randomFloat, type RngState } from '@/sim/rng';
 import {
   advanceWalkPhase,
   computeBlendedPoseMatrices,
-  turnTowards,
+  MIN_WALK_STOP_MS,
+  smoothTurnTowards,
   walkingClipForStationaryTime,
 } from './animation';
 import { createInstancedCrowd, type GroupRenderData } from './instanced-crowd';
@@ -34,6 +35,15 @@ const STEP_MS = 100;
 const CROSS_FADE_S = 0.35;
 const VIEW_CLIP_DURATION_S = 4;
 const MOVEMENT_EPSILON_M = 0.0001;
+/** Half a metre matches the approximate shoulder width of the visitor models. */
+const STOPPING_PLACE_SPACING_M = 0.5;
+/** Softens arrival at and departure from a reserved stopping place. */
+const STOPPING_PLACE_TIME_CONSTANT_S = 0.25;
+const STOPPING_PLACE_SLOTS_PER_RING = 8;
+const STAGGERED_RING_PHASE = 0.5;
+const TWO_PI = Math.PI * 2;
+const compareVisitorIds = (left: GroupState, right: GroupState): number =>
+  left.id < right.id ? -1 : left.id > right.id ? 1 : 0;
 const MODEL_URLS = import.meta.glob<string>('../../../assets/models/visitors/*.glb', {
   query: '?url',
   import: 'default',
@@ -62,6 +72,12 @@ interface GroupState {
   targetZ: number;
   yaw: number;
   targetYaw: number;
+  parkedCell: number | null;
+  parkedSlot: number;
+  stoppingOffsetX: number;
+  stoppingOffsetZ: number;
+  targetStoppingOffsetX: number;
+  targetStoppingOffsetZ: number;
   stationaryMs: number;
   hasMoved: boolean;
   previousPhaseX: number;
@@ -85,6 +101,8 @@ export function createVisitorCrowd(options: VisitorCrowdOptions): VisitorCrowd {
   const attempted = new Set<string>();
   const states = new Map<VisitorId, GroupState>();
   const activeStates: GroupState[] = [];
+  const parkingCandidates: GroupState[] = [];
+  const stoppingPlace = { x: 0, z: 0 };
   const material = new MeshStandardMaterial({ color: 0xffffff });
   const crowd = createInstancedCrowd(parent, material, options.quality);
   const pose: Matrix4[] = [];
@@ -101,6 +119,7 @@ export function createVisitorCrowd(options: VisitorCrowdOptions): VisitorCrowd {
   let world: VisitorWorld | null = null;
   let disposed = false;
   let layout: GroupRenderData[] = [];
+  let parkingNeedsReconcile = false;
 
   function adoptPalette(source: VisitorSource): void {
     if (palette === null && source.paletteTexture !== null) {
@@ -154,6 +173,10 @@ export function createVisitorCrowd(options: VisitorCrowdOptions): VisitorCrowd {
   function createState(visitor: VisitorState, x: number, z: number): GroupState {
     const rng = visualRng(visitor.id);
     const phase = randomFloat(rng);
+    const initialYaw =
+      visitor.activity === 'walking'
+        ? Math.atan2(visitor.nextColumn - visitor.column, visitor.nextRow - visitor.row)
+        : 0;
     const state: GroupState = {
       id: visitor.id,
       rng,
@@ -167,8 +190,14 @@ export function createVisitorCrowd(options: VisitorCrowdOptions): VisitorCrowd {
       fromZ: z,
       targetX: x,
       targetZ: z,
-      yaw: 0,
-      targetYaw: 0,
+      yaw: initialYaw,
+      targetYaw: initialYaw,
+      parkedCell: null,
+      parkedSlot: -1,
+      stoppingOffsetX: 0,
+      stoppingOffsetZ: 0,
+      targetStoppingOffsetX: 0,
+      targetStoppingOffsetZ: 0,
       stationaryMs: 0,
       hasMoved: false,
       previousPhaseX: x,
@@ -187,6 +216,111 @@ export function createVisitorCrowd(options: VisitorCrowdOptions): VisitorCrowd {
     states.set(visitor.id, state);
     activeStates.push(state);
     return state;
+  }
+  function shouldHaveStoppingPlace(state: GroupState): boolean {
+    return (
+      state.visitor.activity !== 'walking' ||
+      (state.hasMoved
+        ? state.stationaryMs >= MIN_WALK_STOP_MS
+        : state.visitor.nextColumn === state.visitor.column &&
+          state.visitor.nextRow === state.visitor.row)
+    );
+  }
+  function reconcileStoppingPlaces(): void {
+    parkingCandidates.length = 0;
+    let index = 0;
+    while (index < activeStates.length) {
+      const state = activeStates[index];
+      index += 1;
+      if (state === undefined) continue;
+      const cell = state.visitor.row * grid.columns + state.visitor.column;
+      if (
+        !shouldHaveStoppingPlace(state) ||
+        (state.parkedCell !== null && state.parkedCell !== cell)
+      ) {
+        state.parkedCell = null;
+        state.parkedSlot = -1;
+        state.targetStoppingOffsetX = 0;
+        state.targetStoppingOffsetZ = 0;
+      }
+      if (shouldHaveStoppingPlace(state) && state.parkedCell === null)
+        parkingCandidates.push(state);
+    }
+    let first = 0;
+    while (first < parkingCandidates.length) {
+      let smallest = first;
+      let candidate = first + 1;
+      while (candidate < parkingCandidates.length) {
+        const current = parkingCandidates[candidate];
+        const selected = parkingCandidates[smallest];
+        if (
+          current !== undefined &&
+          selected !== undefined &&
+          compareVisitorIds(current, selected) < 0
+        )
+          smallest = candidate;
+        candidate += 1;
+      }
+      const current = parkingCandidates[first];
+      const selected = parkingCandidates[smallest];
+      if (current !== undefined && selected !== undefined) {
+        parkingCandidates[first] = selected;
+        parkingCandidates[smallest] = current;
+      }
+      first += 1;
+    }
+    index = 0;
+    while (index < parkingCandidates.length) {
+      const state = parkingCandidates[index];
+      index += 1;
+      if (state === undefined) continue;
+      const cell = state.visitor.row * grid.columns + state.visitor.column;
+      let slot = 0;
+      let foundPlace = false;
+      while (!foundPlace) {
+        let occupied = false;
+        setStoppingPlaceOffset(slot, stoppingPlace);
+        const candidateX = cellCenterX(grid, state.visitor.column) + stoppingPlace.x;
+        const candidateZ = cellCenterZ(grid, state.visitor.row) + stoppingPlace.z;
+        let activeIndex = 0;
+        while (activeIndex < activeStates.length) {
+          const other = activeStates[activeIndex];
+          activeIndex += 1;
+          if (other === undefined || other === state || other.parkedCell !== cell) continue;
+          if (other.parkedSlot === slot) {
+            occupied = true;
+            slot += 1;
+            break;
+          }
+          const otherX = other.targetX + other.visualOffset.x + other.targetStoppingOffsetX;
+          const otherZ = other.targetZ + other.visualOffset.z + other.targetStoppingOffsetZ;
+          if (Math.hypot(candidateX - otherX, candidateZ - otherZ) < STOPPING_PLACE_SPACING_M) {
+            occupied = true;
+            slot += 1;
+            break;
+          }
+        }
+        foundPlace = !occupied;
+      }
+      setStoppingPlaceOffset(slot, stoppingPlace);
+      state.parkedCell = cell;
+      state.parkedSlot = slot;
+      state.targetStoppingOffsetX =
+        slot === 0
+          ? 0
+          : cellCenterX(grid, state.visitor.column) +
+            stoppingPlace.x -
+            state.targetX -
+            state.visualOffset.x;
+      state.targetStoppingOffsetZ =
+        slot === 0
+          ? 0
+          : cellCenterZ(grid, state.visitor.row) +
+            stoppingPlace.z -
+            state.targetZ -
+            state.visualOffset.z;
+    }
+    parkingNeedsReconcile = false;
   }
   function synchronize(nextWorld: VisitorWorld): void {
     if (disposed) return;
@@ -207,6 +341,8 @@ export function createVisitorCrowd(options: VisitorCrowdOptions): VisitorCrowd {
         cellCenterX(grid, visitor.column) + (visitor.nextColumn - visitor.column) * progress;
       const z = cellCenterZ(grid, visitor.row) + (visitor.nextRow - visitor.row) * progress;
       const state = states.get(visitor.id) ?? createState(visitor, x, z);
+      if (state.activity === 'walking' && visitor.activity !== 'walking')
+        state.targetYaw = state.yaw;
       if (state.activity !== visitor.activity && visitor.activity === 'walking')
         state.stationaryMs = 0;
       while (state.memberPhases.length < visitor.groupSize) {
@@ -244,6 +380,12 @@ export function createVisitorCrowd(options: VisitorCrowdOptions): VisitorCrowd {
       }
       rebuild();
     }
+    if (parkingCandidates.length < activeStates.length) {
+      parkingCandidates.length = activeStates.length;
+      parkingCandidates.length = 0;
+    }
+    parkingNeedsReconcile = true;
+    reconcileStoppingPlaces();
   }
   function targetClip(state: GroupState, elapsedS: number): VisitorClip {
     switch (state.visitor.activity) {
@@ -264,6 +406,10 @@ export function createVisitorCrowd(options: VisitorCrowdOptions): VisitorCrowd {
   }
   function advanceGroup(state: GroupState, elapsedMs: number): void {
     const elapsedS = elapsedMs / MS_PER_SECOND;
+    const wasStoppedWalking =
+      state.visitor.activity === 'walking' &&
+      state.hasMoved &&
+      state.stationaryMs >= MIN_WALK_STOP_MS;
     state.interpolationMs = Math.min(
       state.interpolationDurationMs,
       state.interpolationMs + elapsedMs,
@@ -281,7 +427,15 @@ export function createVisitorCrowd(options: VisitorCrowdOptions): VisitorCrowd {
       state.hasMoved = true;
       state.stationaryMs = 0;
     } else state.stationaryMs += elapsedMs;
-    state.yaw = turnTowards(state.yaw, state.targetYaw, elapsedMs);
+    const isStoppedWalking =
+      state.visitor.activity === 'walking' &&
+      state.hasMoved &&
+      state.stationaryMs >= MIN_WALK_STOP_MS;
+    if (wasStoppedWalking !== isStoppedWalking) parkingNeedsReconcile = true;
+    const stoppingBlend = 1 - Math.exp(-elapsedS / STOPPING_PLACE_TIME_CONSTANT_S);
+    state.stoppingOffsetX += (state.targetStoppingOffsetX - state.stoppingOffsetX) * stoppingBlend;
+    state.stoppingOffsetZ += (state.targetStoppingOffsetZ - state.stoppingOffsetZ) * stoppingBlend;
+    state.yaw = smoothTurnTowards(state.yaw, state.targetYaw, elapsedMs);
     const target = targetClip(state, elapsedS);
     if (target !== state.nextClip) {
       if (target === state.currentClip) {
@@ -327,6 +481,7 @@ export function createVisitorCrowd(options: VisitorCrowdOptions): VisitorCrowd {
       stateIndex += 1;
       if (state !== undefined) advanceGroup(state, elapsedMs);
     }
+    if (parkingNeedsReconcile) reconcileStoppingPlaces();
     let previousState: GroupState | undefined;
     let slotIndex = 0;
     while (slotIndex < crowd.slots.length) {
@@ -346,7 +501,11 @@ export function createVisitorCrowd(options: VisitorCrowdOptions): VisitorCrowd {
           pose,
           state.memberPhases,
         );
-        position.set(state.x + state.visualOffset.x, 0, state.z + state.visualOffset.z);
+        position.set(
+          state.x + state.visualOffset.x + state.stoppingOffsetX,
+          0,
+          state.z + state.visualOffset.z + state.stoppingOffsetZ,
+        );
         rotation.setFromAxisAngle(up, state.yaw);
         scale.set(slot.width, slot.height, slot.width);
         groupMatrix.compose(position, rotation, scale);
@@ -391,7 +550,11 @@ export function createVisitorCrowd(options: VisitorCrowdOptions): VisitorCrowd {
       parent.updateWorldMatrix(true, false);
       camera.updateWorldMatrix(true, false);
       projected
-        .set(state.x + state.visualOffset.x, 1.5, state.z + state.visualOffset.z)
+        .set(
+          state.x + state.visualOffset.x + state.stoppingOffsetX,
+          1.5,
+          state.z + state.visualOffset.z + state.stoppingOffsetZ,
+        )
         .applyMatrix4(parent.matrixWorld)
         .project(camera);
       if (
@@ -436,4 +599,24 @@ function advancePhase(
   if (clip === 'walk') return advanceWalkPhase(phase, distanceMoved);
   const next = phase + elapsedS / source.bakedClips[clip].duration;
   return clip === 'sit' ? Math.min(1, next) : next % 1;
+}
+
+function setStoppingPlaceOffset(slot: number, out: { x: number; z: number }): void {
+  if (slot === 0) {
+    out.x = 0;
+    out.z = 0;
+    return;
+  }
+  let ring = 1;
+  let remaining = slot - 1;
+  while (remaining >= ring * STOPPING_PLACE_SLOTS_PER_RING) {
+    remaining -= ring * STOPPING_PLACE_SLOTS_PER_RING;
+    ring += 1;
+  }
+  const slotsInRing = ring * STOPPING_PLACE_SLOTS_PER_RING;
+  const radius = (STOPPING_PLACE_SPACING_M * ring) / (2 * Math.sin(Math.PI / slotsInRing));
+  const angularOffset = ring % 2 === 0 ? STAGGERED_RING_PHASE : 0;
+  const angle = ((remaining + angularOffset) * TWO_PI) / slotsInRing;
+  out.x = Math.sin(angle) * radius;
+  out.z = Math.cos(angle) * radius;
 }
