@@ -64,7 +64,12 @@ export function advanceAngularSpring(state: AngularSpringState, elapsedMs: numbe
   }
 
   const target = state.yaw + difference;
-  const omega = 2 / YAW_SMOOTH_TIME_S;
+  // Stronger damping preserves incoming velocity while braking before a close target.
+  // With omega >= velocity / difference, the analytical error cannot cross zero.
+  const omega = Math.max(
+    2 / YAW_SMOOTH_TIME_S,
+    difference === 0 ? 0 : state.yawVelocity / difference,
+  );
   const error = state.yaw - target;
   const springTerm = state.yawVelocity + omega * error;
   const decay = Math.exp(-omega * elapsedS);
@@ -82,11 +87,6 @@ export function advanceAngularSpring(state: AngularSpringState, elapsedMs: numbe
       -MAX_SMOOTH_YAW_RAD_PER_SECOND,
       Math.min(MAX_SMOOTH_YAW_RAD_PER_SECOND, requestedVelocity),
     );
-  }
-
-  if ((difference > 0 && state.yaw >= target) || (difference < 0 && state.yaw <= target)) {
-    state.yaw = target;
-    state.yawVelocity = 0;
   }
 }
 
