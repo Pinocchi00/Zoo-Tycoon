@@ -20,6 +20,7 @@ from palette import build_material, load_palette  # noqa: E402
 from verify import (  # noqa: E402
     CHILD_FOOT_MAX_SIDE_OFFSET_RATIO,
     CHILD_FOOT_MIN_SIDE_OFFSET,
+    SUNHAT_DIAMETER_MAX_TO_HEAD_WIDTH,
     verify_child_eye_clearance,
     verify_child_foot_lateral_offset,
     verify_source_junctions,
@@ -27,6 +28,7 @@ from verify import (  # noqa: E402
 
 EPSILON = 0.0001
 GUARD_PERTURBATION = 0.01
+SUNHAT_MIN_VISIBLE_BRIM_DIAMETER_TO_HEAD_WIDTH = 1.05
 
 
 def _assert(condition, message):
@@ -210,8 +212,16 @@ def _test_rest(description, root):
         if person.get("hair") == "sunhat":
             brim = bpy.data.objects[f"p{idx}_hat_brim_mesh"]
             head = bpy.data.objects[f"p{idx}_head_mesh"]
-            _assert(_bounds(brim)[1].x - _bounds(brim)[0].x >
-                     1.5 * (_bounds(head)[1].x - _bounds(head)[0].x), "hat has no visible brim")
+            brim_width = _bounds(brim)[1].x - _bounds(brim)[0].x
+            head_width = _bounds(head)[1].x - _bounds(head)[0].x
+            _assert(
+                brim_width > SUNHAT_MIN_VISIBLE_BRIM_DIAMETER_TO_HEAD_WIDTH * head_width,
+                "hat has no visible brim",
+            )
+            _assert(
+                brim_width <= SUNHAT_DIAMETER_MAX_TO_HEAD_WIDTH * head_width,
+                "hat brim is too wide",
+            )
             crown = bpy.data.objects[f"p{idx}_hair_mesh"]
             _assert(brim["zooTint"] == crown["zooTint"] == "none", "hat changes colour with the hair")
             _assert(len({round(vertex.co.z, 6) for vertex in brim.data.vertices}) == 2,
