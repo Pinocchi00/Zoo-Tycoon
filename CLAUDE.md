@@ -77,7 +77,7 @@ Ces règles viennent des erreurs déjà commises. Elles s'appliquent à chaque t
 
 - Au plus **5** lancements OpenCode en même temps, uniquement sur des morceaux **indépendants** : aucun fichier commun, aucun morceau qui attend le résultat d'un autre.
 - Un worktree et une branche par lancement : `git worktree add .claude/worktrees/<tâche>-<morceau> -b <type>/<tâche>-<morceau> <branche de base>`. Le chef ne modifie jamais les fichiers d'un autre worktree (un hook l'interdit) ; c'est OpenCode qui y écrit.
-- La consigne est écrite dans le worktree du chef (`docs/briefs/opencode/`) et passée par chemin absolu. Elle liste les fichiers autorisés : tout fichier modifié hors de cette liste est un refus.
+- La consigne est écrite dans le worktree du chef (`docs/briefs/opencode/`) et passée par chemin absolu avec `-f`. Toute autre consigne qu'elle cite est **jointe aussi** (`-f a.md -f b.md`) et désignée comme « jointe » : OpenCode refuse, à raison, de lire hors de son worktree. Elle liste les fichiers autorisés : tout fichier modifié hors de cette liste est un refus.
 - Commande seule sur sa ligne, en arrière-plan, message avant `-f`. Noter pour chaque lancement : worktree, branche, commit de départ, modèle, consigne.
 - Le chef intègre lui-même les branches des morceaux dans la branche de la tâche (`git merge --no-ff`), dans l'ordre du contrat, puis fait vérifier l'ensemble.
 
