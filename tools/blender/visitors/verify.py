@@ -15,7 +15,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from build import build_group, merge_compatible_parts, validate_glb
 from palette import build_material, load_palette
 from parts import game_to_blender
-from human import _derive_proportions, shoulder_leg_points, shoulder_seat_height, SEATED_LEG_FORWARD_RATIO, STROLLER_HANDLE_FORWARD, STROLLER_HANDLE_HEIGHT_RATIO
+from human import _derive_proportions, shoulder_leg_points, shoulder_seat_height, SEATED_LEG_FORWARD_RATIO, STROLLER_HANDLE_FORWARD, STROLLER_HANDLE_HEIGHT_RATIO, SUNHAT_BRIM_CENTER_HEIGHT_RATIO, SUNHAT_BRIM_DIAMETER_TO_HEAD_WIDTH, SUNHAT_BRIM_HALF_THICKNESS_RATIO, SUNHAT_CROWN_TOP_RATIO
 
 FLOOR_TOLERANCE = 0.004
 ARM_TOLERANCE = 0.003
@@ -25,6 +25,9 @@ CONTACT_TOLERANCE = 0.003
 CHILD_FOOT_MIN_SIDE_OFFSET = 0.08
 CHILD_FOOT_MAX_SIDE_OFFSET_RATIO = 1.3
 EYE_OCCLUSION_TOLERANCE = 0.003
+SUNHAT_DIAMETER_MAX_TO_HEAD_WIDTH = 1.25
+SUNHAT_DIAMETER_TOLERANCE = 0.01
+SUNHAT_SEATING_TOLERANCE = 0.003
 
 
 def select_clip(group, name, rest):
@@ -326,6 +329,42 @@ def verify_child_eye_clearance(description, meshes, clip):
                     ), f"child covers parent eyes during {clip}: {tuple(point)}"
 
 
+def verify_sunhat_fit(description, meshes):
+    for person in description["persons"]:
+        if person.get("hair") != "sunhat":
+            continue
+        prefix = f"p{person['index']}_"
+        head = bpy.data.objects[prefix + "head"]
+        head_radius = head["zooHeadRadius"]
+        head_width_radius = head_radius * 1.04
+        inverse = head.matrix_world.inverted()
+        face = next(
+            obj for obj in meshes
+            if obj.parent == head and obj["zooPerson"] == person["index"] and obj["zooTint"] == "none"
+        )
+        points = [inverse @ face.matrix_world @ vertex.co for vertex in face.data.vertices]
+        brim_outer = [point for point in points if math.hypot(point.x, point.y) > head_width_radius * 1.1]
+        assert brim_outer, f"missing sunhat brim for {prefix}"
+        brim_radius = max(math.hypot(point.x, point.y) for point in brim_outer)
+        diameter_ratio = brim_radius / head_width_radius
+        assert diameter_ratio <= SUNHAT_DIAMETER_MAX_TO_HEAD_WIDTH, (
+            f"sunhat brim exceeds head width for {prefix}: {diameter_ratio:.3f}"
+        )
+        assert abs(diameter_ratio - SUNHAT_BRIM_DIAMETER_TO_HEAD_WIDTH) <= SUNHAT_DIAMETER_TOLERANCE, (
+            f"sunhat brim diameter ratio changed for {prefix}: {diameter_ratio:.3f}"
+        )
+        center_height = head_radius * SUNHAT_BRIM_CENTER_HEIGHT_RATIO
+        half_thickness = head_radius * SUNHAT_BRIM_HALF_THICKNESS_RATIO
+        assert all(
+            abs(point.z - center_height) <= half_thickness + SUNHAT_SEATING_TOLERANCE
+            for point in brim_outer
+        ), f"sunhat brim is not flat and regularly thick for {prefix}"
+        crown_top = max(point.z for point in points)
+        assert abs(crown_top - head_radius * SUNHAT_CROWN_TOP_RATIO) <= SUNHAT_SEATING_TOLERANCE, (
+            f"sunhat crown does not stay seated on its head for {prefix}"
+        )
+
+
 def test_shoulder_guard(description, meshes, clip, proportions):
     if description["archetypeId"] != "shoulder-ride":
         return
@@ -566,6 +605,7 @@ def verify(description, exported=False):
         assert face_uvs == expected, "facial bucket lost the eyes, white catchlights or mouth"
         skin = bpy.data.objects[f"p{person['index']}_head_mesh"]
         assert all((loop.uv - Vector(palette.uv("eye_shine"))).length < 0.0001 for loop in skin.data.uv_layers.active.data), "facial details remain in the skin bucket"
+    verify_sunhat_fit(description, meshes)
     standing = [person for person in description["persons"] if person.get("posture", "standing") == "standing"]
     proportions = prepare_proportions(description)
     junctions = prepare_junctions(description, meshes)

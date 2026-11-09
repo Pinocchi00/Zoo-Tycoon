@@ -29,6 +29,12 @@ HAIR_SEGMENTS = 24
 HAIR_RINGS = 5
 SEAT_HAIR_OVERLAP = 0.012
 SEATED_LEG_FORWARD_RATIO = 0.4
+SUNHAT_BRIM_DIAMETER_TO_HEAD_WIDTH = 1.15
+SUNHAT_BRIM_CENTER_HEIGHT_RATIO = 0.55
+SUNHAT_BRIM_HALF_THICKNESS_RATIO = 0.055
+SUNHAT_CROWN_TOP_RATIO = 1.13
+SUNHAT_CROWN_BASE_HEIGHT_RATIO = 0.55
+SUNHAT_CROWN_RADIUS_RATIO = 1.05
 
 
 def shoulder_seat_height(parent, child):
@@ -293,7 +299,7 @@ def _hat_crown(prefix, radius, person, palette, material):
     obj = _blob(f"{prefix}hair", [0, 0, 0], [1, 1, 1],
                 "fur_jaguar_light", person, "none", palette, material)
     uv = obj.data.uv_layers.active.data[0].uv.copy()
-    vertices = [game_to_blender([0, radius * 1.13, 0])]
+    vertices = [game_to_blender([0, radius * SUNHAT_CROWN_TOP_RATIO, 0])]
     faces = []
     previous_start, previous_count = 0, 1
     for ring, count in enumerate((8, 16, 24, 24), start=1):
@@ -301,9 +307,9 @@ def _hat_crown(prefix, radius, person, palette, material):
         start = len(vertices)
         for segment in range(count):
             longitude = 2 * math.pi * segment / count
-            vertices.append(game_to_blender([radius * 1.05 * math.sin(latitude) * math.cos(longitude),
-                                            radius * (0.55 + 0.58 * math.cos(latitude)),
-                                            radius * 1.05 * math.sin(latitude) * math.sin(longitude)]))
+            vertices.append(game_to_blender([radius * SUNHAT_CROWN_RADIUS_RATIO * math.sin(latitude) * math.cos(longitude),
+                                            radius * (SUNHAT_CROWN_BASE_HEIGHT_RATIO + 0.58 * math.cos(latitude)),
+                                            radius * SUNHAT_CROWN_RADIUS_RATIO * math.sin(latitude) * math.sin(longitude)]))
         _join_rings(faces, previous_start, previous_count, start, count)
         previous_start, previous_count = start, count
     faces.append(tuple(range(start, start + count)))
@@ -410,17 +416,20 @@ def build_person(index, params, palette, material, parent_object):
                         vertex.co.z = center.z + (vertex.co.z - center.z) * 1.35
                 detail.parent = head
         if hair_style == "sunhat":
+            brim_radius = (
+                p["head_r"] * 1.04 * SUNHAT_BRIM_DIAMETER_TO_HEAD_WIDTH
+            )
             brim = _blob(
-                f"{prefix}hat_brim", [0.0, p["head_r"] * 0.55, 0.0],
-                [p["head_r"] * 1.7, p["head_r"] * 0.055, p["head_r"] * 1.7],
+                f"{prefix}hat_brim", [0.0, p["head_r"] * SUNHAT_BRIM_CENTER_HEIGHT_RATIO, 0.0],
+                [brim_radius, p["head_r"] * SUNHAT_BRIM_HALF_THICKNESS_RATIO, brim_radius],
                 "fur_jaguar_light", index, "none", palette, material, segments=32, rings=4,
             )
             uv = brim.data.uv_layers.active.data[0].uv.copy()
             vertices, faces = [], []
-            for height in (-0.055, 0.055):
-                vertices.extend(game_to_blender([p["head_r"] * 1.7 * math.cos(2 * math.pi * i / 32),
-                                                p["head_r"] * (0.55 + height),
-                                                p["head_r"] * 1.7 * math.sin(2 * math.pi * i / 32)]) for i in range(32))
+            for height in (-SUNHAT_BRIM_HALF_THICKNESS_RATIO, SUNHAT_BRIM_HALF_THICKNESS_RATIO):
+                vertices.extend(game_to_blender([brim_radius * math.cos(2 * math.pi * i / 32),
+                                                p["head_r"] * (SUNHAT_BRIM_CENTER_HEIGHT_RATIO + height),
+                                                brim_radius * math.sin(2 * math.pi * i / 32)]) for i in range(32))
             _join_rings(faces, 0, 32, 32, 32)
             faces.extend((tuple(reversed(range(32))), tuple(range(32, 64))))
             _replace_surface(brim, vertices, faces, uv)
