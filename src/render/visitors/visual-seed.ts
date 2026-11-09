@@ -1,5 +1,14 @@
 import { createRng, randomFloat, randomInt, type RngState } from '@/sim/rng';
 
+/** Maximum visual spread is 35% of the one-metre construction cell. */
+export const MAX_VISITOR_OFFSET_M = 0.35;
+const TWO_PI = Math.PI * 2;
+
+export interface VisitorVisualOffset {
+  readonly x: number;
+  readonly z: number;
+}
+
 /** Hashes a visitor id string into an unsigned 32-bit seed. */
 export function seedFromId(id: string): number {
   let hash = 0x811c_9dc5;
@@ -13,6 +22,14 @@ export function seedFromId(id: string): number {
 /** Creates a visual RNG for a visitor group, independent from the simulation RNG. */
 export function visualRng(id: string): RngState {
   return createRng(seedFromId(id));
+}
+
+/** Returns a stable, uniform-in-area offset within a small ground-plane disk. */
+export function visitorVisualOffset(id: string): VisitorVisualOffset {
+  const rng = visualRng(id);
+  const angle = randomFloat(rng) * TWO_PI;
+  const radius = Math.sqrt(randomFloat(rng)) * MAX_VISITOR_OFFSET_M;
+  return { x: Math.sin(angle) * radius, z: Math.cos(angle) * radius };
 }
 
 /** Returns a deterministic per-member phase offset from the group seed. */

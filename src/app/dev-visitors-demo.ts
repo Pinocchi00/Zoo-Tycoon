@@ -12,6 +12,8 @@ import { buildAnimalDemo } from './dev-demo';
 export const VISITOR_DEMO_PEOPLE = 100;
 const DEMO_STEP_MS = 1000;
 const MAX_DEMO_STEPS = 20 * 60;
+const AISLE_LENGTH_CELLS = 50;
+const AISLE_ROWS = [235, 245] as const;
 
 function people(state: GameState): number {
   let total = 0;
@@ -29,8 +31,8 @@ export function buildVisitorDemo(data: GameData, events: EventQueue): GameState 
     throw new Error('Visitor demo needs the demo path surface.');
   }
   const cells: CellPosition[] = [];
-  for (let column = 118; column <= 137; column += 1) {
-    cells.push({ column, row: 235 }, { column, row: 245 });
+  for (let column = 118; column < 118 + AISLE_LENGTH_CELLS; column += 1) {
+    for (const row of AISLE_ROWS) cells.push({ column, row });
   }
   for (const cell of cells) {
     const connected = applyCommand(

@@ -11,7 +11,12 @@ import {
 import { cellCenterX, cellCenterZ, logger, type Result, type VisitorId } from '@/shared';
 import { MM_PER_CELL, type VisitorState } from '@/sim';
 import { randomFloat, type RngState } from '@/sim/rng';
-import { computeBlendedPoseMatrices } from './animation';
+import {
+  advanceWalkPhase,
+  computeBlendedPoseMatrices,
+  turnTowards,
+  walkingClipForStationaryTime,
+} from './animation';
 import { createInstancedCrowd, type GroupRenderData } from './instanced-crowd';
 import { disposeVisitorObjects, loadVisitorSource } from './model-source';
 import {
@@ -22,12 +27,13 @@ import {
   type VisitorSource,
   type VisitorWorld,
 } from './types';
-import { memberPhaseOffset, pickViewingClip, visualRng } from './visual-seed';
+import { memberPhaseOffset, pickViewingClip, visitorVisualOffset, visualRng } from './visual-seed';
 
 const MS_PER_SECOND = 1000;
 const STEP_MS = 100;
 const CROSS_FADE_S = 0.35;
 const VIEW_CLIP_DURATION_S = 4;
+const MOVEMENT_EPSILON_M = 0.0001;
 const MODEL_URLS = import.meta.glob<string>('../../../assets/models/visitors/*.glb', {
   query: '?url',
   import: 'default',
@@ -45,7 +51,9 @@ interface GroupState {
   readonly id: VisitorId;
   readonly rng: RngState;
   readonly memberPhases: number[];
+  readonly visualOffset: { readonly x: number; readonly z: number };
   visitor: VisitorState;
+  activity: VisitorState['activity'];
   x: number;
   z: number;
   fromX: number;
@@ -53,6 +61,11 @@ interface GroupState {
   targetX: number;
   targetZ: number;
   yaw: number;
+  targetYaw: number;
+  stationaryMs: number;
+  hasMoved: boolean;
+  previousPhaseX: number;
+  previousPhaseZ: number;
   snapshotMs: number;
   interpolationMs: number;
   interpolationDurationMs: number;
@@ -145,7 +158,9 @@ export function createVisitorCrowd(options: VisitorCrowdOptions): VisitorCrowd {
       id: visitor.id,
       rng,
       memberPhases: [],
+      visualOffset: visitorVisualOffset(visitor.id),
       visitor,
+      activity: visitor.activity,
       x,
       z,
       fromX: x,
@@ -153,6 +168,11 @@ export function createVisitorCrowd(options: VisitorCrowdOptions): VisitorCrowd {
       targetX: x,
       targetZ: z,
       yaw: 0,
+      targetYaw: 0,
+      stationaryMs: 0,
+      hasMoved: false,
+      previousPhaseX: x,
+      previousPhaseZ: z,
       snapshotMs: visitor.updatedAtMs,
       interpolationMs: STEP_MS,
       interpolationDurationMs: STEP_MS,
@@ -187,11 +207,14 @@ export function createVisitorCrowd(options: VisitorCrowdOptions): VisitorCrowd {
         cellCenterX(grid, visitor.column) + (visitor.nextColumn - visitor.column) * progress;
       const z = cellCenterZ(grid, visitor.row) + (visitor.nextRow - visitor.row) * progress;
       const state = states.get(visitor.id) ?? createState(visitor, x, z);
+      if (state.activity !== visitor.activity && visitor.activity === 'walking')
+        state.stationaryMs = 0;
       while (state.memberPhases.length < visitor.groupSize) {
         const member = state.memberPhases.length;
         state.memberPhases.push(memberPhaseOffset(visualRng(visitor.id), member));
       }
       state.visitor = visitor;
+      state.activity = visitor.activity;
       if (visitor.updatedAtMs !== state.snapshotMs || x !== state.targetX || z !== state.targetZ) {
         state.interpolationDurationMs = Math.max(STEP_MS, visitor.updatedAtMs - state.snapshotMs);
         state.interpolationMs = 0;
@@ -203,14 +226,8 @@ export function createVisitorCrowd(options: VisitorCrowdOptions): VisitorCrowd {
       }
       const dx = visitor.nextColumn - visitor.column;
       const dz = visitor.nextRow - visitor.row;
-      if (visitor.activity === 'walking' && (dx !== 0 || dz !== 0)) state.yaw = Math.atan2(dx, dz);
-      else {
-        state.x = x;
-        state.z = z;
-        state.fromX = x;
-        state.fromZ = z;
-        state.interpolationMs = state.interpolationDurationMs;
-      }
+      if (visitor.activity === 'walking' && (dx !== 0 || dz !== 0))
+        state.targetYaw = Math.atan2(dx, dz);
       tryLoad(visitor.archetypeId);
     }
     if (changed) {
@@ -231,10 +248,7 @@ export function createVisitorCrowd(options: VisitorCrowdOptions): VisitorCrowd {
   function targetClip(state: GroupState, elapsedS: number): VisitorClip {
     switch (state.visitor.activity) {
       case 'walking':
-        return state.visitor.nextColumn !== state.visitor.column ||
-          state.visitor.nextRow !== state.visitor.row
-          ? 'walk'
-          : 'stop';
+        return state.hasMoved ? walkingClipForStationaryTime(state.stationaryMs) : 'stop';
       case 'viewing':
         state.viewTimerS -= elapsedS;
         if (state.viewTimerS <= 0) {
@@ -257,6 +271,17 @@ export function createVisitorCrowd(options: VisitorCrowdOptions): VisitorCrowd {
     const fraction = state.interpolationMs / state.interpolationDurationMs;
     state.x = state.fromX + (state.targetX - state.fromX) * fraction;
     state.z = state.fromZ + (state.targetZ - state.fromZ) * fraction;
+    const distanceMoved = Math.hypot(
+      state.x - state.previousPhaseX,
+      state.z - state.previousPhaseZ,
+    );
+    state.previousPhaseX = state.x;
+    state.previousPhaseZ = state.z;
+    if (distanceMoved > MOVEMENT_EPSILON_M) {
+      state.hasMoved = true;
+      state.stationaryMs = 0;
+    } else state.stationaryMs += elapsedMs;
+    state.yaw = turnTowards(state.yaw, state.targetYaw, elapsedMs);
     const target = targetClip(state, elapsedS);
     if (target !== state.nextClip) {
       if (target === state.currentClip) {
@@ -278,8 +303,14 @@ export function createVisitorCrowd(options: VisitorCrowdOptions): VisitorCrowd {
     }
     const source = sources.get(state.visitor.archetypeId);
     if (source === undefined) return;
-    state.phase = advancePhase(state.currentClip, state.phase, elapsedS, source);
-    state.nextPhase = advancePhase(state.nextClip, state.nextPhase, elapsedS, source);
+    state.phase = advancePhase(state.currentClip, state.phase, elapsedS, distanceMoved, source);
+    state.nextPhase = advancePhase(
+      state.nextClip,
+      state.nextPhase,
+      elapsedS,
+      distanceMoved,
+      source,
+    );
     if (state.currentClip !== state.nextClip) {
       state.blend = Math.min(1, state.blend + elapsedS / CROSS_FADE_S);
       if (state.blend === 1) {
@@ -315,7 +346,7 @@ export function createVisitorCrowd(options: VisitorCrowdOptions): VisitorCrowd {
           pose,
           state.memberPhases,
         );
-        position.set(state.x, 0, state.z);
+        position.set(state.x + state.visualOffset.x, 0, state.z + state.visualOffset.z);
         rotation.setFromAxisAngle(up, state.yaw);
         scale.set(slot.width, slot.height, slot.width);
         groupMatrix.compose(position, rotation, scale);
@@ -359,7 +390,10 @@ export function createVisitorCrowd(options: VisitorCrowdOptions): VisitorCrowd {
         return false;
       parent.updateWorldMatrix(true, false);
       camera.updateWorldMatrix(true, false);
-      projected.set(state.x, 1.5, state.z).applyMatrix4(parent.matrixWorld).project(camera);
+      projected
+        .set(state.x + state.visualOffset.x, 1.5, state.z + state.visualOffset.z)
+        .applyMatrix4(parent.matrixWorld)
+        .project(camera);
       if (
         !Number.isFinite(projected.x) ||
         !Number.isFinite(projected.y) ||
@@ -396,8 +430,10 @@ function advancePhase(
   clip: VisitorClip,
   phase: number,
   elapsedS: number,
+  distanceMoved: number,
   source: VisitorSource,
 ): number {
+  if (clip === 'walk') return advanceWalkPhase(phase, distanceMoved);
   const next = phase + elapsedS / source.bakedClips[clip].duration;
   return clip === 'sit' ? Math.min(1, next) : next % 1;
 }

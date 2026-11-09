@@ -1,6 +1,12 @@
 import { expect, it } from 'vitest';
 import { randomFloat } from '@/sim/rng';
-import { memberPhaseOffset, seedFromId, visualRng } from './visual-seed';
+import {
+  MAX_VISITOR_OFFSET_M,
+  memberPhaseOffset,
+  seedFromId,
+  visitorVisualOffset,
+  visualRng,
+} from './visual-seed';
 
 it('keeps member phases in [0, 1) when signed mixing would produce a negative remainder', () => {
   const id = 'visitor-10';
@@ -15,4 +21,14 @@ it('keeps member phases in [0, 1) when signed mixing would produce a negative re
     expect(phase).toBeLessThan(1);
     expect(memberPhaseOffset(visualRng(id), member)).toBe(phase);
   }
+});
+
+it('keeps each stable visitor offset inside the spreading disk and varies it by seed', () => {
+  const first = visitorVisualOffset('visitor-1');
+  const repeated = visitorVisualOffset('visitor-1');
+  const second = visitorVisualOffset('visitor-2');
+
+  expect(first).toEqual(repeated);
+  expect(Math.hypot(first.x, first.z)).toBeLessThanOrEqual(MAX_VISITOR_OFFSET_M);
+  expect(first).not.toEqual(second);
 });

@@ -251,10 +251,38 @@ describe('instanced visitor runtime', () => {
     item.updatedAtMs = 200;
     crowd.handleEvents([], world);
     crowd.project(item.id, view, 600, 600, out);
+    expect(out.x - initialX).toBeCloseTo(10);
+    crowd.update(50);
+    crowd.project(item.id, view, 600, 600, out);
+    expect(out.x - initialX).toBeCloseTo(55);
+    crowd.update(50);
+    crowd.project(item.id, view, 600, 600, out);
+    expect(out.x - initialX).toBeCloseTo(100);
     const stoppedX = out.x;
     crowd.update(50);
     crowd.project(item.id, view, 600, 600, out);
     expect(out.x).toBe(stoppedX);
+    crowd.dispose();
+  });
+  it('keeps the drawn position continuous when a walking visitor crosses a cell edge', async () => {
+    const item = visitor(1, 'teen-photographer', 1);
+    item.nextColumn = 2;
+    item.progressMm = 900;
+    const { crowd, world } = await loaded([item]);
+    const out = { x: 0, y: 0 };
+    const view = camera();
+    crowd.project(item.id, view, 600, 600, out);
+    const beforeEdge = out.x;
+
+    item.column = 2;
+    item.nextColumn = 2;
+    item.progressMm = 0;
+    item.updatedAtMs = 100;
+    crowd.handleEvents([], world);
+    crowd.update(100);
+    crowd.project(item.id, view, 600, 600, out);
+
+    expect(Math.abs(out.x - beforeEdge)).toBeLessThanOrEqual(11);
     crowd.dispose();
   });
   it('keeps instance matrix buffers and avoids map values and array iterators across frames, including after setQuality', async () => {
@@ -401,6 +429,23 @@ describe('instanced visitor runtime', () => {
     ).toBeLessThan(0.01);
     crowd.update(349);
     expect(matrixOf(leg).elements).not.toEqual(seated.elements);
+    crowd.dispose();
+  });
+  it('keeps a never-moved visitor on the stop clip from creation', async () => {
+    const fixture = prototype('teen-photographer', 1);
+    const stop = fixture.clips.find((clip) => clip.name === 'stop');
+    if (stop === undefined) throw new Error('Missing fixture stop clip.');
+    stop.tracks = [new NumberKeyframeTrack('p0_leg_pivot.rotation[x]', [0, 1], [0, 0])];
+    const model = unwrap(prepareVisitorSource('teen-photographer', fixture.root, fixture.clips));
+    const { crowd, parent } = await loaded([visitor(1, 'teen-photographer', 1)], [model]);
+    const leg = mesh(parent, 'teen-photographer:p0_leg');
+    const stopped = matrixOf(leg);
+
+    crowd.update(100);
+    expect(matrixOf(leg).elements).toEqual(stopped.elements);
+    crowd.update(200);
+    expect(matrixOf(leg).elements).toEqual(stopped.elements);
+
     crowd.dispose();
   });
   it('keeps a carried child attached to the animated parent through walk, sit and walk', async () => {

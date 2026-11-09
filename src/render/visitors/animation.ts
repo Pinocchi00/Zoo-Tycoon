@@ -2,6 +2,12 @@ import { Matrix4, Quaternion, Vector3 } from 'three';
 import type { BakedClip, VisitorClip, VisitorSource } from './types';
 
 const SAMPLE_RATE = 30;
+/** A 0.35 m chibi leg swinging through 18° covers about 0.43 m per full cycle. */
+export const WALK_CYCLE_DISTANCE_M = 0.45;
+/** One brief 100 ms simulation boundary pause must not select the stop pose. */
+export const MIN_WALK_STOP_MS = 300;
+/** Limits turns to one full revolution per second, avoiding instantaneous corner snaps. */
+export const MAX_YAW_RAD_PER_SECOND = Math.PI * 2;
 const positionA = new Vector3();
 const positionB = new Vector3();
 const quaternionA = new Quaternion();
@@ -10,6 +16,22 @@ const targetQuaternion = new Quaternion();
 const scaleA = new Vector3();
 const scaleB = new Vector3();
 const local = new Matrix4();
+
+export function walkingClipForStationaryTime(stationaryMs: number): 'walk' | 'stop' {
+  return stationaryMs >= MIN_WALK_STOP_MS ? 'stop' : 'walk';
+}
+
+export function advanceWalkPhase(phase: number, distanceM: number): number {
+  return (phase + distanceM / WALK_CYCLE_DISTANCE_M) % 1;
+}
+
+/** Turns along the shortest angular path, clamping the turn to one frame's limit. */
+export function turnTowards(current: number, target: number, elapsedMs: number): number {
+  const difference = Math.atan2(Math.sin(target - current), Math.cos(target - current));
+  const maxRadians = (MAX_YAW_RAD_PER_SECOND * Math.max(0, elapsedMs)) / 1000;
+  const change = Math.max(-maxRadians, Math.min(maxRadians, difference));
+  return current + change;
+}
 
 export function sampleNodeLocal(
   clip: BakedClip,
