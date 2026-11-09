@@ -17,6 +17,7 @@ sys.path.insert(0, str(VISITORS_DIR))
 from build import EXPECTED_CLIP_NAMES, build_group, _count_triangles_per_person  # noqa: E402
 from human import game_to_blender, HAIR_SEGMENTS  # noqa: E402
 from palette import build_material, load_palette  # noqa: E402
+from verify import verify_source_junctions  # noqa: E402
 
 EPSILON = 0.0001
 
@@ -103,7 +104,7 @@ def _test_faces(description):
                         "moustache forms a wide smile")
                 _assert(sign * sum(vertex.co.x for vertex in moustache.data.vertices) > 0,
                         "moustache lobes are not on opposite sides")
-        if person.get("hair", "short") != "none":
+        if person.get("hair", "short") not in {"none", "sunhat"}:
             hair = bpy.data.objects[prefix + "hair_mesh"]
             surface = bmesh.new()
             surface.from_mesh(hair.data)
@@ -158,23 +159,28 @@ def _test_rest(description, root):
                         "baby pelvis does not rest on the seat")
             else:
                 _assert(person_root.parent.name == expected_parent, "child is not carried on shoulders")
-                head = bpy.data.objects["p0_head_mesh"]
+                head = bpy.data.objects["p0_head"]
+                head_mesh = bpy.data.objects["p0_head_mesh"]
+                head_center = head.matrix_world.translation
+                head_radius = head["zooHeadRadius"]
                 body = bpy.data.objects[f"p{idx}_body_mesh"]
-                _assert(_bounds(body)[0].z > _bounds(head)[1].z,
-                         "child torso intersects the carrier's head")
+                hair = bpy.data.objects["p0_hair_mesh"]
+                gap = _bounds(body)[0].z - _bounds(hair)[1].z
+                _assert(-0.02 <= gap <= 0, "child behind must rest slightly inside the hair crown")
+                _assert(_bounds(body)[0].z >= _bounds(head_mesh)[1].z - EPSILON,
+                         "child torso penetrates the carrier's skull")
                 child_head = bpy.data.objects[f"p{idx}_head_mesh"]
-                _assert(_bounds(child_head)[0].z > _bounds(head)[1].z,
+                _assert(_bounds(child_head)[0].z > _bounds(head_mesh)[1].z,
                         "carrier hides the child's face")
-                gap = _bounds(body)[0].z - _bounds(head)[1].z
-                _assert(gap < 0.12, "child floats above the carrier")
-                head_center = bpy.data.objects["p0_head"].matrix_world.translation
+                _assert(gap >= -0.02, "child sinks into the carrier")
                 for side, sign in (("l", -1), ("r", 1)):
                     leg = bpy.data.objects[f"p{idx}_leg_{side}"]
                     foot = leg.matrix_world @ game_to_blender(leg["zooFoot"])
-                    _assert(sign * (foot.x - head_center.x) > 0.35,
-                            "child's legs do not straddle the head")
-                    _assert(foot.z < _bounds(head)[1].z + 0.04,
-                            "child's feet do not hang beside the head")
+                    _assert(sign * (foot.x - head_center.x) > 0.08,
+                            "child's legs are not on opposite sides of the forehead")
+                    _assert(head_center.z + head_radius * 0.02 < foot.z <
+                            head_center.z + head_radius * 1.03,
+                            "child's feet do not hang beside the head without covering its eyes")
         if person.get("camera", False):
             camera = bpy.data.objects[f"p{idx}_camera"]
             _assert(camera.parent.name == f"p{idx}_spine", "camera is attached to a limb")
@@ -194,7 +200,19 @@ def _test_rest(description, root):
             brim = bpy.data.objects[f"p{idx}_hat_brim_mesh"]
             head = bpy.data.objects[f"p{idx}_head_mesh"]
             _assert(_bounds(brim)[1].x - _bounds(brim)[0].x >
-                    1.5 * (_bounds(head)[1].x - _bounds(head)[0].x), "hat has no visible brim")
+                     1.5 * (_bounds(head)[1].x - _bounds(head)[0].x), "hat has no visible brim")
+            crown = bpy.data.objects[f"p{idx}_hair_mesh"]
+            _assert(brim["zooTint"] == crown["zooTint"] == "none", "hat changes colour with the hair")
+            _assert(len({round(vertex.co.z, 6) for vertex in brim.data.vertices}) == 2,
+                    "hat brim is not flat with constant thickness")
+            _assert(len(brim.data.vertices) == 64, "hat brim circular outline is too coarse")
+            _assert(brim.data.uv_layers.active.data[0].uv == crown.data.uv_layers.active.data[0].uv,
+                    "hat crown and brim do not share one palette colour")
+            surface = bmesh.new()
+            surface.from_mesh(crown.data)
+            _assert(all(edge.is_manifold and edge.is_contiguous for edge in surface.edges)
+                    and surface.calc_volume(signed=True) > 0, "hat crown is open or inverted")
+            surface.free()
     print(f"[zoo-refuge] {description['archetypeId']}: rest geometry and budget passed {counts}")
 
 
@@ -215,6 +233,7 @@ def _test_clips(description, root):
             frame = end * sample / 8
             bpy.context.scene.frame_set(int(frame), subframe=frame % 1)
             bpy.context.view_layer.update()
+            verify_source_junctions(description, clip)
             for person in description["persons"]:
                 idx = person["index"]
                 if person.get("posture") in {"stroller", "shoulders"}:

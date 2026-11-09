@@ -3,6 +3,7 @@
 import json
 import math
 import sys
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -14,7 +15,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from build import build_group, merge_compatible_parts, validate_glb
 from palette import build_material, load_palette
 from parts import game_to_blender
-from human import _derive_proportions, shoulder_leg_points, SHOULDER_SEAT_RADII, STROLLER_HANDLE_FORWARD, STROLLER_HANDLE_HEIGHT_RATIO
+from human import _derive_proportions, shoulder_leg_points, shoulder_seat_height, SEATED_LEG_FORWARD_RATIO, STROLLER_HANDLE_FORWARD, STROLLER_HANDLE_HEIGHT_RATIO
 
 FLOOR_TOLERANCE = 0.004
 ARM_TOLERANCE = 0.003
@@ -40,33 +41,41 @@ def minimum_height(obj):
     return min((obj.matrix_world @ vertex.co).z for vertex in obj.data.vertices)
 
 
-def verify_arm_lengths(description, meshes, clip):
-    """Bound both joint reach and actual skin geometry in the person's spine frame."""
+def prepare_proportions(description):
+    proportions = {person["index"]: _derive_proportions(person) for person in description["persons"]}
     for person in description["persons"]:
-        prefix = f"p{person['index']}_"
-        p = _derive_proportions(person)
-        spine = bpy.data.objects[prefix + "spine"]
-        inverse = spine.matrix_world.inverted()
+        p = proportions[person["index"]]
         reach = p["arm_len"]
         if person.get("stroller"):
             vertical = person["height"] * STROLLER_HANDLE_HEIGHT_RATIO - p["hip_height"] - p["torso"] * 0.65
             reach = math.hypot(vertical, STROLLER_HANDLE_FORWARD)
         elif person.get("shoulderChild") is not None:
             child = next(member for member in description["persons"] if member["index"] == person["shoulderChild"])
-            small = _derive_proportions(child)
+            small = proportions[child["index"]]
             _, foot = shoulder_leg_points(person, child, 1)
             reach = Vector((small["hip_w"] + p["limb_r"] + foot[0] - p["shoulder_w"],
-                            p["torso"] * 0.35 + p["neck"] + p["head_r"] * SHOULDER_SEAT_RADII + foot[1],
-                            foot[2])).length
-        elif person.get("camera") and clip == "photo":
-            # The camera pose has a deliberately longer reach, derived from the
-            # face and grip proportions, never from animated scale or mesh bounds.
-            grip = p["limb_r"] * 1.4
-            target = Vector((p["shoulder_w"] - grip,
-                             p["head_r"] * 1.3 + 0.03,
+                            p["torso"] * 0.35 + p["neck"] + shoulder_seat_height(person, child) + foot[1],
+                            foot[2] + small["leg_len"] * SEATED_LEG_FORWARD_RATIO)).length
+        p["arm_reach"] = reach
+        p["photo_reach"] = reach
+        if person.get("camera"):
+            target = Vector((p["shoulder_w"] - p["limb_r"] * 1.4, p["head_r"] * 1.3 + 0.03,
                              p["torso"] + p["neck"] - (p["torso"] * 0.65 - p["arm_len"] * ARM_SLEEVE_RATIO)))
-            reach = p["arm_len"] * ARM_SLEEVE_RATIO + target.length
-        shoulders = [game_to_blender([sign * p["shoulder_w"], p["torso"] * 0.65, 0]) for sign in (-1, 1)]
+            p["photo_reach"] = p["arm_len"] * ARM_SLEEVE_RATIO + target.length
+        p["shoulders"] = [game_to_blender([sign * p["shoulder_w"], p["torso"] * 0.65, 0]) for sign in (-1, 1)]
+        p["grip_offsets"] = {side: Vector((sign * p["limb_r"], 0, 0)) for side, sign in (("l", -1), ("r", 1))}
+    return proportions
+
+
+def verify_arm_lengths(description, meshes, clip, proportions):
+    """Bound both joint reach and actual skin geometry in the person's spine frame."""
+    for person in description["persons"]:
+        prefix = f"p{person['index']}_"
+        p = proportions[person["index"]]
+        spine = bpy.data.objects[prefix + "spine"]
+        inverse = spine.matrix_world.inverted()
+        reach = p["photo_reach"] if clip == "photo" else p["arm_reach"]
+        shoulders = p["shoulders"]
         for side, shoulder in zip(("l", "r"), shoulders):
             arm = bpy.data.objects[prefix + f"arm_{side}"]
             hand = inverse @ arm.matrix_world @ game_to_blender(arm["zooHand"])
@@ -85,7 +94,7 @@ def verify_arm_lengths(description, meshes, clip):
                 assert min((point - shoulder).length for shoulder in shoulders) <= limit, f"{obj.name} arm geometry exceeds proportions during {clip}"
 
 
-def test_arm_guard(description, meshes, clip):
+def test_arm_guard(description, meshes, clip, proportions):
     child = next((person for person in description["persons"] if person.get("posture") == "shoulders"), None)
     if child is None:
         return
@@ -96,7 +105,7 @@ def test_arm_guard(description, meshes, clip):
     old_endpoint = [-p["head_r"] * 0.65, -p["torso"] * 0.65 - p["head_r"] * 0.65, p["head_r"] * 0.65]
     arm["zooHand"] = [value * (1 - ARM_SLEEVE_RATIO) for value in old_endpoint]
     try:
-        verify_arm_lengths(description, meshes, clip)
+        verify_arm_lengths(description, meshes, clip, proportions)
     except AssertionError as error:
         assert "arm reach exceeds" in str(error), str(error)
     else:
@@ -108,7 +117,7 @@ def test_arm_guard(description, meshes, clip):
     original_vertex = vertex.co.copy()
     vertex.co.z -= child["height"]
     try:
-        verify_arm_lengths(description, meshes, clip)
+        verify_arm_lengths(description, meshes, clip, proportions)
     except AssertionError as error:
         assert "arm geometry exceeds" in str(error), str(error)
     else:
@@ -170,7 +179,16 @@ def verify_hand_geometry(obj, points, grip, radius, clip):
     assert all(abs((points[index] - center).length - radius) < CONTACT_TOLERANCE for index in indices), f"parent hand is not a rigid round grip during {clip}"
 
 
-def verify_shoulder_legs(description, meshes, clip):
+def supported_arm_mesh(meshes, prefix, side):
+    named = next((obj for obj in meshes if obj.name == prefix + f"arm_{side}_mesh"), None)
+    if named is not None:
+        return named
+    # Both supported arms have one spine/skin merge bucket; select the actual
+    # right-hand component by its grip, rather than silently testing the left.
+    return next(obj for obj in meshes if obj.parent.name == prefix + "spine" and obj["zooTint"] == "skin")
+
+
+def verify_shoulder_legs(description, meshes, clip, proportions):
     for parent in description["persons"]:
         child = parent.get("shoulderChild")
         if child is None:
@@ -181,6 +199,12 @@ def verify_shoulder_legs(description, meshes, clip):
         head = bpy.data.objects[prefix + "head"]
         radius = head["zooHeadRadius"]
         center = inverse @ head.matrix_world.translation
+        small = proportions[child]
+        adult = proportions[parent["index"]]
+        child_body = bpy.data.objects[f"p{child}_body_mesh"]
+        bottom = min((inverse @ child_body.matrix_world @ vertex.co).z for vertex in child_body.data.vertices)
+        crown = center.z + radius * 1.03
+        assert -0.02 <= bottom - crown <= 0.003, f"child seat loses crown contact during {clip}"
         obstacles = [(obj, mesh_surface(obj, inverse)) for obj in meshes if obj["zooPerson"] == parent["index"]]
         feet = []
         for side, sign in (("l", -1), ("r", 1)):
@@ -188,34 +212,64 @@ def verify_shoulder_legs(description, meshes, clip):
             knee = inverse @ leg.matrix_world @ game_to_blender(leg["zooKnee"])
             foot = inverse @ leg.matrix_world @ game_to_blender(leg["zooFoot"])
             feet.append(foot)
-            assert -knee.y > radius * 0.65 and -foot.y > radius * 0.85, f"child leg hangs behind parent during {clip}"
-            assert sign * foot.x > radius and foot.z < center.z, f"child calf does not hang in front of chest during {clip}"
-            assert knee.z > foot.z + radius * 0.65, f"child calf is not hanging during {clip}"
+            hip = inverse @ leg.matrix_world.translation
+            assert (knee - hip).length <= small["leg_len"] * 1.5 and (foot - knee).length <= small["leg_len"] * 1.6, f"child leg exceeds normal length during {clip}"
+            assert -knee.y > small["leg_len"] and -foot.y > small["leg_len"], f"child leg hangs behind parent during {clip}"
+            assert sign * foot.x > small["hip_w"] and center.z < foot.z < crown, f"child calf does not hang above forehead during {clip}"
+            assert knee.z > foot.z + small["leg_len"] * 0.5, f"child calf is not hanging during {clip}"
             arm = bpy.data.objects[prefix + f"arm_{side}"]
             hand = inverse @ arm.matrix_world @ game_to_blender(arm["zooHand"])
-            grip = foot + Vector((sign * _derive_proportions(parent)["limb_r"], 0, 0))
+            grip = foot + adult["grip_offsets"][side]
             assert (hand - grip).length < CONTACT_TOLERANCE, f"parent releases child ankle during {clip}"
-            arm_mesh, (arm_points, _, _) = next(obstacle for obstacle in obstacles if obstacle[0].name == prefix + "arm_l_mesh")
-            verify_hand_geometry(arm_mesh, arm_points, grip, _derive_proportions(parent)["limb_r"], clip)
+            arm_mesh = supported_arm_mesh(meshes, prefix, side)
+            _, (arm_points, _, _) = next(obstacle for obstacle in obstacles if obstacle[0] == arm_mesh)
+            verify_hand_geometry(arm_mesh, arm_points, grip, adult["limb_r"], clip)
             obj = bpy.data.objects[f"p{child}_leg_{side}_mesh"]
             points, triangles, surface = mesh_surface(obj, inverse)
             for obstacle, (_, _, adult_surface) in obstacles:
                 def held_contact(point):
-                    return obstacle.name == prefix + "arm_l_mesh" and (point - foot).length < _derive_proportions(parent)["limb_r"] * 1.7
+                    return obstacle == arm_mesh and (point - foot).length < adult["limb_r"] * 1.7
 
                 for point in points:
                     inside = inside_surface(adult_surface, point)
-                    assert not inside or held_contact(point), f"child leg penetrates {obstacle.name} during {clip}"
+                    assert not inside or held_contact(point), f"child leg penetrates {obstacle.name} during {clip}: {tuple(point)}"
                 for child_triangle, _ in surface.overlap(adult_surface):
                     centroid = sum((points[index] for index in triangles[child_triangle]), Vector()) / 3
                     assert held_contact(centroid), f"child leg surface crosses {obstacle.name} during {clip}: {tuple(centroid)}"
-            assert all(-point.y > radius * 0.65 for point in points if point.z < knee.z - radius * 0.15), f"child calf geometry hangs behind parent during {clip}"
+            assert all(-point.y > small["leg_len"] for point in points if point.z < knee.z - small["limb_r"]), f"child calf geometry hangs behind parent during {clip}"
+            eye_top = center.z + radius * 0.02
+            assert min(point.z for point in points) > eye_top, f"child covers parent eyes during {clip}"
         assert abs(feet[0].x + feet[1].x) < CONTACT_TOLERANCE and abs(feet[0].z - feet[1].z) < CONTACT_TOLERANCE and abs(feet[0].y - feet[1].y) < CONTACT_TOLERANCE, f"asymmetric child legs during {clip}"
 
 
-def test_shoulder_guard(description, meshes, clip):
+def test_shoulder_guard(description, meshes, clip, proportions):
     if description["archetypeId"] != "shoulder-ride":
         return
+    root = bpy.data.objects["p1_root"]
+    original_location = root.location.copy()
+    for offset in (-0.08, 0.08):
+        root.location.z += offset
+        bpy.context.view_layer.update()
+        try:
+            verify_shoulder_legs(description, meshes, clip, proportions)
+        except AssertionError as error:
+            assert "crown contact" in str(error), str(error)
+        else:
+            raise AssertionError("seat guard accepts floating or deeply embedded child")
+        finally:
+            root.location = original_location
+            bpy.context.view_layer.update()
+    leg = bpy.data.objects["p1_leg_r"]
+    original_knee = list(leg["zooKnee"])
+    leg["zooKnee"] = [value * 3 for value in original_knee]
+    try:
+        verify_shoulder_legs(description, meshes, clip, proportions)
+    except AssertionError as error:
+        assert "normal length" in str(error), str(error)
+    else:
+        raise AssertionError("leg guard accepts elongated child thigh")
+    finally:
+        leg["zooKnee"] = original_knee
     obj = bpy.data.objects["p1_leg_l_mesh"]
     original = [vertex.co.copy() for vertex in obj.data.vertices]
     for target in (bpy.data.objects["p0_head"].matrix_world.translation,
@@ -224,7 +278,7 @@ def test_shoulder_guard(description, meshes, clip):
         for vertex in obj.data.vertices:
             vertex.co = local + vertex.co * 0.05
         try:
-            verify_shoulder_legs(description, meshes, clip)
+            verify_shoulder_legs(description, meshes, clip, proportions)
         except AssertionError as error:
             assert "penetrates" in str(error) or "surface crosses" in str(error), str(error)
         else:
@@ -239,7 +293,7 @@ def test_shoulder_guard(description, meshes, clip):
         point.y += 1.0
         vertex.co = to_local @ point
     try:
-        verify_shoulder_legs(description, meshes, clip)
+        verify_shoulder_legs(description, meshes, clip, proportions)
     except AssertionError as error:
         assert "geometry hangs behind" in str(error), str(error)
     else:
@@ -252,29 +306,129 @@ def test_shoulder_guard(description, meshes, clip):
     leg["zooKnee"] = [knee[0], knee[1], -abs(knee[2])]
     leg["zooFoot"] = [foot[0], foot[1], -abs(foot[2])]
     try:
-        verify_shoulder_legs(description, meshes, clip)
+        verify_shoulder_legs(description, meshes, clip, proportions)
     except AssertionError as error:
         assert "hangs behind" in str(error), str(error)
     else:
         raise AssertionError(f"shoulder guard accepts rear-hanging legs during {clip}")
     finally:
         leg["zooKnee"], leg["zooFoot"] = knee, foot
-    mesh = bpy.data.objects["p0_arm_l_mesh"]
-    arm = bpy.data.objects["p0_arm_l"]
-    grip = mesh.matrix_world.inverted() @ arm.matrix_world @ game_to_blender(arm["zooHand"])
-    points = [vertex.co.copy() for vertex in mesh.data.vertices]
-    indices, _ = min(mesh_components(mesh, points), key=lambda component: (component[1] - grip).length)
-    for index in indices:
-        mesh.data.vertices[index].co.z += 1.0
-    try:
-        verify_shoulder_legs(description, meshes, clip)
-    except AssertionError as error:
-        assert "hand geometry releases" in str(error), str(error)
-    else:
-        raise AssertionError(f"shoulder guard accepts detached hand geometry during {clip}")
-    finally:
+    for side in ("l", "r"):
+        mesh = supported_arm_mesh(meshes, "p0_", side)
+        arm = bpy.data.objects[f"p0_arm_{side}"]
+        grip = mesh.matrix_world.inverted() @ arm.matrix_world @ game_to_blender(arm["zooHand"])
+        points = [vertex.co.copy() for vertex in mesh.data.vertices]
+        indices, _ = min(mesh_components(mesh, points), key=lambda component: (component[1] - grip).length)
         for index in indices:
-            mesh.data.vertices[index].co = points[index]
+            mesh.data.vertices[index].co.z += 1.0
+        try:
+            verify_shoulder_legs(description, meshes, clip, proportions)
+        except AssertionError as error:
+            assert "hand geometry releases" in str(error), str(error)
+        else:
+            raise AssertionError(f"shoulder guard accepts detached {side} hand geometry during {clip}")
+        finally:
+            for index in indices:
+                mesh.data.vertices[index].co = points[index]
+
+
+def prepare_junctions(description, meshes):
+    """Cache topology once; exported vertex ordering is allowed to differ."""
+    groups = []
+    for person in description["persons"]:
+        prefix = f"p{person['index']}_"
+        components = []
+        for obj in meshes:
+            if not obj.name.startswith(prefix) or not any(obj.name == prefix + name for name in (
+                "body_mesh", "arm_l_mesh", "arm_r_mesh", "hand_l_mesh", "hand_r_mesh", "leg_l_mesh", "leg_r_mesh"
+            )):
+                continue
+            obj.data.calc_loop_triangles()
+            points = [vertex.co.copy() for vertex in obj.data.vertices]
+            for indices, _ in mesh_components(obj, points):
+                ordered = sorted(indices)
+                remap = {index: position for position, index in enumerate(ordered)}
+                triangles = [tuple(remap[index] for index in triangle.vertices)
+                             for triangle in obj.data.loop_triangles if triangle.vertices[0] in indices]
+                components.append((obj, ordered, triangles))
+        groups.append(components)
+    return groups
+
+
+def verify_source_junctions(description, clip):
+    """Check each intended neighbour before merging can hide a broken seam."""
+    for person in description["persons"]:
+        prefix = f"p{person['index']}_"
+        inverse = bpy.data.objects[prefix + "spine"].matrix_world.inverted()
+        for side in ("l", "r"):
+            pairs = [("body", f"sleeve_{side}"), (f"sleeve_{side}", f"arm_{side}"),
+                     (f"arm_{side}", f"hand_{side}"), ("body", f"leg_{side}")]
+            if person.get("posture") in {"shoulders", "stroller"}:
+                pairs.extend(((f"leg_{side}", f"shin_{side}"), (f"shin_{side}", f"shoe_{side}")))
+            else:
+                pairs.append((f"leg_{side}", f"shoe_{side}"))
+            for first, second in pairs:
+                a = bpy.data.objects[prefix + first + "_mesh"]
+                b = bpy.data.objects[prefix + second + "_mesh"]
+                points, _, surface = mesh_surface(a, inverse)
+                other_points, _, other_surface = mesh_surface(b, inverse)
+                assert surface.overlap(other_surface) or inside_surface(surface, other_points[0]) or inside_surface(other_surface, points[0]), f"open neighbouring junction {a.name}/{b.name} during {clip}"
+
+
+def verify_junctions(groups, clip):
+    for components in groups:
+        surfaces = []
+        for obj, indices, triangles in components:
+            points = [obj.matrix_world @ obj.data.vertices[index].co for index in indices]
+            low = Vector(tuple(min(point[axis] for point in points) for axis in range(3)))
+            high = Vector(tuple(max(point[axis] for point in points) for axis in range(3)))
+            surfaces.append((points, low, high, BVHTree.FromPolygons(points, triangles, all_triangles=True)))
+        connected = {0}
+        while True:
+            previous = len(connected)
+            for a in tuple(connected):
+                points, low, high, surface = surfaces[a]
+                for b, (other_points, other_low, other_high, other_surface) in enumerate(surfaces):
+                    if b in connected or any(low[axis] > other_high[axis] or high[axis] < other_low[axis] for axis in range(3)):
+                        continue
+                    if surface.overlap(other_surface) or inside_surface(surface, other_points[0]) or inside_surface(other_surface, points[0]):
+                        connected.add(b)
+            if len(connected) == previous:
+                break
+        assert len(connected) == len(components), f"open body/limb junction during {clip}: {[components[index][0].name for index in range(len(components)) if index not in connected]}"
+
+
+def test_source_junction_guard(description, clip):
+    for side in ("l", "r"):
+        hand = bpy.data.objects[f"p0_hand_{side}_mesh"]
+        original = hand.location.copy()
+        hand.location.x += 1
+        bpy.context.view_layer.update()
+        try:
+            verify_source_junctions(description, clip)
+        except AssertionError as error:
+            assert "open neighbouring junction" in str(error), str(error)
+        else:
+            raise AssertionError(f"junction guard accepts detached {side} hand")
+        finally:
+            hand.location = original
+            bpy.context.view_layer.update()
+
+
+def test_junction_guard(groups, clip):
+    obj, indices, _ = groups[0][-1]
+    original = [obj.data.vertices[index].co.copy() for index in indices]
+    for index in indices:
+        obj.data.vertices[index].co.x += 10
+    try:
+        verify_junctions(groups, clip)
+    except AssertionError as error:
+        assert "open body/limb junction" in str(error), str(error)
+    else:
+        raise AssertionError("junction guard accepts a detached limb segment")
+    finally:
+        for index, point in zip(indices, original):
+            obj.data.vertices[index].co = point
 
 
 def verify(description, exported=False):
@@ -289,6 +443,18 @@ def verify(description, exported=False):
     else:
         palette = load_palette()
         group = build_group(description, palette, build_material(palette))
+        rest = {obj.name: obj.matrix_basis.copy() for obj in group.children_recursive}
+        for clip in ("walk", "stop", "look", "point", "photo", "sit"):
+            end = select_clip(group, clip, rest)
+            samples = max(8, math.ceil(end) * 2)
+            for step in range(samples + 1):
+                frame = end * step / samples
+                bpy.context.scene.frame_set(int(frame), subframe=frame % 1)
+                verify_source_junctions(description, clip)
+                if step == 0:
+                    test_source_junction_guard(description, clip)
+        select_clip(group, "", rest)
+        bpy.context.scene.frame_set(0)
         # Reverse traversal to catch accidental dependence on creation order.
         merge_compatible_parts(SimpleNamespace(children_recursive=list(reversed(group.children_recursive))))
     meshes = [obj for obj in group.children_recursive if obj.type == "MESH"]
@@ -306,25 +472,30 @@ def verify(description, exported=False):
         assert len(faces) == 1, "facial details must share exactly one untinted head bucket"
         palette = load_palette()
         face_uvs = {tuple(round(value, 5) for value in loop.uv) for loop in faces[0].data.uv_layers.active.data}
-        expected = {tuple(round(value, 5) for value in palette.uv(color)) for color in ("eye_black", "eye_shine", "nose_dark")}
+        colors = ("eye_black", "eye_shine", "nose_dark", "fur_jaguar_light") if person.get("hair") == "sunhat" else ("eye_black", "eye_shine", "nose_dark")
+        expected = {tuple(round(value, 5) for value in palette.uv(color)) for color in colors}
         assert face_uvs == expected, "facial bucket lost the eyes, white catchlights or mouth"
         skin = bpy.data.objects[f"p{person['index']}_head_mesh"]
         assert all((loop.uv - Vector(palette.uv("eye_shine"))).length < 0.0001 for loop in skin.data.uv_layers.active.data), "facial details remain in the skin bucket"
     standing = [person for person in description["persons"] if person.get("posture", "standing") == "standing"]
+    proportions = prepare_proportions(description)
+    junctions = prepare_junctions(description, meshes)
     for clip in ("walk", "stop", "look", "point", "photo", "sit"):
         end = select_clip(group, clip, rest)
         assert end > 0, f"empty animation: {clip}"
-        samples = math.ceil(end) * 2
+        samples = max(8, math.ceil(end) * 2)
         for step in range(samples + 1):
             time = end * step / samples
             bpy.context.scene.frame_set(int(time), subframe=time % 1)
             for obj in meshes:
                 assert all(math.isfinite(value) for row in obj.matrix_world for value in row), f"invalid pose: {clip}"
-            verify_arm_lengths(description, meshes, clip)
-            verify_shoulder_legs(description, meshes, clip)
+            verify_arm_lengths(description, meshes, clip, proportions)
+            verify_shoulder_legs(description, meshes, clip, proportions)
+            verify_junctions(junctions, clip)
             if step == 0:
-                test_arm_guard(description, meshes, clip)
-                test_shoulder_guard(description, meshes, clip)
+                test_arm_guard(description, meshes, clip, proportions)
+                test_shoulder_guard(description, meshes, clip, proportions)
+                test_junction_guard(junctions, clip)
             for person in description["persons"]:
                 if person.get("posture") == "shoulders":
                     head = bpy.data.objects["p0_head"]
@@ -406,10 +577,12 @@ def verify(description, exported=False):
 
 
 def main():
+    started = time.perf_counter()
     for path in sorted((Path(__file__).parent / "descriptions").glob("*.json")):
         description = json.loads(path.read_text())
         verify(description)
         verify(description, exported=True)
+    print(f"[zoo-refuge] verify.py duration: {time.perf_counter() - started:.2f} s")
 
 
 if __name__ == "__main__":
