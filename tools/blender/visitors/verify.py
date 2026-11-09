@@ -22,6 +22,9 @@ ARM_TOLERANCE = 0.003
 ARM_SLEEVE_RATIO = 0.34
 ARM_SURFACE_MARGIN = 1.25
 CONTACT_TOLERANCE = 0.003
+CHILD_FOOT_MIN_SIDE_OFFSET = 0.08
+CHILD_FOOT_MAX_SIDE_OFFSET_RATIO = 1.3
+EYE_OCCLUSION_TOLERANCE = 0.003
 
 
 def select_clip(group, name, rest):
@@ -100,30 +103,38 @@ def test_arm_guard(description, meshes, clip, proportions):
         return
     prefix = f"p{child['index']}_"
     p = _derive_proportions(child)
-    arm = bpy.data.objects[prefix + "arm_l"]
-    original = list(arm["zooHand"])
-    old_endpoint = [-p["head_r"] * 0.65, -p["torso"] * 0.65 - p["head_r"] * 0.65, p["head_r"] * 0.65]
-    arm["zooHand"] = [value * (1 - ARM_SLEEVE_RATIO) for value in old_endpoint]
-    try:
-        verify_arm_lengths(description, meshes, clip, proportions)
-    except AssertionError as error:
-        assert "arm reach exceeds" in str(error), str(error)
-    else:
-        raise AssertionError(f"arm guard accepted the old shoulder-child reach during {clip}")
-    finally:
-        arm["zooHand"] = original
-    mesh = next(obj for obj in meshes if obj["zooPerson"] == child["index"] and obj["zooTint"] == "skin" and obj.parent.name == prefix + "spine")
-    vertex = mesh.data.vertices[0]
-    original_vertex = vertex.co.copy()
-    vertex.co.z -= child["height"]
-    try:
-        verify_arm_lengths(description, meshes, clip, proportions)
-    except AssertionError as error:
-        assert "arm geometry exceeds" in str(error), str(error)
-    else:
-        raise AssertionError(f"arm guard accepted elongated geometry during {clip}")
-    finally:
-        vertex.co = original_vertex
+    for side, sign in zip(("l", "r"), (-1, 1)):
+        arm = bpy.data.objects[prefix + f"arm_{side}"]
+        original = list(arm["zooHand"])
+        old_endpoint = [sign * p["head_r"] * 0.65,
+                        -p["torso"] * 0.65 - p["head_r"] * 0.65,
+                        p["head_r"] * 0.65]
+        arm["zooHand"] = [value * (1 - ARM_SLEEVE_RATIO) for value in old_endpoint]
+        try:
+            verify_arm_lengths(description, meshes, clip, proportions)
+        except AssertionError as error:
+            assert "arm reach exceeds" in str(error), str(error)
+        else:
+            raise AssertionError(f"arm guard accepted the old shoulder-child {side} reach during {clip}")
+        finally:
+            arm["zooHand"] = original
+
+        mesh = supported_arm_mesh(meshes, prefix, side)
+        grip = mesh.matrix_world.inverted() @ arm.matrix_world @ game_to_blender(arm["zooHand"])
+        points = [vertex.co.copy() for vertex in mesh.data.vertices]
+        components = mesh_components(mesh, points)
+        indices, _ = min(components, key=lambda component: (component[1] - grip).length)
+        for index in indices:
+            mesh.data.vertices[index].co.z -= child["height"]
+        try:
+            verify_arm_lengths(description, meshes, clip, proportions)
+        except AssertionError as error:
+            assert "arm geometry exceeds" in str(error), str(error)
+        else:
+            raise AssertionError(f"arm guard accepted elongated {side} geometry during {clip}")
+        finally:
+            for index, point in enumerate(points):
+                mesh.data.vertices[index].co = point
 
 
 def mesh_surface(obj, inverse):
@@ -215,7 +226,8 @@ def verify_shoulder_legs(description, meshes, clip, proportions):
             hip = inverse @ leg.matrix_world.translation
             assert (knee - hip).length <= small["leg_len"] * 1.5 and (foot - knee).length <= small["leg_len"] * 1.6, f"child leg exceeds normal length during {clip}"
             assert -knee.y > small["leg_len"] and -foot.y > small["leg_len"], f"child leg hangs behind parent during {clip}"
-            assert sign * foot.x > small["hip_w"] and center.z < foot.z < crown, f"child calf does not hang above forehead during {clip}"
+            verify_child_foot_lateral_offset(foot, sign, small["hip_w"], radius, clip)
+            assert center.z < foot.z < crown, f"child calf does not hang above forehead during {clip}"
             assert knee.z > foot.z + small["leg_len"] * 0.5, f"child calf is not hanging during {clip}"
             arm = bpy.data.objects[prefix + f"arm_{side}"]
             hand = inverse @ arm.matrix_world @ game_to_blender(arm["zooHand"])
@@ -237,9 +249,62 @@ def verify_shoulder_legs(description, meshes, clip, proportions):
                     centroid = sum((points[index] for index in triangles[child_triangle]), Vector()) / 3
                     assert held_contact(centroid), f"child leg surface crosses {obstacle.name} during {clip}: {tuple(centroid)}"
             assert all(-point.y > small["leg_len"] for point in points if point.z < knee.z - small["limb_r"]), f"child calf geometry hangs behind parent during {clip}"
-            eye_top = center.z + radius * 0.02
-            assert min(point.z for point in points) > eye_top, f"child covers parent eyes during {clip}"
         assert abs(feet[0].x + feet[1].x) < CONTACT_TOLERANCE and abs(feet[0].z - feet[1].z) < CONTACT_TOLERANCE and abs(feet[0].y - feet[1].y) < CONTACT_TOLERANCE, f"asymmetric child legs during {clip}"
+
+
+def verify_child_foot_lateral_offset(foot, sign, hip_width, head_radius, clip):
+    offset = sign * foot.x
+    assert hip_width < offset < head_radius * CHILD_FOOT_MAX_SIDE_OFFSET_RATIO, (
+        f"child feet spread beyond forehead during {clip}: side offset {offset:.4f} m"
+    )
+
+
+def verify_child_eye_clearance(description, meshes, clip):
+    for parent in description["persons"]:
+        child_index = parent.get("shoulderChild")
+        if child_index is None:
+            continue
+        parent_prefix = f"p{parent['index']}_"
+        child_prefix = f"p{child_index}_"
+        inverse = bpy.data.objects[parent_prefix + "spine"].matrix_world.inverted()
+        eyes = [bpy.data.objects.get(parent_prefix + f"eye_{side}_mesh") for side in ("l", "r")]
+        eye_points = []
+        if all(eye is not None for eye in eyes):
+            for eye in eyes:
+                if eye is None:
+                    continue
+                eye_points.append([inverse @ eye.matrix_world @ vertex.co for vertex in eye.data.vertices])
+        else:
+            head = bpy.data.objects[parent_prefix + "head"]
+            face = next(obj for obj in meshes if obj.parent == head and obj["zooTint"] == "none")
+            points = [inverse @ face.matrix_world @ vertex.co for vertex in face.data.vertices]
+            components = sorted(
+                mesh_components(face, points),
+                key=lambda component: len(component[0]),
+                reverse=True,
+            )
+            eye_components = components[:2]
+            assert len(eye_components) == 2, f"missing parent eye geometry during {clip}"
+            eye_points.extend([[points[index] for index in indices] for indices, _ in eye_components])
+
+        eye_bounds = []
+        for points in eye_points:
+            low = Vector(tuple(min(point[axis] for point in points) for axis in range(3)))
+            high = Vector(tuple(max(point[axis] for point in points) for axis in range(3)))
+            eye_bounds.append((low, high))
+
+        for obj in meshes:
+            if obj.get("zooPerson") != child_index or not any(
+                part in obj.name for part in ("_leg_", "_shin_", "_shoe_")
+            ):
+                continue
+            for vertex in obj.data.vertices:
+                point = inverse @ obj.matrix_world @ vertex.co
+                for low, high in eye_bounds:
+                    in_eye_projection = low.x <= point.x <= high.x and low.z <= point.z <= high.z
+                    assert not (
+                        in_eye_projection and point.y < low.y - EYE_OCCLUSION_TOLERANCE
+                    ), f"child covers parent eyes during {clip}: {tuple(point)}"
 
 
 def test_shoulder_guard(description, meshes, clip, proportions):
@@ -451,6 +516,11 @@ def verify(description, exported=False):
                 frame = end * step / samples
                 bpy.context.scene.frame_set(int(frame), subframe=frame % 1)
                 verify_source_junctions(description, clip)
+                verify_child_eye_clearance(
+                    description,
+                    [obj for obj in group.children_recursive if obj.type == "MESH"],
+                    clip,
+                )
                 if step == 0:
                     test_source_junction_guard(description, clip)
         select_clip(group, "", rest)
@@ -490,6 +560,7 @@ def verify(description, exported=False):
             for obj in meshes:
                 assert all(math.isfinite(value) for row in obj.matrix_world for value in row), f"invalid pose: {clip}"
             verify_arm_lengths(description, meshes, clip, proportions)
+            verify_child_eye_clearance(description, meshes, clip)
             verify_shoulder_legs(description, meshes, clip, proportions)
             verify_junctions(junctions, clip)
             if step == 0:

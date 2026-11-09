@@ -17,9 +17,16 @@ sys.path.insert(0, str(VISITORS_DIR))
 from build import EXPECTED_CLIP_NAMES, build_group, _count_triangles_per_person  # noqa: E402
 from human import game_to_blender, HAIR_SEGMENTS  # noqa: E402
 from palette import build_material, load_palette  # noqa: E402
-from verify import verify_source_junctions  # noqa: E402
+from verify import (  # noqa: E402
+    CHILD_FOOT_MAX_SIDE_OFFSET_RATIO,
+    CHILD_FOOT_MIN_SIDE_OFFSET,
+    verify_child_eye_clearance,
+    verify_child_foot_lateral_offset,
+    verify_source_junctions,
+)
 
 EPSILON = 0.0001
+GUARD_PERTURBATION = 0.01
 
 
 def _assert(condition, message):
@@ -176,8 +183,12 @@ def _test_rest(description, root):
                 for side, sign in (("l", -1), ("r", 1)):
                     leg = bpy.data.objects[f"p{idx}_leg_{side}"]
                     foot = leg.matrix_world @ game_to_blender(leg["zooFoot"])
-                    _assert(sign * (foot.x - head_center.x) > 0.08,
-                            "child's legs are not on opposite sides of the forehead")
+                    side_offset = sign * (foot.x - head_center.x)
+                    _assert(
+                        CHILD_FOOT_MIN_SIDE_OFFSET < side_offset <
+                        head_radius * CHILD_FOOT_MAX_SIDE_OFFSET_RATIO,
+                        "child's legs are not beside the forehead",
+                    )
                     _assert(head_center.z + head_radius * 0.02 < foot.z <
                             head_center.z + head_radius * 1.03,
                             "child's feet do not hang beside the head without covering its eyes")
@@ -234,6 +245,11 @@ def _test_clips(description, root):
             bpy.context.scene.frame_set(int(frame), subframe=frame % 1)
             bpy.context.view_layer.update()
             verify_source_junctions(description, clip)
+            verify_child_eye_clearance(
+                description,
+                [obj for obj in root.children_recursive if obj.type == "MESH"],
+                clip,
+            )
             for person in description["persons"]:
                 idx = person["index"]
                 if person.get("posture") in {"stroller", "shoulders"}:
@@ -256,6 +272,56 @@ def _test_clips(description, root):
     print(f"[zoo-refuge] {description['archetypeId']}: six clips, nine samples each passed")
 
 
+def _test_shoulder_clearance_guards(description, root):
+    parent = next((person for person in description["persons"]
+                   if person.get("shoulderChild") is not None), None)
+    if parent is None:
+        return
+    meshes = [obj for obj in root.children_recursive if obj.type == "MESH"]
+    child_index = parent["shoulderChild"]
+    parent_spine = bpy.data.objects[f"p{parent['index']}_spine"]
+    parent_head = bpy.data.objects[f"p{parent['index']}_head"]
+
+    try:
+        verify_child_foot_lateral_offset(
+            Vector((
+                parent_head["zooHeadRadius"] * CHILD_FOOT_MAX_SIDE_OFFSET_RATIO
+                + GUARD_PERTURBATION,
+                0,
+                0,
+            )),
+            1,
+            CHILD_FOOT_MIN_SIDE_OFFSET,
+            parent_head["zooHeadRadius"],
+            "stop",
+        )
+    except AssertionError as error:
+        _assert("child feet spread beyond forehead" in str(error), str(error))
+    else:
+        raise AssertionError("shoulder guard accepts feet spread beyond the parent head")
+
+    eye = bpy.data.objects[f"p{parent['index']}_eye_l_mesh"]
+    eye_points = [parent_spine.matrix_world.inverted() @ eye.matrix_world @ vertex.co
+                  for vertex in eye.data.vertices]
+    target = Vector((
+        (min(point.x for point in eye_points) + max(point.x for point in eye_points)) * 0.5,
+        min(point.y for point in eye_points) - GUARD_PERTURBATION,
+        (min(point.z for point in eye_points) + max(point.z for point in eye_points)) * 0.5,
+    ))
+    leg_mesh = bpy.data.objects[f"p{child_index}_leg_l_mesh"]
+    vertex = leg_mesh.data.vertices[0]
+    original_vertex = vertex.co.copy()
+    vertex.co = leg_mesh.matrix_world.inverted() @ parent_spine.matrix_world @ target
+    try:
+        verify_child_eye_clearance(description, meshes, "stop")
+    except AssertionError as error:
+        _assert("child covers parent eyes" in str(error), str(error))
+    else:
+        raise AssertionError("shoulder guard accepts a child leg point in front of the parent's eye")
+    finally:
+        vertex.co = original_vertex
+
+
 def main():
     for path in sorted((VISITORS_DIR / "descriptions").glob("*.json")):
         bpy.ops.wm.read_factory_settings(use_empty=True)
@@ -264,6 +330,7 @@ def main():
         root = build_group(description, palette, build_material(palette))
         bpy.context.view_layer.update()
         _test_rest(description, root)
+        _test_shoulder_clearance_guards(description, root)
         _test_faces(description)
         _test_clips(description, root)
     print("[zoo-refuge] visitor pose regression checks passed")
