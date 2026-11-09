@@ -15,7 +15,7 @@ export interface ModelReport {
   readonly problems: readonly string[];
 }
 
-function describeGlbError(error: GlbError): string {
+export function describeGlbError(error: GlbError): string {
   switch (error.kind) {
     case 'tooShort':
       return `file is too short to be a .glb (${String(error.bytes)} bytes)`;

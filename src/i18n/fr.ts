@@ -5,6 +5,7 @@
 export const fr = {
   'app.title': 'Zoo Refuge',
   'app.loading': 'Préparation du parc…',
+  'visitor.closeThought': 'Fermer la pensée du visiteur',
   'dev.fpsUnit': 'i/s',
   'species.capybara.name': 'Capybara',
   'species.capybara.signature': "Museau carré, corps en tonneau, zen dans l'eau",
