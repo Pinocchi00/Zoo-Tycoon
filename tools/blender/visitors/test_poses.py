@@ -300,7 +300,8 @@ def _test_shoulder_clearance_guards(description, root):
     else:
         raise AssertionError("shoulder guard accepts feet spread beyond the parent head")
 
-    eye = bpy.data.objects[f"p{parent['index']}_eye_l_mesh"]
+    eye_objects = [bpy.data.objects[f"p{parent['index']}_eye_{side}_mesh"] for side in ("l", "r")]
+    eye = eye_objects[0]
     eye_points = [parent_spine.matrix_world.inverted() @ eye.matrix_world @ vertex.co
                   for vertex in eye.data.vertices]
     target = Vector((
@@ -311,15 +312,20 @@ def _test_shoulder_clearance_guards(description, root):
     leg_mesh = bpy.data.objects[f"p{child_index}_leg_l_mesh"]
     vertex = leg_mesh.data.vertices[0]
     original_vertex = vertex.co.copy()
-    vertex.co = leg_mesh.matrix_world.inverted() @ parent_spine.matrix_world @ target
+    original_names = [obj.name for obj in eye_objects]
     try:
+        for obj in eye_objects:
+            obj.name = f"{obj.name}_fallback_test"
+        vertex.co = leg_mesh.matrix_world.inverted() @ parent_spine.matrix_world @ target
         verify_child_eye_clearance(description, meshes, "stop")
     except AssertionError as error:
         _assert("child covers parent eyes" in str(error), str(error))
     else:
-        raise AssertionError("shoulder guard accepts a child leg point in front of the parent's eye")
+        raise AssertionError("shoulder fallback accepts a child leg point in front of the parent's eye")
     finally:
         vertex.co = original_vertex
+        for obj, name in zip(eye_objects, original_names):
+            obj.name = name
 
 
 def main():

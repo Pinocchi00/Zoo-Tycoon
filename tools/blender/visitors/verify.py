@@ -259,6 +259,21 @@ def verify_child_foot_lateral_offset(foot, sign, hip_width, head_radius, clip):
     )
 
 
+def is_eye_component(points, radius):
+    low = Vector(tuple(min(point[axis] for point in points) for axis in range(3)))
+    high = Vector(tuple(max(point[axis] for point in points) for axis in range(3)))
+    center = (low + high) * 0.5
+    width, depth, height = (high - low)
+    return (
+        radius * 0.30 <= abs(center.x) <= radius * 0.56
+        and -radius * 0.90 <= center.y <= -radius * 0.65
+        and -radius * 0.38 <= center.z <= -radius * 0.10
+        and radius * 0.30 <= width <= radius * 0.48
+        and depth <= radius * 0.16
+        and radius * 0.38 <= height <= radius * 0.62
+    )
+
+
 def verify_child_eye_clearance(description, meshes, clip):
     for parent in description["persons"]:
         child_index = parent.get("shoulderChild")
@@ -276,16 +291,20 @@ def verify_child_eye_clearance(description, meshes, clip):
                 eye_points.append([inverse @ eye.matrix_world @ vertex.co for vertex in eye.data.vertices])
         else:
             head = bpy.data.objects[parent_prefix + "head"]
-            face = next(obj for obj in meshes if obj.parent == head and obj["zooTint"] == "none")
-            points = [inverse @ face.matrix_world @ vertex.co for vertex in face.data.vertices]
-            components = sorted(
-                mesh_components(face, points),
-                key=lambda component: len(component[0]),
-                reverse=True,
-            )
-            eye_components = components[:2]
-            assert len(eye_components) == 2, f"missing parent eye geometry during {clip}"
-            eye_points.extend([[points[index] for index in indices] for indices, _ in eye_components])
+            radius = head["zooHeadRadius"]
+            head_inverse = head.matrix_world.inverted()
+            eye_components = []
+            for face in meshes:
+                if face.parent != head or face.get("zooTint") != "none":
+                    continue
+                head_points = [head_inverse @ face.matrix_world @ vertex.co for vertex in face.data.vertices]
+                world_points = [inverse @ face.matrix_world @ vertex.co for vertex in face.data.vertices]
+                for indices, _ in mesh_components(face, head_points):
+                    component = [head_points[index] for index in indices]
+                    if is_eye_component(component, radius):
+                        eye_components.append([world_points[index] for index in indices])
+            assert len(eye_components) == 2, f"could not identify both parent eye components during {clip}"
+            eye_points.extend(eye_components)
 
         eye_bounds = []
         for points in eye_points:
