@@ -13,9 +13,9 @@ import { MM_PER_CELL, type VisitorState } from '@/sim';
 import { randomFloat, type RngState } from '@/sim/rng';
 import {
   advanceWalkPhase,
+  advanceAngularSpring,
   computeBlendedPoseMatrices,
   MIN_WALK_STOP_MS,
-  smoothTurnTowards,
   walkingClipForStationaryTime,
 } from './animation';
 import { createInstancedCrowd, type GroupRenderData } from './instanced-crowd';
@@ -44,6 +44,52 @@ const STAGGERED_RING_PHASE = 0.5;
 const TWO_PI = Math.PI * 2;
 const compareVisitorIds = (left: GroupState, right: GroupState): number =>
   left.id < right.id ? -1 : left.id > right.id ? 1 : 0;
+
+function sortGroupStatesInPlace(states: (GroupState | undefined)[], length: number): void {
+  let start = Math.floor(length / 2) - 1;
+  while (start >= 0) {
+    siftGroupStates(states, start, length);
+    start -= 1;
+  }
+  let end = length - 1;
+  while (end > 0) {
+    const first = states[0];
+    const last = states[end];
+    if (first === undefined || last === undefined)
+      throw new Error('Candidate buffer is incomplete.');
+    states[0] = last;
+    states[end] = first;
+    siftGroupStates(states, 0, end);
+    end -= 1;
+  }
+}
+
+function siftGroupStates(
+  states: (GroupState | undefined)[],
+  initialRoot: number,
+  end: number,
+): void {
+  let root = initialRoot;
+  while (root * 2 + 1 < end) {
+    let childIndex = root * 2 + 1;
+    const left = states[childIndex];
+    if (left === undefined) throw new Error('Candidate buffer is incomplete.');
+    const rightIndex = childIndex + 1;
+    const right = states[rightIndex];
+    if (rightIndex < end && right === undefined) throw new Error('Candidate buffer is incomplete.');
+    if (rightIndex < end && right !== undefined && compareVisitorIds(left, right) < 0)
+      childIndex = rightIndex;
+    const parent = states[root];
+    const child = states[childIndex];
+    if (parent === undefined || child === undefined)
+      throw new Error('Candidate buffer is incomplete.');
+    if (compareVisitorIds(parent, child) >= 0) return;
+    states[root] = child;
+    states[childIndex] = parent;
+    root = childIndex;
+  }
+}
+
 const MODEL_URLS = import.meta.glob<string>('../../../assets/models/visitors/*.glb', {
   query: '?url',
   import: 'default',
@@ -59,6 +105,7 @@ async function defaultLoadSource(
 }
 interface GroupState {
   readonly id: VisitorId;
+  activeIndex: number;
   readonly rng: RngState;
   readonly memberPhases: number[];
   readonly visualOffset: { readonly x: number; readonly z: number };
@@ -72,6 +119,7 @@ interface GroupState {
   targetZ: number;
   yaw: number;
   targetYaw: number;
+  yawVelocity: number;
   parkedCell: number | null;
   parkedSlot: number;
   stoppingOffsetX: number;
@@ -101,7 +149,10 @@ export function createVisitorCrowd(options: VisitorCrowdOptions): VisitorCrowd {
   const attempted = new Set<string>();
   const states = new Map<VisitorId, GroupState>();
   const activeStates: GroupState[] = [];
-  const parkingCandidates: GroupState[] = [];
+  const parkingCandidates: (GroupState | undefined)[] = [];
+  const stoppedCellHeads = new Int32Array(grid.rows * grid.columns);
+  let nextStoppedByState = new Int32Array(0);
+  let parkingCandidateCount = 0;
   const stoppingPlace = { x: 0, z: 0 };
   const material = new MeshStandardMaterial({ color: 0xffffff });
   const crowd = createInstancedCrowd(parent, material, options.quality);
@@ -179,6 +230,7 @@ export function createVisitorCrowd(options: VisitorCrowdOptions): VisitorCrowd {
         : 0;
     const state: GroupState = {
       id: visitor.id,
+      activeIndex: activeStates.length,
       rng,
       memberPhases: [],
       visualOffset: visitorVisualOffset(visitor.id),
@@ -192,6 +244,7 @@ export function createVisitorCrowd(options: VisitorCrowdOptions): VisitorCrowd {
       targetZ: z,
       yaw: initialYaw,
       targetYaw: initialYaw,
+      yawVelocity: 0,
       parkedCell: null,
       parkedSlot: -1,
       stoppingOffsetX: 0,
@@ -227,54 +280,39 @@ export function createVisitorCrowd(options: VisitorCrowdOptions): VisitorCrowd {
     );
   }
   function reconcileStoppingPlaces(): void {
-    parkingCandidates.length = 0;
+    stoppedCellHeads.fill(-1);
+    parkingCandidateCount = 0;
     let index = 0;
     while (index < activeStates.length) {
       const state = activeStates[index];
       index += 1;
       if (state === undefined) continue;
       const cell = state.visitor.row * grid.columns + state.visitor.column;
-      if (
-        !shouldHaveStoppingPlace(state) ||
-        (state.parkedCell !== null && state.parkedCell !== cell)
-      ) {
+      const needsPlace = shouldHaveStoppingPlace(state);
+      if (!needsPlace || (state.parkedCell !== null && state.parkedCell !== cell)) {
         state.parkedCell = null;
         state.parkedSlot = -1;
         state.targetStoppingOffsetX = 0;
         state.targetStoppingOffsetZ = 0;
       }
-      if (shouldHaveStoppingPlace(state) && state.parkedCell === null)
-        parkingCandidates.push(state);
-    }
-    let first = 0;
-    while (first < parkingCandidates.length) {
-      let smallest = first;
-      let candidate = first + 1;
-      while (candidate < parkingCandidates.length) {
-        const current = parkingCandidates[candidate];
-        const selected = parkingCandidates[smallest];
-        if (
-          current !== undefined &&
-          selected !== undefined &&
-          compareVisitorIds(current, selected) < 0
-        )
-          smallest = candidate;
-        candidate += 1;
+      if (needsPlace) {
+        if (state.parkedCell === null) {
+          parkingCandidates[parkingCandidateCount] = state;
+          parkingCandidateCount += 1;
+        } else if (cell >= 0 && cell < stoppedCellHeads.length) {
+          nextStoppedByState[state.activeIndex] = stoppedCellHeads[cell] ?? -1;
+          stoppedCellHeads[cell] = state.activeIndex;
+        }
       }
-      const current = parkingCandidates[first];
-      const selected = parkingCandidates[smallest];
-      if (current !== undefined && selected !== undefined) {
-        parkingCandidates[first] = selected;
-        parkingCandidates[smallest] = current;
-      }
-      first += 1;
     }
+    sortGroupStatesInPlace(parkingCandidates, parkingCandidateCount);
     index = 0;
-    while (index < parkingCandidates.length) {
+    while (index < parkingCandidateCount) {
       const state = parkingCandidates[index];
       index += 1;
       if (state === undefined) continue;
       const cell = state.visitor.row * grid.columns + state.visitor.column;
+      if (cell < 0 || cell >= stoppedCellHeads.length) continue;
       let slot = 0;
       let foundPlace = false;
       while (!foundPlace) {
@@ -282,11 +320,15 @@ export function createVisitorCrowd(options: VisitorCrowdOptions): VisitorCrowd {
         setStoppingPlaceOffset(slot, stoppingPlace);
         const candidateX = cellCenterX(grid, state.visitor.column) + stoppingPlace.x;
         const candidateZ = cellCenterZ(grid, state.visitor.row) + stoppingPlace.z;
-        let activeIndex = 0;
-        while (activeIndex < activeStates.length) {
-          const other = activeStates[activeIndex];
-          activeIndex += 1;
-          if (other === undefined || other === state || other.parkedCell !== cell) continue;
+        let otherIndex = stoppedCellHeads[cell] ?? -1;
+        while (otherIndex >= 0) {
+          const other = activeStates[otherIndex];
+          if (other === undefined) break;
+          const nextIndex = nextStoppedByState[otherIndex] ?? -1;
+          if (other === state || other.parkedCell !== cell) {
+            otherIndex = nextIndex;
+            continue;
+          }
           if (other.parkedSlot === slot) {
             occupied = true;
             slot += 1;
@@ -299,6 +341,7 @@ export function createVisitorCrowd(options: VisitorCrowdOptions): VisitorCrowd {
             slot += 1;
             break;
           }
+          otherIndex = nextIndex;
         }
         foundPlace = !occupied;
       }
@@ -319,6 +362,13 @@ export function createVisitorCrowd(options: VisitorCrowdOptions): VisitorCrowd {
             stoppingPlace.z -
             state.targetZ -
             state.visualOffset.z;
+      nextStoppedByState[state.activeIndex] = stoppedCellHeads[cell] ?? -1;
+      stoppedCellHeads[cell] = state.activeIndex;
+    }
+    index = 0;
+    while (index < parkingCandidateCount) {
+      parkingCandidates[index] = undefined;
+      index += 1;
     }
     parkingNeedsReconcile = false;
   }
@@ -374,16 +424,23 @@ export function createVisitorCrowd(options: VisitorCrowdOptions): VisitorCrowd {
       }));
       const active = new Set(layout.map((group) => group.id));
       for (const id of states.keys()) if (!active.has(id)) states.delete(id);
-      for (let index = activeStates.length - 1; index >= 0; index -= 1) {
-        const state = activeStates[index];
-        if (state !== undefined && !active.has(state.id)) activeStates.splice(index, 1);
+      let readIndex = 0;
+      let writeIndex = 0;
+      while (readIndex < activeStates.length) {
+        const state = activeStates[readIndex];
+        readIndex += 1;
+        if (state === undefined || !active.has(state.id)) continue;
+        state.activeIndex = writeIndex;
+        activeStates[writeIndex] = state;
+        writeIndex += 1;
       }
+      activeStates.length = writeIndex;
       rebuild();
     }
-    if (parkingCandidates.length < activeStates.length) {
+    if (nextStoppedByState.length < activeStates.length)
+      nextStoppedByState = new Int32Array(activeStates.length);
+    if (parkingCandidates.length < activeStates.length)
       parkingCandidates.length = activeStates.length;
-      parkingCandidates.length = 0;
-    }
     parkingNeedsReconcile = true;
     reconcileStoppingPlaces();
   }
@@ -406,10 +463,7 @@ export function createVisitorCrowd(options: VisitorCrowdOptions): VisitorCrowd {
   }
   function advanceGroup(state: GroupState, elapsedMs: number): void {
     const elapsedS = elapsedMs / MS_PER_SECOND;
-    const wasStoppedWalking =
-      state.visitor.activity === 'walking' &&
-      state.hasMoved &&
-      state.stationaryMs >= MIN_WALK_STOP_MS;
+    const wasStoppedWalking = shouldHaveStoppingPlace(state);
     state.interpolationMs = Math.min(
       state.interpolationDurationMs,
       state.interpolationMs + elapsedMs,
@@ -427,15 +481,12 @@ export function createVisitorCrowd(options: VisitorCrowdOptions): VisitorCrowd {
       state.hasMoved = true;
       state.stationaryMs = 0;
     } else state.stationaryMs += elapsedMs;
-    const isStoppedWalking =
-      state.visitor.activity === 'walking' &&
-      state.hasMoved &&
-      state.stationaryMs >= MIN_WALK_STOP_MS;
+    const isStoppedWalking = shouldHaveStoppingPlace(state);
     if (wasStoppedWalking !== isStoppedWalking) parkingNeedsReconcile = true;
     const stoppingBlend = 1 - Math.exp(-elapsedS / STOPPING_PLACE_TIME_CONSTANT_S);
     state.stoppingOffsetX += (state.targetStoppingOffsetX - state.stoppingOffsetX) * stoppingBlend;
     state.stoppingOffsetZ += (state.targetStoppingOffsetZ - state.stoppingOffsetZ) * stoppingBlend;
-    state.yaw = smoothTurnTowards(state.yaw, state.targetYaw, elapsedMs);
+    advanceAngularSpring(state, elapsedMs);
     const target = targetClip(state, elapsedS);
     if (target !== state.nextClip) {
       if (target === state.currentClip) {

@@ -13,7 +13,7 @@ import { ok, type Result } from '@/shared';
 import type { VisitorState } from '@/sim';
 import { createVisitorCrowd } from './crowd';
 import { createInstancedCrowd } from './instanced-crowd';
-import { MAX_SMOOTH_YAW_RAD_PER_SECOND, smoothTurnTowards } from './animation';
+import { MAX_SMOOTH_YAW_RAD_PER_SECOND } from './animation';
 import { prototype, source, unwrap, visitor } from './test-fixtures';
 import { isShadowCastingPiece, prepareVisitorSource } from './model-source';
 import type { VisitorCrowd, VisitorModelProblem, VisitorSource } from './types';
@@ -123,6 +123,61 @@ describe('instanced visitor runtime', () => {
       crowd.dispose();
     },
   );
+  it('assigns distinct stopping places to 200 visitors on one cell without per-reconcile array allocations', async () => {
+    const list = Array.from({ length: 200 }, (_, index) => {
+      const item = visitor(index + 1, 'teen-photographer', 1);
+      item.nextColumn = 2;
+      return item;
+    });
+    const { crowd, world } = await loaded(list);
+    const view = new OrthographicCamera(-100, 100, 100, -100, 0.1, 100);
+    view.position.set(0, 10, 0);
+    view.up.set(0, 0, -1);
+    view.lookAt(0, 0, 0);
+    view.updateMatrixWorld(true);
+    const mapped = vi.spyOn(Array.prototype, 'map');
+    const filtered = vi.spyOn(Array.prototype, 'filter');
+    const sliced = vi.spyOn(Array.prototype, 'slice');
+    const pushed = vi.spyOn(Array.prototype, 'push');
+    try {
+      for (const item of list) {
+        item.progressMm = 100;
+        item.updatedAtMs = 100;
+      }
+      crowd.syncAll(world);
+      crowd.update(100);
+      for (const item of list) {
+        item.progressMm = 0;
+        item.nextColumn = item.column;
+        item.updatedAtMs = 200;
+      }
+      crowd.syncAll(world);
+      crowd.update(100);
+      crowd.update(100);
+      crowd.update(200);
+      crowd.update(5000);
+    } finally {
+      mapped.mockRestore();
+      filtered.mockRestore();
+      sliced.mockRestore();
+      pushed.mockRestore();
+    }
+    expect(mapped).not.toHaveBeenCalled();
+    expect(filtered).not.toHaveBeenCalled();
+    expect(sliced).not.toHaveBeenCalled();
+    expect(pushed).not.toHaveBeenCalled();
+
+    const positions = list.map((item) => screenPosition(crowd, item.id, view));
+    for (let first = 0; first < positions.length; first += 1) {
+      for (let second = first + 1; second < positions.length; second += 1) {
+        const a = positions[first];
+        const b = positions[second];
+        if (a === undefined || b === undefined) throw new Error('Missing visitor position.');
+        expect(Math.hypot(a.x - b.x, a.y - b.y)).toBeGreaterThanOrEqual(2.5 - 1e-4);
+      }
+    }
+    crowd.dispose();
+  });
   it('assigns places deterministically and keeps existing places when groups join or leave', async () => {
     async function positionsFor(
       order: readonly number[],
@@ -245,7 +300,7 @@ describe('instanced visitor runtime', () => {
     expect(matrixOf(arm).elements).toEqual(resumedWalkingPose);
     crowd.dispose();
   });
-  it('smooths crowd orientation and initializes a walking visitor facing its route', async () => {
+  it('smoothly springs crowd orientation and initializes a walking visitor facing its route', async () => {
     const item = visitor(1, 'teen-photographer', 1);
     item.nextRow = 2;
     const { crowd, parent, world } = await loaded([item]);
@@ -268,15 +323,6 @@ describe('instanced visitor runtime', () => {
     const appearing = await loaded([facing]);
     expect(yawOf(mesh(appearing.parent, 'teen-photographer:p0_arm'))).toBeCloseTo(Math.PI / 2);
     appearing.crowd.dispose();
-  });
-  it('smoothly turns from positive 170 degrees to negative 170 by the short path', () => {
-    const start = (170 * Math.PI) / 180;
-    const target = (-170 * Math.PI) / 180;
-    const result = smoothTurnTowards(start, target, 100);
-    const signedTurn = Math.atan2(Math.sin(result - start), Math.cos(result - start));
-    expect(signedTurn).toBeGreaterThan(0);
-    expect(signedTurn).toBeLessThan((20 * Math.PI) / 180);
-    expect(signedTurn).toBeLessThanOrEqual((MAX_SMOOTH_YAW_RAD_PER_SECOND * 100) / 1000);
   });
   it.each([
     ['p0_body_mesh', true],

@@ -8,10 +8,12 @@ export const WALK_CYCLE_DISTANCE_M = 0.45;
 export const MIN_WALK_STOP_MS = 300;
 /** Limits turns to one full revolution per second, avoiding instantaneous corner snaps. */
 export const MAX_YAW_RAD_PER_SECOND = Math.PI * 2;
-/** Smooths visitor turns over a quarter second while keeping them responsive. */
-export const YAW_TIME_CONSTANT_S = 0.25;
-/** Keeps crowded-visitor turns gentle even when the target direction changes sharply. */
-export const MAX_SMOOTH_YAW_RAD_PER_SECOND = Math.PI;
+/** A 0.4 s critically damped spring gives a broad turn without oscillation. */
+export const YAW_SMOOTH_TIME_S = 0.4;
+/** Caps turns at 135°/s so even a reversal takes a visibly unhurried path. */
+export const MAX_SMOOTH_YAW_RAD_PER_SECOND = Math.PI * 0.75;
+const ANGLE_SETTLE_TOLERANCE_RAD = 0.0001;
+const ANGULAR_VELOCITY_SETTLE_TOLERANCE = 0.0001;
 const positionA = new Vector3();
 const positionB = new Vector3();
 const quaternionA = new Quaternion();
@@ -37,14 +39,55 @@ export function turnTowards(current: number, target: number, elapsedMs: number):
   return current + change;
 }
 
-/** Exponentially smooths orientation along the shortest path with a bounded turn speed. */
-export function smoothTurnTowards(current: number, target: number, elapsedMs: number): number {
+export interface AngularSpringState {
+  yaw: number;
+  targetYaw: number;
+  yawVelocity: number;
+}
+
+/** Advances a critically damped angular spring along the shortest path without overshoot. */
+export function advanceAngularSpring(state: AngularSpringState, elapsedMs: number): void {
   const elapsedS = Math.max(0, elapsedMs) / 1000;
-  const difference = Math.atan2(Math.sin(target - current), Math.cos(target - current));
-  const smoothing = 1 - Math.exp(-elapsedS / YAW_TIME_CONSTANT_S);
-  const requestedChange = difference * smoothing;
-  const maxChange = MAX_SMOOTH_YAW_RAD_PER_SECOND * elapsedS;
-  return current + Math.max(-maxChange, Math.min(maxChange, requestedChange));
+  if (elapsedS === 0) return;
+
+  const difference = Math.atan2(
+    Math.sin(state.targetYaw - state.yaw),
+    Math.cos(state.targetYaw - state.yaw),
+  );
+  if (
+    Math.abs(difference) <= ANGLE_SETTLE_TOLERANCE_RAD &&
+    Math.abs(state.yawVelocity) <= ANGULAR_VELOCITY_SETTLE_TOLERANCE
+  ) {
+    state.yaw = state.targetYaw;
+    state.yawVelocity = 0;
+    return;
+  }
+
+  const target = state.yaw + difference;
+  const omega = 2 / YAW_SMOOTH_TIME_S;
+  const error = state.yaw - target;
+  const springTerm = state.yawVelocity + omega * error;
+  const decay = Math.exp(-omega * elapsedS);
+  const requestedYaw = target + (error + springTerm * elapsedS) * decay;
+  const requestedVelocity = (state.yawVelocity - omega * springTerm * elapsedS) * decay;
+  const yawChange = requestedYaw - state.yaw;
+  const maximumChange = MAX_SMOOTH_YAW_RAD_PER_SECOND * elapsedS;
+
+  if (Math.abs(yawChange) > maximumChange) {
+    state.yaw += Math.sign(yawChange) * maximumChange;
+    state.yawVelocity = Math.sign(yawChange) * MAX_SMOOTH_YAW_RAD_PER_SECOND;
+  } else {
+    state.yaw = requestedYaw;
+    state.yawVelocity = Math.max(
+      -MAX_SMOOTH_YAW_RAD_PER_SECOND,
+      Math.min(MAX_SMOOTH_YAW_RAD_PER_SECOND, requestedVelocity),
+    );
+  }
+
+  if ((difference > 0 && state.yaw >= target) || (difference < 0 && state.yaw <= target)) {
+    state.yaw = target;
+    state.yawVelocity = 0;
+  }
 }
 
 export function sampleNodeLocal(
