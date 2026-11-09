@@ -24,11 +24,15 @@ from verify import (  # noqa: E402
     verify_child_eye_clearance,
     verify_child_foot_lateral_offset,
     verify_source_junctions,
+    verify_sunhat_contact,
+    maximum_vertical_surface_gap,
+    upper_surface_triangles,
 )
 
 EPSILON = 0.0001
 GUARD_PERTURBATION = 0.01
 SUNHAT_MIN_VISIBLE_BRIM_DIAMETER_TO_HEAD_WIDTH = 1.05
+SUNHAT_FLOATING_CROWN_OFFSET_RATIO = 0.10
 
 
 def _assert(condition, message):
@@ -255,6 +259,25 @@ def _test_clips(description, root):
             bpy.context.scene.frame_set(int(frame), subframe=frame % 1)
             bpy.context.view_layer.update()
             verify_source_junctions(description, clip)
+            meshes = [obj for obj in root.children_recursive if obj.type == "MESH"]
+            verify_sunhat_contact(description, meshes)
+            for person in description["persons"]:
+                if person.get("hair") != "sunhat":
+                    continue
+                prefix = f"p{person['index']}_"
+                crown = bpy.data.objects[prefix + "hair_mesh"]
+                original = crown.location.copy()
+                crown.location.z += bpy.data.objects[prefix + "head"]["zooHeadRadius"] * SUNHAT_FLOATING_CROWN_OFFSET_RATIO
+                bpy.context.view_layer.update()
+                try:
+                    verify_sunhat_contact(description, meshes)
+                except AssertionError as error:
+                    _assert("sunhat crown gap exceeds tolerance" in str(error), str(error))
+                else:
+                    raise AssertionError(f"sunhat guard accepts a floating crown during {clip}")
+                finally:
+                    crown.location = original
+                    bpy.context.view_layer.update()
             verify_child_eye_clearance(
                 description,
                 [obj for obj in root.children_recursive if obj.type == "MESH"],
@@ -339,6 +362,23 @@ def _test_shoulder_clearance_guards(description, root):
 
 
 def main():
+    # A local dip between the former vertex/midpoint/centroid samples must count.
+    crown = [Vector((0, 0, 0)), Vector((1, 0, 0)), Vector((0, 1, 0))]
+    skull = [*crown, Vector((0.22, 0.17, -0.10))]
+    gap = maximum_vertical_surface_gap(
+        upper_surface_triangles(crown, [(0, 1, 2)]),
+        upper_surface_triangles(skull, [(0, 1, 3), (1, 2, 3), (2, 0, 3)]),
+    )
+    _assert(abs(gap - 0.10) < EPSILON, "sunhat gap guard misses a local skull dip")
+    try:
+        maximum_vertical_surface_gap(
+            upper_surface_triangles(crown, [(0, 1, 2)]),
+            upper_surface_triangles([point * 0.1 for point in crown], [(0, 1, 2)]),
+        )
+    except AssertionError as error:
+        _assert("sunhat crown extends beyond skull" in str(error), str(error))
+    else:
+        raise AssertionError("sunhat guard accepts a crown overhanging empty space")
     for path in sorted((VISITORS_DIR / "descriptions").glob("*.json")):
         bpy.ops.wm.read_factory_settings(use_empty=True)
         description = json.loads(path.read_text(encoding="utf-8"))

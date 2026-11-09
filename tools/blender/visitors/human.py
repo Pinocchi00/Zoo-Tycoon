@@ -32,9 +32,9 @@ SEATED_LEG_FORWARD_RATIO = 0.4
 SUNHAT_BRIM_DIAMETER_TO_HEAD_WIDTH = 1.15
 SUNHAT_BRIM_CENTER_HEIGHT_RATIO = 0.55
 SUNHAT_BRIM_HALF_THICKNESS_RATIO = 0.055
-SUNHAT_CROWN_TOP_RATIO = 1.13
-SUNHAT_CROWN_BASE_HEIGHT_RATIO = 0.55
-SUNHAT_CROWN_RADIUS_RATIO = 1.05
+SUNHAT_CROWN_TOP_RATIO = 0.945
+SUNHAT_CROWN_SURFACE_OFFSET_RATIO = 0.005
+SUNHAT_CROWN_MIN_SKULL_HEIGHT_RATIO = 0.30
 
 
 def shoulder_seat_height(parent, child):
@@ -295,24 +295,36 @@ def _hair_cap(prefix, radius, style, color, person, palette, material):
     return obj
 
 
-def _hat_crown(prefix, radius, person, palette, material):
+def _hat_crown(prefix, radius, person, palette, material, head_mesh):
     obj = _blob(f"{prefix}hair", [0, 0, 0], [1, 1, 1],
                 "fur_jaguar_light", person, "none", palette, material)
     uv = obj.data.uv_layers.active.data[0].uv.copy()
-    vertices = [game_to_blender([0, radius * SUNHAT_CROWN_TOP_RATIO, 0])]
+    vertices = []
     faces = []
-    previous_start, previous_count = 0, 1
-    for ring, count in enumerate((8, 16, 24, 24), start=1):
-        latitude = math.pi * ring / 8
-        start = len(vertices)
-        for segment in range(count):
-            longitude = 2 * math.pi * segment / count
-            vertices.append(game_to_blender([radius * SUNHAT_CROWN_RADIUS_RATIO * math.sin(latitude) * math.cos(longitude),
-                                            radius * (SUNHAT_CROWN_BASE_HEIGHT_RATIO + 0.58 * math.cos(latitude)),
-                                            radius * SUNHAT_CROWN_RADIUS_RATIO * math.sin(latitude) * math.sin(longitude)]))
-        _join_rings(faces, previous_start, previous_count, start, count)
-        previous_start, previous_count = start, count
-    faces.append(tuple(range(start, start + count)))
+    # Reuse the actual skull facets so the inner crown cannot bridge over them.
+    remap = {}
+    for polygon in head_mesh.data.polygons:
+        if min(head_mesh.data.vertices[index].co.z for index in polygon.vertices) < radius * SUNHAT_CROWN_MIN_SKULL_HEIGHT_RATIO:
+            continue
+        face = []
+        for index in polygon.vertices:
+            if index not in remap:
+                remap[index] = len(vertices)
+                point = head_mesh.data.vertices[index].co.copy()
+                point.z += radius * SUNHAT_CROWN_SURFACE_OFFSET_RATIO
+                vertices.append(point)
+            face.append(remap[index])
+        faces.append(tuple(face))
+    edges = {}
+    for face in faces:
+        for first, second in zip(face, face[1:] + face[:1]):
+            key = tuple(sorted((first, second)))
+            edges[key] = None if key in edges else (first, second)
+    following = {first: second for edge in edges.values() if edge is not None for first, second in (edge,)}
+    boundary = [min(following)]
+    while following[boundary[-1]] != boundary[0]:
+        boundary.append(following[boundary[-1]])
+    faces.append(tuple(reversed(boundary)))
     _replace_surface(obj, vertices, faces, uv)
     return obj
 
@@ -384,7 +396,9 @@ def build_person(index, params, palette, material, parent_object):
     )
     head_mesh.parent = head
     _simplify_hidden_back(head_mesh, p["head_r"] * 0.3)
-    if params.get("hair", "short") != "none":
+    if params.get("hair") == "sunhat":
+        _simplify_hidden_vertices(head_mesh, lambda point: p["head_r"] * 0.8 < point.z < p["head_r"] * 0.93, stride=4)
+    if params.get("hair", "short") not in {"none", "sunhat"}:
         _simplify_hidden_vertices(head_mesh, lambda point: point.z > p["head_r"] * 0.3, stride=1)
     for vertex in head_mesh.data.vertices:
         vertex.co.x *= 1.0 - 0.09 * vertex.co.z / p["head_r"]
@@ -393,7 +407,7 @@ def build_person(index, params, palette, material, parent_object):
 
     hair_style = params.get("hair", "short")
     if hair_style != "none":
-        hair_mesh = (_hat_crown(prefix, p["head_r"], index, palette, material)
+        hair_mesh = (_hat_crown(prefix, p["head_r"], index, palette, material, head_mesh)
                      if hair_style == "sunhat" else
                      _hair_cap(prefix, p["head_r"], hair_style, hair, index, palette, material))
         hair_mesh.parent = head

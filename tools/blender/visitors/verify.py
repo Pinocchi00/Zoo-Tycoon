@@ -28,6 +28,99 @@ EYE_OCCLUSION_TOLERANCE = 0.003
 SUNHAT_DIAMETER_MAX_TO_HEAD_WIDTH = 1.25
 SUNHAT_DIAMETER_TOLERANCE = 0.01
 SUNHAT_SEATING_TOLERANCE = 0.003
+SUNHAT_CROWN_GAP_TOLERANCE_RATIO = 0.02
+SURFACE_VERTICAL_NORMAL_TOLERANCE = 0.00001
+SURFACE_COVERAGE_AREA_TOLERANCE_RATIO = 0.0001
+
+
+def projected_triangle_overlap(first, second):
+    """Clip convex XY footprints; affine height differences peak at their vertices."""
+    polygon = list(first)
+    for a, b in zip(second, second[1:] + second[:1]):
+        clipped = []
+        if not polygon:
+            break
+        previous = polygon[-1]
+        previous_side = (b.x - a.x) * (previous.y - a.y) - (b.y - a.y) * (previous.x - a.x)
+        for point in polygon:
+            side = (b.x - a.x) * (point.y - a.y) - (b.y - a.y) * (point.x - a.x)
+            if (side >= 0) != (previous_side >= 0):
+                clipped.append(previous.lerp(point, previous_side / (previous_side - side)))
+            if side >= 0:
+                clipped.append(point)
+            previous, previous_side = point, side
+        polygon = clipped
+    return polygon
+
+
+def upper_surface_triangles(points, triangles):
+    surfaces = []
+    for indices in triangles:
+        vertices = tuple(points[index] for index in indices)
+        a, b, c = vertices
+        normal = (b - a).cross(c - a)
+        if normal.z > normal.length * SURFACE_VERTICAL_NORMAL_TOLERANCE:
+            surfaces.append((vertices, normal))
+    return surfaces
+
+
+def maximum_vertical_surface_gap(crown, skull):
+    maximum = -math.inf
+    for upper, upper_normal in crown:
+        covered_area = 0.0
+        for lower, lower_normal in skull:
+            if any(max(point[axis] for point in upper) < min(point[axis] for point in lower)
+                   or min(point[axis] for point in upper) > max(point[axis] for point in lower)
+                   for axis in (0, 1)):
+                continue
+            overlap = projected_triangle_overlap(upper, lower)
+            covered_area += abs(sum(a.x * b.y - b.x * a.y for a, b in zip(overlap, overlap[1:] + overlap[:1]))) / 2
+            for point in overlap:
+                def height(vertices, normal):
+                    origin = vertices[0]
+                    return origin.z - (normal.x * (point.x - origin.x) + normal.y * (point.y - origin.y)) / normal.z
+                maximum = max(maximum, height(upper, upper_normal) - height(lower, lower_normal))
+        area = upper_normal.z / 2
+        assert abs(covered_area - area) <= area * SURFACE_COVERAGE_AREA_TOLERANCE_RATIO, "sunhat crown extends beyond skull"
+    assert math.isfinite(maximum), "missing sunhat contact surface"
+    return maximum
+
+
+def verify_sunhat_contact(description, meshes):
+    maximum_gap = 0.0
+    for person in description["persons"]:
+        if person.get("hair") != "sunhat":
+            continue
+        prefix = f"p{person['index']}_"
+        head = bpy.data.objects[prefix + "head"]
+        radius = head["zooHeadRadius"]
+        inverse = head.matrix_world.inverted()
+        skull = bpy.data.objects[prefix + "head_mesh"]
+        skull_points, skull_triangles, _ = mesh_surface(skull, inverse)
+        skull_indices, _ = max(mesh_components(skull, skull_points), key=lambda component: len(component[0]))
+        skull_triangles = [triangle for triangle in skull_triangles if all(index in skull_indices for index in triangle)]
+        crown_parts = []
+        for obj in meshes:
+            if obj.parent != head or obj.get("zooTint") != "none":
+                continue
+            points, triangles, _ = mesh_surface(obj, inverse)
+            for indices, _ in mesh_components(obj, points):
+                if max(points[index].z for index in indices) <= radius * 0.8:
+                    continue
+                crown_parts.append((obj, points, triangles, indices))
+        assert len(crown_parts) == 1, f"missing sunhat crown for {prefix}"
+        obj, points, triangles, indices = crown_parts[0]
+        assert obj.parent == skull.parent, f"sunhat does not follow head for {prefix}"
+        crown_triangles = [triangle for triangle in triangles if all(index in indices for index in triangle)]
+        gap = maximum_vertical_surface_gap(
+            upper_surface_triangles(points, crown_triangles),
+            upper_surface_triangles(skull_points, skull_triangles),
+        )
+        maximum_gap = max(maximum_gap, gap)
+        assert gap <= radius * SUNHAT_CROWN_GAP_TOLERANCE_RATIO, (
+            f"sunhat crown gap exceeds tolerance for {prefix}: {gap:.6f} m"
+        )
+    return maximum_gap
 
 
 def select_clip(group, name, rest):
@@ -609,6 +702,7 @@ def verify(description, exported=False):
     standing = [person for person in description["persons"] if person.get("posture", "standing") == "standing"]
     proportions = prepare_proportions(description)
     junctions = prepare_junctions(description, meshes)
+    maximum_hat_gap = 0.0
     for clip in ("walk", "stop", "look", "point", "photo", "sit"):
         end = select_clip(group, clip, rest)
         assert end > 0, f"empty animation: {clip}"
@@ -622,6 +716,7 @@ def verify(description, exported=False):
             verify_child_eye_clearance(description, meshes, clip)
             verify_shoulder_legs(description, meshes, clip, proportions)
             verify_junctions(junctions, clip)
+            maximum_hat_gap = max(maximum_hat_gap, verify_sunhat_contact(description, meshes))
             if step == 0:
                 test_arm_guard(description, meshes, clip, proportions)
                 test_shoulder_guard(description, meshes, clip, proportions)
@@ -703,6 +798,8 @@ def verify(description, exported=False):
                     assert camera.parent.name == f"p{person['index']}_spine", "camera remains on an arm"
                     assert (camera.location - rest[camera.name].translation).length < 0.0001, f"camera leaves chest during {clip}"
     source = "GLB" if exported else "source"
+    if any(person.get("hair") == "sunhat" for person in description["persons"]):
+        print(f"[zoo-refuge] sunhat ({source}): maximum vertical crown gap {maximum_hat_gap:.6f} m; six clips verified")
     print(f"[zoo-refuge] {description['archetypeId']} ({source}): six clips, arm proportions, merge, walk, sit, photo verified; floor minimum {lowest:.4f} m")
 
 

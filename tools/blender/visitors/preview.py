@@ -71,8 +71,9 @@ def main():
     args = parser.parse_args(sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else [])
     verify_game_colors()
     bpy.ops.wm.read_factory_settings(use_empty=True)
-    archetypes = ("shoulder-ride",) * 3 if args.shoulder else ARCHETYPES
+    archetypes = ("shoulder-ride",) * 3 if args.shoulder else ARCHETYPES + (("retirees",) if args.faces else ())
     for index, archetype in enumerate(archetypes):
+        tint_index = min(index, len(ARCHETYPES) - 1)
         before = set(bpy.data.objects)
         bpy.ops.import_scene.gltf(filepath=str(ROOT / "assets/models/visitors" / f"{archetype}.glb"))
         bpy.context.scene.frame_set(0)
@@ -82,7 +83,7 @@ def main():
         bpy.context.collection.objects.link(layout)
         group.parent = layout
         group = layout
-        group.location.x = (-5.1, -2.2, -0.2, 1.8, 3.8)[index]
+        group.location.x = (-5.1, -2.2, -0.2, 1.8, 3.8)[tint_index]
         group.rotation_euler.z = math.radians(-25)
         if args.shoulder:
             group.location.x = (index - 1) * 2.0
@@ -92,7 +93,7 @@ def main():
                 obj.animation_data.action = None
             if obj.type == "MESH" and obj.get("zooTint", "none") != "none":
                 tint = obj["zooTint"]
-                tint_material(obj, person_tint(1 if args.shoulder else index, obj["zooPerson"], tint))
+                tint_material(obj, person_tint(1 if args.shoulder else tint_index, obj["zooPerson"], tint))
         # Imported glTF actions are assigned directly by Blender; evaluate only stop.
         for obj in objects:
             if obj.animation_data:
@@ -100,13 +101,13 @@ def main():
                 for track in obj.animation_data.nla_tracks:
                     track.mute = track != stop
         if args.faces:
-            person = FACE_PEOPLE[index]
+            person = FACE_PEOPLE[tint_index]
             for obj in objects:
                 if obj.type == "MESH" and obj["zooPerson"] != person:
                     obj.hide_render = True
                 if obj.type == "MESH" and "_leg_" in obj.name:
                     obj.hide_render = True
-            group.rotation_euler.z = 0.0
+            group.rotation_euler.z = math.radians(-90) if index == len(ARCHETYPES) else 0.0
             group.location = (0.0, 0.0, 0.0)
             scene = bpy.context.scene
             scene.frame_set(15)
@@ -116,7 +117,7 @@ def main():
             group.scale = (factor,) * 3
             bpy.context.view_layer.update()
             center = head.matrix_world.translation.copy()
-            group.location = Vector(((index - 2) * 1.30, 0.0, 1.25)) - center
+            group.location = Vector(((index - 2.5) * 1.30, 0.0, 1.25)) - center
 
     scene = bpy.context.scene
     duration = max(strip.frame_end for obj in bpy.data.objects if obj.animation_data
@@ -134,7 +135,7 @@ def main():
     camera = bpy.context.object
     camera.rotation_euler = (Vector((0.0, 0.0, target_height)) - camera.location).to_track_quat("-Z", "Y").to_euler()
     camera.data.type = "ORTHO"
-    camera.data.ortho_scale = 7.0 if args.faces else 6.5 if args.shoulder else 12.8
+    camera.data.ortho_scale = 8.2 if args.faces else 6.5 if args.shoulder else 12.8
     scene.camera = camera
     for location, energy, size in (((-3, -5, 8), 700, 8), ((6, 1, 6), 400, 7)):
         bpy.ops.object.light_add(type="AREA", location=location)
