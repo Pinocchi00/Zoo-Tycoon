@@ -85,7 +85,7 @@ def _reset(obj, rest):
     obj.scale = r.get("scale", Vector((1.0, 1.0, 1.0))).copy()
 
 
-def build_walk(pivots, person_index, rest, duration_s=1.0, swing_deg=25.0, bob_m=0.03,
+def build_walk(pivots, person_index, rest, duration_s=1.0, swing_deg=18.0, bob_m=0.035,
                hands_busy=False):
     base = "walk"
     end = round(duration_s * FPS)
@@ -96,8 +96,8 @@ def build_walk(pivots, person_index, rest, duration_s=1.0, swing_deg=25.0, bob_m
     arm_r = _new_action(pivots["arm_r"], base)
     hips = _new_action(pivots["hips"], base)
 
-    for step in range(5):
-        t = step / 4
+    for step in range(17):
+        t = step / 16
         frame = round(end * t)
         v_leg_l = swing * math.cos(2.0 * math.pi * t)
         v_leg_r = swing * math.cos(2.0 * math.pi * (t + 0.5))
@@ -107,7 +107,7 @@ def build_walk(pivots, person_index, rest, duration_s=1.0, swing_deg=25.0, bob_m
         _rot(pivots["leg_r"], frame, (v_leg_r, 0.0, 0.0))
         _rot(pivots["arm_l"], frame, (0.0 if hands_busy else v_arm_l, 0.0, 0.0))
         _rot(pivots["arm_r"], frame, (0.0 if hands_busy else v_arm_r, 0.0, 0.0))
-        lift = bob_m * (1.0 - math.cos(4.0 * math.pi * t)) / 2.0
+        lift = bob_m * (1.0 - math.cos(4.0 * math.pi * t)) / 2.0 + 0.008
         _loc_offset(pivots["hips"], frame, (0.0, 0.0, lift), rest)
 
     _stash(pivots["leg_l"], leg_l, base)
@@ -133,7 +133,7 @@ def build_stop(pivots, person_index, rest, duration_s=2.0):
         _scale(pivots["spine"], frame, (s, s, s))
         _rot(pivots["arm_l"], frame, (math.radians(2.0 * math.sin(2.0 * math.pi * t)), 0.0, 0.0))
         _rot(pivots["arm_r"], frame, (math.radians(2.0 * math.sin(2.0 * math.pi * t + 0.5)), 0.0, 0.0))
-        _rot(pivots["head"], frame, (math.radians(1.5 * math.sin(2.0 * math.pi * t)), 0.0, 0.0))
+        _rot(pivots["head"], frame, (math.radians(1.5 * math.sin(2.0 * math.pi * t)), math.radians(3.0), 0.0))
 
     _stash(pivots["spine"], spine, base)
     _stash(pivots["head"], head, base)
@@ -150,7 +150,7 @@ def build_look(pivots, person_index, rest, duration_s=2.0, yaw_deg=35.0):
         t = step / 4
         frame = round(end * t)
         yaw = math.radians(yaw_deg) * math.sin(2.0 * math.pi * t)
-        _rot(pivots["head"], frame, (0.0, 0.0, yaw))
+        _rot(pivots["head"], frame, (0.0, math.radians(5.0) * math.sin(2.0 * math.pi * t), yaw))
 
     _stash(pivots["head"], head, base)
 
@@ -181,23 +181,38 @@ def build_photo(pivots, person_index, rest, duration_s=2.0):
     base = "photo"
     end = round(duration_s * FPS)
     arm_r = _new_action(pivots["arm_r"], base)
+    arm_l = _new_action(pivots["arm_l"], base)
     head = _new_action(pivots["head"], base)
+    camera = pivots["camera"]
+    camera_action = _new_action(camera, base) if camera is not None else None
 
-    # Raise camera to eye level and hold, with a tiny head tilt.
-    for t, arm_x, head_x in (
-        (0.0, 0.0, 0.0),
-        (0.25, -math.radians(75.0), math.radians(-5.0)),
-        (0.4, -math.radians(85.0), math.radians(-10.0)),
-        (0.6, -math.radians(85.0), math.radians(-10.0)),
-        (0.75, -math.radians(75.0), math.radians(-5.0)),
-        (1.0, 0.0, 0.0),
+    for t, reach in (
+        (0.0, 0.0), (0.25, 0.85), (0.4, 1.0),
+        (0.6, 1.0), (0.75, 0.85), (1.0, 0.0),
     ):
         frame = round(end * t)
-        _rot(pivots["arm_r"], frame, (arm_x, 0.0, math.radians(30.0)))
-        _rot(pivots["head"], frame, (head_x, 0.0, 0.0))
+        for side, sign in (("r", 1), ("l", -1)):
+            arm = pivots[f"arm_{side}"]
+            hand = arm["zooHand"]
+            source = Vector((hand[0], -hand[2], hand[1]))
+            target = Vector((-arm.location.x + sign * 0.05,
+                             -pivots["head"]["zooHeadRadius"] * 1.3 - 0.03,
+                             (pivots["head"].location.z - arm.location.z) * 0.9))
+            rotation = source.rotation_difference(target).to_euler()
+            _rot(arm, frame, tuple(value * reach for value in rotation))
+            stretch = 1.0 + (target.length / source.length - 1.0) * reach
+            _scale(arm, frame, (stretch, stretch, stretch))
+            if side == "r" and camera is not None:
+                rotation = arm.rotation_euler.to_quaternion().inverted().to_euler()
+                _rot(camera, frame, rotation)
+                _scale(camera, frame, (1.0 / stretch,) * 3)
+        _rot(pivots["head"], frame, (math.radians(10.0) * reach, 0.0, 0.0))
 
     _stash(pivots["arm_r"], arm_r, base)
+    _stash(pivots["arm_l"], arm_l, base)
     _stash(pivots["head"], head, base)
+    if camera is not None:
+        _stash(camera, camera_action, base)
 
 
 def build_sit(pivots, person_index, rest, duration_s=1.0):
@@ -208,15 +223,19 @@ def build_sit(pivots, person_index, rest, duration_s=1.0):
     leg_l = _new_action(pivots["leg_l"], base)
     leg_r = _new_action(pivots["leg_r"], base)
 
-    for step in range(5):
-        t = step / 4
+    for step in range(17):
+        t = step / 16
         frame = round(end * t)
         sit = (1.0 - math.cos(math.pi * t)) / 2.0
+        legs = min(sit * 2.0, 1.0)
+        descend = max(sit * 2.0 - 1.0, 0.0)
         # Hips drop relative to the rest pose; the rest height itself is preserved.
-        _loc_offset(pivots["hips"], frame, (0.0, 0.0, -0.35 * sit), rest)
-        _rot(pivots["spine"], frame, (math.radians(15.0) * sit, 0.0, 0.0))
-        _rot(pivots["leg_l"], frame, (math.radians(-90.0) * sit, 0.0, 0.0))
-        _rot(pivots["leg_r"], frame, (math.radians(-90.0) * sit, 0.0, 0.0))
+        hip_height = rest[pivots["hips"].name]["location"].z
+        seat_height = pivots["hips"]["zooSeatHeight"]
+        _loc_offset(pivots["hips"], frame, (0.0, 0.0, (seat_height - hip_height) * descend), rest)
+        _rot(pivots["spine"], frame, (math.radians(-5.0) * sit, 0.0, 0.0))
+        _rot(pivots["leg_l"], frame, (math.radians(-85.0) * legs, 0.0, 0.0))
+        _rot(pivots["leg_r"], frame, (math.radians(-85.0) * legs, 0.0, 0.0))
 
     _stash(pivots["hips"], hips, base)
     _stash(pivots["spine"], spine, base)

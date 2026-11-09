@@ -109,6 +109,25 @@ def build_group(description, palette, material):
     return group_root
 
 
+def merge_compatible_parts(group_root):
+    """Keep independent articulation and tinting while sharing one draw per bucket."""
+    buckets = {}
+    for obj in group_root.children_recursive:
+        if obj.type == "MESH":
+            key = (obj.parent, obj["zooPerson"], obj["zooTint"])
+            buckets.setdefault(key, []).append(obj)
+    for objects in buckets.values():
+        if len(objects) < 2:
+            continue
+        anchor = next((obj for obj in objects if obj.name.endswith(("_head_mesh", "_body_mesh"))), objects[0])
+        bpy.ops.object.select_all(action="DESELECT")
+        for obj in objects:
+            obj.select_set(True)
+        bpy.context.view_layer.objects.active = anchor
+        bpy.ops.object.join()
+        anchor.select_set(False)
+
+
 def export(path):
     path.parent.mkdir(parents=True, exist_ok=True)
     bpy.ops.export_scene.gltf(
@@ -266,6 +285,7 @@ def main():
     palette = load_palette()
     material = build_material(palette)
     group_root = build_group(description, palette, material)
+    merge_compatible_parts(group_root)
     export(args.out)
 
     counts = _count_triangles_per_person(group_root, description["memberCount"])

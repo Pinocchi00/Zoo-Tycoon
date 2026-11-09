@@ -7,11 +7,10 @@
     {
       "index": 0,
       "position": [0, 0, 0],
-      "height": 1.6,
+      "height": 1.1,
       "width": 0.95,
       "headScale": 1.0,
-      "legRatio": 0.46,
-      "torsoRatio": 0.34,
+      "legRatio": 0.2,
       "hair": "cap_backwards",
       "glasses": true,
       "camera": true,
