@@ -21,7 +21,7 @@ from palette import build_material, load_palette  # noqa: E402
 VISITORS_DIR = Path(__file__).parent
 sys.path.insert(0, str(VISITORS_DIR))
 from animations import build_person_animations  # noqa: E402
-from human import add_stroller, build_person  # noqa: E402
+from human import add_stroller, build_person, shoulder_leg_points, _derive_proportions, SHOULDER_SEAT_RADII  # noqa: E402
 
 EXPECTED_CLIP_NAMES = {"walk", "stop", "look", "point", "photo", "sit"}
 ALLOWED_TINTS = {"skin", "hair", "shirt", "pants", "none"}
@@ -64,7 +64,23 @@ def build_group(description, palette, material):
     }
     bpy.context.collection.objects.link(group_root)
 
-    persons = description["persons"]
+    persons = [dict(person) for person in description["persons"]]
+    for parent in persons:
+        child_index = parent.get("shoulderChild")
+        if child_index is None:
+            continue
+        child = next(person for person in persons if person["index"] == child_index)
+        child["shoulderLegs"] = {side: shoulder_leg_points(parent, child, sign)
+                                 for side, sign in (("l", -1), ("r", 1))}
+        adult, small = _derive_proportions(parent), _derive_proportions(child)
+        parent["shoulderGrips"] = {}
+        for side, sign in (("l", -1), ("r", 1)):
+            _, foot = child["shoulderLegs"][side]
+            parent["shoulderGrips"][side] = [
+                sign * (small["hip_w"] + adult["limb_r"]) + foot[0] - sign * adult["shoulder_w"],
+                adult["torso"] * 0.35 + adult["neck"] + adult["head_r"] * SHOULDER_SEAT_RADII + foot[1],
+                foot[2],
+            ]
     pivots_by_index = {}
 
     for person in persons:

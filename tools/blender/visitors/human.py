@@ -8,6 +8,7 @@ from pathlib import Path
 import math
 
 import bpy
+import bmesh
 from mathutils import Vector
 
 BLENDER_DIR = Path(__file__).parent.parent
@@ -20,11 +21,24 @@ PIVOT_DISPLAY_SIZE = 0.05
 STROLLER_HANDLE_HEIGHT_RATIO = 0.59
 STROLLER_HANDLE_FORWARD = 0.38
 STROLLER_SEAT_HEIGHT = 0.61
-ROUND_SEGMENTS = 10
+ROUND_SEGMENTS = 16
 ROUND_RINGS = 3
+LIMB_SEGMENTS = 8
 EYE_SEGMENTS = 20
-HAIR_SEGMENTS = 16
-HAIR_RINGS = 5
+HAIR_SEGMENTS = 24
+HAIR_RINGS = 6
+SHOULDER_SEAT_RADII = 1.58
+
+
+def shoulder_leg_points(parent, child, sign):
+    """Route the thigh around the crown, then hang the calf in front of the chest."""
+    adult = _derive_proportions(parent)
+    small = _derive_proportions(child)
+    radius = adult["head_r"]
+    hip = small["hip_w"]
+    knee = [sign * (max(radius * 1.13, 0.36) - hip), -radius * 1.01, radius * 1.20]
+    foot = [knee[0], -radius * 2.20, radius * 1.28]
+    return knee, foot
 
 
 def _empty(name, location, parent=None):
@@ -71,7 +85,7 @@ def _blob(
     exponent=1.0,
     face_forward=False,
 ):
-    return _make(
+    obj = _make(
         {
             "name": name,
             "kind": "body",
@@ -89,6 +103,65 @@ def _blob(
         palette,
         material,
     )
+    if segments >= 12 and rings >= 4:
+        uv = obj.data.uv_layers.active.data[0].uv.copy()
+        vertices, faces = [], []
+        for ring in range(rings + 1):
+            latitude = math.pi * ring / rings
+            count = 1 if ring in (0, rings) else max(4, round(segments * math.sin(latitude) / 4) * 4)
+            start = len(vertices)
+            for segment in range(count):
+                longitude = 2 * math.pi * segment / count
+                x = radii[0] * math.sin(latitude) * math.cos(longitude)
+                along = math.cos(latitude)
+                across = math.sin(latitude) * math.sin(longitude)
+                point = [x, radii[1] * (across if face_forward else along),
+                         radii[2] * (along if face_forward else across)]
+                vertices.append(game_to_blender([a + b for a, b in zip(center, point)]))
+            if ring:
+                _join_rings(faces, previous_start, previous_count, start, count)
+            previous_start, previous_count = start, count
+        # Ring winding is reversed when the polar axis changes from up to forward.
+        if face_forward:
+            faces = [tuple(reversed(face)) for face in faces]
+        _replace_surface(obj, vertices, faces, uv)
+    return obj
+
+
+def _join_rings(faces, first, first_count, second, second_count):
+    a = b = 0
+    while a < first_count or b < second_count:
+        left = first + a % first_count
+        right = second + b % second_count
+        if first_count == 1:
+            faces.append((left, second + (b + 1) % second_count, right))
+            b += 1
+            if b == second_count:
+                break
+        elif second_count == 1:
+            faces.append((left, first + (a + 1) % first_count, right))
+            a += 1
+            if a == first_count:
+                break
+        elif (a + 1) / first_count <= (b + 1) / second_count:
+            faces.append((left, first + (a + 1) % first_count, right))
+            a += 1
+        else:
+            faces.append((left, second + (b + 1) % second_count, right))
+            b += 1
+
+
+def _replace_surface(obj, vertices, faces, uv):
+    obj.data.clear_geometry()
+    obj.data.from_pydata(vertices, [], faces)
+    for layer in list(obj.data.uv_layers):
+        obj.data.uv_layers.remove(layer)
+    layer = obj.data.uv_layers.new()
+    for loop in layer.data:
+        loop.uv = uv
+    for polygon in obj.data.polygons:
+        polygon.use_smooth = True
+    obj.data.update()
 
 
 def _limb(
@@ -146,11 +219,11 @@ def _derive_proportions(params):
     }
 
 
-def _round_limb(name, start, end, radius, color, person, tint, palette, material):
+def _round_limb(name, start, end, radius, color, person, tint, palette, material, segments=LIMB_SEGMENTS, rings=ROUND_RINGS):
     center = [(a + b) * 0.5 for a, b in zip(start, end)]
     direction = game_to_blender(end) - game_to_blender(start)
     obj = _blob(name, center, [radius, max(direction.length * 0.65, radius), radius],
-                color, person, tint, palette, material, segments=ROUND_SEGMENTS, rings=ROUND_RINGS,
+                color, person, tint, palette, material, segments=segments, rings=rings,
                 face_forward=True)
     rotation = Vector((0.0, 0.0, -1.0)).rotation_difference(direction.normalized())
     origin = game_to_blender(center)
@@ -159,70 +232,55 @@ def _round_limb(name, start, end, radius, color, person, tint, palette, material
     return obj
 
 
+def _simplify_hidden_back(obj, depth):
+    """Spend the saved rear pole triangles on the visible outline instead."""
+    _simplify_hidden_vertices(obj, lambda point: point.y > depth)
+
+
+def _simplify_hidden_vertices(obj, hidden):
+    mesh = bmesh.new()
+    mesh.from_mesh(obj.data)
+    candidates = sorted((vertex for vertex in mesh.verts if hidden(vertex.co)),
+                        key=lambda vertex: tuple(vertex.co))
+    for vertex in candidates[::2]:
+        if vertex.is_valid:
+            bmesh.ops.dissolve_verts(mesh, verts=[vertex], use_face_split=False, use_boundary_tear=False)
+    bmesh.ops.triangulate(mesh, faces=list(mesh.faces))
+    mesh.to_mesh(obj.data)
+    mesh.free()
+    for polygon in obj.data.polygons:
+        polygon.use_smooth = True
+
+
 def _hair_cap(prefix, radius, style, color, person, palette, material):
-    """A regular spherical cap follows the head instead of stacking an oval on it."""
+    """A scalloped fringe blends into longer temples and a rounded nape."""
     obj = _blob(f"{prefix}hair", [0, 0, 0], [1, 1, 1], color, person, "hair", palette, material)
     uv = obj.data.uv_layers.active.data[0].uv.copy()
     vertices = [game_to_blender([0, radius * 1.03, 0])]
     faces = []
-    edge_angle = math.pi * (0.53 if style == "bob" else 0.44)
+    previous_start, previous_count = 0, 1
     for ring in range(1, HAIR_RINGS + 1):
-        latitude = edge_angle * ring / HAIR_RINGS
-        for segment in range(HAIR_SEGMENTS):
-            longitude = 2 * math.pi * segment / HAIR_SEGMENTS
+        count = max(8, round(HAIR_SEGMENTS * min(1, ring / (HAIR_RINGS * 0.65)) / 4) * 4)
+        start = len(vertices)
+        for segment in range(count):
+            longitude = 2 * math.pi * segment / count
+            front = max(math.sin(longitude), 0.0)
+            back = max(-math.sin(longitude), 0.0)
+            edge_angle = math.pi * (0.61 - 0.23 * front + 0.12 * back)
+            edge_angle += 0.10 * front * math.cos(3 * longitude + 0.4)
+            if style == "bob":
+                edge_angle += 0.15 * (1 - front)
+            latitude = edge_angle * ring / HAIR_RINGS
             vertices.append(game_to_blender([
                 radius * 1.09 * math.sin(latitude) * math.cos(longitude),
                 radius * (0.04 + 0.99 * math.cos(latitude)),
                 radius * 1.01 * math.sin(latitude) * math.sin(longitude),
             ]))
-    for segment in range(HAIR_SEGMENTS):
-        following = (segment + 1) % HAIR_SEGMENTS
-        faces.append((0, 1 + following, 1 + segment))
-        for ring in range(HAIR_RINGS - 1):
-            a = 1 + ring * HAIR_SEGMENTS + segment
-            b = 1 + ring * HAIR_SEGMENTS + following
-            faces.append((a, b, b + HAIR_SEGMENTS, a + HAIR_SEGMENTS))
+        _join_rings(faces, previous_start, previous_count, start, count)
+        previous_start, previous_count = start, count
     # Close the underside inside the head; its edge never appears in the silhouette.
-    faces.append(tuple(1 + (HAIR_RINGS - 1) * HAIR_SEGMENTS + n for n in range(HAIR_SEGMENTS)))
-    obj.data.clear_geometry()
-    obj.data.from_pydata(vertices, [], faces)
-    layer = obj.data.uv_layers.new()
-    for loop in layer.data:
-        loop.uv = uv
-    for polygon in obj.data.polygons:
-        polygon.use_smooth = len(polygon.vertices) <= 4
-    obj.data.update()
-    return obj
-
-
-def _chin_crescent(prefix, radius, hair, index, palette, material):
-    obj = _blob(f"{prefix}beard", [0, 0, 0], [1, 1, 1], hair, index, "hair", palette, material)
-    uv = obj.data.uv_layers.active.data[0].uv.copy()
-    vertices = []
-    faces = []
-    arc_steps, tube_steps = 12, 4
-    for step in range(arc_steps + 1):
-        angle = math.pi * (1.18 + step / arc_steps * 0.64)
-        taper = 0.025 + 0.065 * math.sin(math.pi * step / arc_steps)
-        for tube in range(tube_steps):
-            cross = 2 * math.pi * tube / tube_steps
-            vertices.append(game_to_blender([
-                radius * (0.65 + taper * math.cos(cross)) * math.cos(angle),
-                radius * (0.78 + taper * math.cos(cross)) * math.sin(angle),
-                radius * (0.64 + taper * math.sin(cross)),
-            ]))
-    for step in range(arc_steps):
-        for tube in range(tube_steps):
-            a = step * tube_steps + tube
-            b = step * tube_steps + (tube + 1) % tube_steps
-            faces.append((a, b, b + tube_steps, a + tube_steps))
-    obj.data.clear_geometry()
-    obj.data.from_pydata(vertices, [], faces)
-    layer = obj.data.uv_layers.new()
-    for loop in layer.data:
-        loop.uv = uv
-    for polygon in obj.data.polygons:
-        polygon.use_smooth = True
+    faces.append(tuple(range(start, start + count)))
+    _replace_surface(obj, vertices, faces, uv)
     return obj
 
 
@@ -246,7 +304,7 @@ def build_person(index, params, palette, material, parent_object):
     spine = _empty(f"{prefix}spine", [0.0, 0.0, 0.0], hips)
     head = _empty(f"{prefix}head", [0.0, p["torso"] + p["neck"], 0.0], spine)
     head["zooHeadRadius"] = p["head_r"]
-    shoulder_seat = _empty(f"{prefix}shoulder_seat", [0.0, p["torso"] + p["neck"] + p["head_r"] * 1.5, 0.0], spine)
+    shoulder_seat = _empty(f"{prefix}shoulder_seat", [0.0, p["torso"] + p["neck"] + p["head_r"] * SHOULDER_SEAT_RADII, 0.0], spine)
     arm_l = _empty(f"{prefix}arm_l", [-p["shoulder_w"], p["torso"] * 0.65, 0.0], spine)
     arm_r = _empty(f"{prefix}arm_r", [p["shoulder_w"], p["torso"] * 0.65, 0.0], spine)
     leg_l = _empty(f"{prefix}leg_l", [-p["hip_w"], 0.0, 0.0], hips)
@@ -268,6 +326,7 @@ def build_person(index, params, palette, material, parent_object):
         face_forward=True,
     )
     body.parent = spine
+    _simplify_hidden_back(body, 0.0)
     for vertex in body.data.vertices:
         height_fraction = vertex.co.z / max(p["torso"], 0.01)
         vertex.co.x *= 1.0 - 0.18 * height_fraction
@@ -283,11 +342,12 @@ def build_person(index, params, palette, material, parent_object):
         "skin",
         palette,
         material,
-        segments=24,
-        rings=6,
+        segments=32,
+        rings=8,
         face_forward=True,
     )
     head_mesh.parent = head
+    _simplify_hidden_back(head_mesh, p["head_r"] * 0.3)
     for vertex in head_mesh.data.vertices:
         vertex.co.x *= 1.0 - 0.09 * vertex.co.z / p["head_r"]
         # Flatten only the front, preserving the round back and cheek silhouette.
@@ -309,7 +369,7 @@ def build_person(index, params, palette, material, parent_object):
                 detail = _blob(f"{prefix}hair_detail_{n}",
                                [x * p["head_r"], y * p["head_r"], z * p["head_r"]],
                                [radius * p["head_r"]] * 3, hair, index, "hair",
-                                palette, material, segments=12, rings=3, face_forward=True)
+                                palette, material, segments=16, rings=4, face_forward=True)
                 if hair_style == "ponytail":
                     center = game_to_blender([x * p["head_r"], y * p["head_r"], z * p["head_r"]])
                     for vertex in detail.data.vertices:
@@ -330,8 +390,18 @@ def build_person(index, params, palette, material, parent_object):
             )
             brim.parent = head
 
-        if hair_style == "beard":
-            detail = _chin_crescent(prefix, p["head_r"], hair, index, palette, material)
+
+    moustache = hair_style == "beard" or params.get("facialHair") == "moustache"
+    if moustache:
+        nose = _blob(f"{prefix}nose", [0, -p["head_r"] * 0.44, p["head_r"] * 0.79],
+                     [p["head_r"] * 0.075, p["head_r"] * 0.06, p["head_r"] * 0.07],
+                     skin, index, "skin", palette, material, segments=8, rings=2, face_forward=True)
+        nose.parent = head
+        for side, sign in (("l", -1), ("r", 1)):
+            detail = _blob(f"{prefix}moustache_{side}",
+                           [sign * p["head_r"] * 0.13, -p["head_r"] * 0.61, p["head_r"] * 0.77],
+                           [p["head_r"] * 0.16, p["head_r"] * 0.10, p["head_r"] * 0.12],
+                           hair, index, "hair", palette, material, segments=12, rings=3, face_forward=True)
             detail.parent = head
 
     eye_y = -p["head_r"] * 0.24
@@ -348,7 +418,7 @@ def build_person(index, params, palette, material, parent_object):
             palette,
             material,
             segments=EYE_SEGMENTS,
-            rings=3,
+            rings=2,
             face_forward=True,
         )
         eye.parent = head
@@ -357,13 +427,13 @@ def build_person(index, params, palette, material, parent_object):
             [sx * p["head_r"] * 0.43 - eye_r * 0.30,
              eye_y + eye_r * 0.43, eye_z + eye_r * 0.23],
             [eye_r * 0.23, eye_r * 0.23, eye_r * 0.07], "eye_shine", index, "none",
-            palette, material, segments=12, rings=2, face_forward=True,
+             palette, material, segments=8, rings=2, face_forward=True,
         )
         shine.parent = head
 
     nose = _blob(
         f"{prefix}mouth",
-        [0.0, -p["head_r"] * 0.53, p["head_r"] * 0.78],
+        [0.0, -p["head_r"] * (0.77 if moustache else 0.53), p["head_r"] * (0.65 if moustache else 0.78)],
         [p["head_r"] * 0.045, p["head_r"] * 0.022, p["head_r"] * 0.018],
         "nose_dark",
         index,
@@ -378,27 +448,22 @@ def build_person(index, params, palette, material, parent_object):
 
     if params.get("glasses", False):
         for side, sign in (("l", -1), ("r", 1)):
-            bpy.ops.mesh.primitive_torus_add(
-                major_segments=16, minor_segments=3,
-                major_radius=p["head_r"] * 0.30, minor_radius=p["head_r"] * 0.018,
-            )
-            glasses = bpy.context.object
-            # Reuse a palette-mapped primitive's metadata and UVs for the open rim.
-            template = _blob(f"{prefix}glasses_{side}", [0, 0, 0], [1, 1, 1],
-                             "eye_black", index, "none", palette, material)
-            uv = template.data.uv_layers.active.data[0].uv.copy()
-            glasses.name = template.name + "_rim"
-            glasses.data.materials.append(material)
-            for layer in list(glasses.data.uv_layers):
-                glasses.data.uv_layers.remove(layer)
-            layer = glasses.data.uv_layers.new()
-            for loop in layer.data:
-                loop.uv = uv
-            for polygon in glasses.data.polygons:
-                polygon.use_smooth = True
-            bpy.data.objects.remove(template, do_unlink=True)
-            glasses["zooPerson"] = index
-            glasses["zooTint"] = "none"
+            glasses = _blob(f"{prefix}glasses_{side}", [0, 0, 0], [1, 1, 1],
+                              "eye_black", index, "none", palette, material)
+            uv = glasses.data.uv_layers.active.data[0].uv.copy()
+            glasses.name += "_rim"
+            vertices, faces = [], []
+            rim_segments = 18
+            # The invisible rear half of the wire costs no triangles; the front
+            # retains a curved cross-section and a finer circular outline.
+            for ring, (offset, depth) in enumerate(((0.018, 0), (0, 0.018), (-0.018, 0))):
+                for segment in range(rim_segments):
+                    angle = 2 * math.pi * segment / rim_segments
+                    radius = p["head_r"] * (0.30 + offset)
+                    vertices.append(Vector((radius * math.cos(angle), radius * math.sin(angle), p["head_r"] * depth)))
+                if ring:
+                    _join_rings(faces, (ring - 1) * rim_segments, rim_segments, ring * rim_segments, rim_segments)
+            _replace_surface(glasses, vertices, faces, uv)
             glasses.rotation_euler.x = math.pi / 2
             glasses.location = game_to_blender([sign * p["head_r"] * 0.43, eye_y, eye_z + p["head_r"] * 0.06])
             glasses.parent = head
@@ -418,7 +483,7 @@ def build_person(index, params, palette, material, parent_object):
             arm_end = [0.0, params["height"] * STROLLER_HANDLE_HEIGHT_RATIO
                        - p["hip_height"] - p["torso"] * 0.65, STROLLER_HANDLE_FORWARD]
         elif params.get("shoulderChild") is not None:
-            arm_end = [sx * p["head_r"] * 0.65, p["head_r"] * 2.0, 0.10]
+            arm_end = params["shoulderGrips"][side]
         elif posture == "shoulders":
             direction = Vector((sx * 0.25, -1.0, 0.25)).normalized() * p["arm_len"]
             arm_end = list(direction)
@@ -442,7 +507,7 @@ def build_person(index, params, palette, material, parent_object):
         hand_pivot = _empty(f"{prefix}hand_{side}", arm_end, pivot) if params.get("camera") else None
         hand_pivots[f"hand_{side}"] = hand_pivot
         hand = _blob(f"{prefix}hand_{side}", [0, 0, 0] if hand_pivot else endpoint, [p["limb_r"]] * 3,
-                     skin, index, "skin", palette, material, segments=20, rings=2, face_forward=True)
+                     skin, index, "skin", palette, material, segments=16, rings=4, face_forward=True)
         hand.parent = spine if supported_arms else hand_pivot if hand_pivot else pivot
         pivot["zooHand"] = arm_end
 
@@ -455,17 +520,23 @@ def build_person(index, params, palette, material, parent_object):
             knee = [sx * splay, -p["leg_len"] * 0.08, forward]
             drop = 1.4 if posture == "shoulders" else 0.46
             foot = [sx * splay, -p["leg_len"] * drop, forward + p["leg_len"] * 0.05]
+            if posture == "shoulders":
+                knee, foot = params["shoulderLegs"][side]
             pivot["zooKnee"] = knee
         pivot["zooFoot"] = foot
         leg_end = knee if knee is not None else foot
         leg = _round_limb(f"{prefix}leg_{side}", [0.0, 0.0, 0.0], leg_end,
-                          p["limb_r"], pants, index, "pants", palette, material)
+                          p["limb_r"] * (1.18 if posture == "shoulders" else 1.0), pants, index, "pants", palette, material,
+                          segments=12 if posture == "shoulders" else LIMB_SEGMENTS,
+                          rings=4 if posture == "shoulders" else ROUND_RINGS)
         leg.parent = pivot
         if knee is not None:
             shin = _round_limb(
                 f"{prefix}shin_{side}", knee, foot,
-                p["limb_r"],
+                p["limb_r"] * (1.18 if posture == "shoulders" else 1.0),
                 pants, index, "pants", palette, material,
+                segments=12 if posture == "shoulders" else LIMB_SEGMENTS,
+                rings=4 if posture == "shoulders" else ROUND_RINGS,
             )
             shin.parent = pivot
         shoe = _blob(
@@ -478,10 +549,13 @@ def build_person(index, params, palette, material, parent_object):
             palette,
             material,
             segments=ROUND_SEGMENTS,
-            rings=ROUND_RINGS,
+            rings=4,
             exponent=1.0,
+            face_forward=True,
         )
         shoe.parent = pivot
+        bottom = game_to_blender([foot[0], foot[1] - params["height"] * 0.018, foot[2]])
+        _simplify_hidden_vertices(shoe, lambda point: bottom.z - p["limb_r"] * 0.95 < point.z < bottom.z - p["limb_r"] * 0.1)
 
     # Facial texels must retain zooTint none: skin multiplication would darken
     # the white catchlights. The merger combines them only within the head pivot.
@@ -501,14 +575,14 @@ def build_person(index, params, palette, material, parent_object):
             palette,
             material,
             segments=8,
-            rings=4,
+            rings=3,
             exponent=0.5,
         )
         camera_body.parent = camera
         lens = _blob(f"{prefix}camera_lens",
                       [0.0, 0.0, p["limb_r"] * 0.64],
                      [p["limb_r"] * 0.45, p["limb_r"] * 0.45, p["limb_r"] * 0.35],
-                     "otter_throat", index, "none", palette, material, segments=6, rings=4)
+                      "otter_throat", index, "none", palette, material, segments=6, rings=3)
         lens.parent = camera
         neck = [0.0, p["torso"] * 0.90, p["body_d"] * 0.70]
         strap_pivot = _empty(f"{prefix}camera_strap", neck, spine)

@@ -19,7 +19,7 @@ TINT_COLORS = {
     "shirt": (0xFF5555, 0x55AAFF, 0xFFDD44, 0x88CC88, 0xFF9900, 0xEEEEEE),
     "pants": (0x334455, 0x556677, 0x887766, 0x444444, 0x998877),
 }
-FACE_PEOPLE = (3, 1, 0, 0, 1)
+FACE_PEOPLE = (3, 1, 0, 0, 0)
 DARKEST_SKIN = 0x8D552A
 LIGHT_SKIN = 0xFFC8A8
 
@@ -65,27 +65,38 @@ def person_tint(archetype_index, person, tint):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--faces", action="store_true")
+    parser.add_argument("--shoulder", action="store_true")
+    parser.add_argument("--clip", choices=("walk", "stop", "look", "point", "photo", "sit"), default="stop")
+    parser.add_argument("--phase", type=float, default=0.25)
     args = parser.parse_args(sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else [])
     verify_game_colors()
     bpy.ops.wm.read_factory_settings(use_empty=True)
-    for index, archetype in enumerate(ARCHETYPES):
+    archetypes = ("shoulder-ride",) * 3 if args.shoulder else ARCHETYPES
+    for index, archetype in enumerate(archetypes):
         before = set(bpy.data.objects)
         bpy.ops.import_scene.gltf(filepath=str(ROOT / "assets/models/visitors" / f"{archetype}.glb"))
         bpy.context.scene.frame_set(0)
         objects = set(bpy.data.objects) - before
         group = next(obj for obj in objects if obj.get("zooVisitor") is not None)
+        layout = bpy.data.objects.new(f"preview_layout_{index}", None)
+        bpy.context.collection.objects.link(layout)
+        group.parent = layout
+        group = layout
         group.location.x = (-5.1, -2.2, -0.2, 1.8, 3.8)[index]
         group.rotation_euler.z = math.radians(-25)
+        if args.shoulder:
+            group.location.x = (index - 1) * 2.0
+            group.rotation_euler.z = math.radians((0, -45, -90)[index])
         for obj in objects:
             if obj.animation_data:
                 obj.animation_data.action = None
             if obj.type == "MESH" and obj.get("zooTint", "none") != "none":
                 tint = obj["zooTint"]
-                tint_material(obj, person_tint(index, obj["zooPerson"], tint))
+                tint_material(obj, person_tint(1 if args.shoulder else index, obj["zooPerson"], tint))
         # Imported glTF actions are assigned directly by Blender; evaluate only stop.
         for obj in objects:
             if obj.animation_data:
-                stop = next((track for track in obj.animation_data.nla_tracks if "stop" in track.name), None)
+                stop = next((track for track in obj.animation_data.nla_tracks if args.clip in track.name), None)
                 for track in obj.animation_data.nla_tracks:
                     track.mute = track != stop
         if args.faces:
@@ -105,21 +116,25 @@ def main():
             group.scale = (factor,) * 3
             bpy.context.view_layer.update()
             center = head.matrix_world.translation.copy()
-            group.location = Vector(((index - 2) * 1.10, 0.0, 1.25)) - center
+            group.location = Vector(((index - 2) * 1.30, 0.0, 1.25)) - center
 
     scene = bpy.context.scene
-    scene.frame_set(15)
+    duration = max(strip.frame_end for obj in bpy.data.objects if obj.animation_data
+                   for track in obj.animation_data.nla_tracks if not track.mute for strip in track.strips)
+    frame = duration * args.phase
+    scene.frame_set(int(frame), subframe=frame % 1)
     bpy.ops.mesh.primitive_plane_add(size=200)
     floor = bpy.context.object
     floor.name = "preview_floor"
     material = bpy.data.materials.new("preview_neutral")
     material.diffuse_color = (0.85, 0.85, 0.83, 1.0)
     floor.data.materials.append(material)
-    bpy.ops.object.camera_add(location=(0.0, -12.0, 1.2 if args.faces else 5.5))
+    target_height = 1.2 if args.faces else 1.15 if args.shoulder else 0.8
+    bpy.ops.object.camera_add(location=(0.0, -12.0, 1.2 if args.faces else 2.1 if args.shoulder else 5.5))
     camera = bpy.context.object
-    camera.rotation_euler = (Vector((0.0, 0.0, 1.2 if args.faces else 0.8)) - camera.location).to_track_quat("-Z", "Y").to_euler()
+    camera.rotation_euler = (Vector((0.0, 0.0, target_height)) - camera.location).to_track_quat("-Z", "Y").to_euler()
     camera.data.type = "ORTHO"
-    camera.data.ortho_scale = 5.7 if args.faces else 12.8
+    camera.data.ortho_scale = 7.0 if args.faces else 6.5 if args.shoulder else 12.8
     scene.camera = camera
     for location, energy, size in (((-3, -5, 8), 700, 8), ((6, 1, 6), 400, 7)):
         bpy.ops.object.light_add(type="AREA", location=location)
@@ -138,7 +153,8 @@ def main():
     scene.render.resolution_y = 900
     scene.render.resolution_percentage = 100
     scene.view_settings.view_transform = "Standard"
-    scene.render.filepath = str(ROOT / "docs" / ("visitors-preview-faces.png" if args.faces else "visitors-preview.png"))
+    filename = "visitors-preview-shoulder.png" if args.shoulder else "visitors-preview-faces.png" if args.faces else "visitors-preview.png"
+    scene.render.filepath = str(ROOT / "docs" / filename)
     bpy.ops.render.render(write_still=True)
 
 

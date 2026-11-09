@@ -9,12 +9,13 @@ import sys
 from pathlib import Path
 
 import bpy
+import bmesh
 from mathutils import Vector
 
 VISITORS_DIR = Path(__file__).parent
 sys.path.insert(0, str(VISITORS_DIR))
 from build import EXPECTED_CLIP_NAMES, build_group, _count_triangles_per_person  # noqa: E402
-from human import game_to_blender  # noqa: E402
+from human import game_to_blender, HAIR_SEGMENTS  # noqa: E402
 from palette import build_material, load_palette  # noqa: E402
 
 EPSILON = 0.0001
@@ -35,6 +36,30 @@ def _bounds(obj):
         Vector(tuple(min(point[axis] for point in vertices) for axis in range(3))),
         Vector(tuple(max(point[axis] for point in vertices) for axis in range(3))),
     )
+
+
+def _test_fringe_edge(hair, radius):
+    edge = [vertex.co for vertex in list(hair.data.vertices)[-HAIR_SEGMENTS:]
+            if vertex.co.y < -radius * 0.70]
+    _assert(len(edge) >= 3 and max(point.z for point in edge) - min(point.z for point in edge) > radius * 0.03,
+            "fringe has a horizontal bowl edge")
+
+
+def _test_fringe_guard(hair, radius):
+    edge = [vertex for vertex in list(hair.data.vertices)[-HAIR_SEGMENTS:]
+            if vertex.co.y < -radius * 0.70]
+    heights = [vertex.co.z for vertex in edge]
+    for vertex in edge:
+        vertex.co.z = sum(heights) / len(heights)
+    try:
+        _test_fringe_edge(hair, radius)
+    except AssertionError as error:
+        _assert("horizontal bowl edge" in str(error), str(error))
+    else:
+        raise AssertionError("fringe guard accepts a horizontal bowl edge")
+    finally:
+        for vertex, height in zip(edge, heights):
+            vertex.co.z = height
 
 
 def _test_faces(description):
@@ -64,12 +89,37 @@ def _test_faces(description):
                             for loop in rim.data.uv_layers.active.data),
                         "rim does not use the dark eye texel")
                 _assert(not any("lens" in obj.name for obj in head.children), "glasses contain a solid lens")
-        if person.get("hair") == "beard":
-            beard = bpy.data.objects[prefix + "beard_mesh"]
-            _assert(beard["zooTint"] == "hair", "beard does not follow hair tint")
-            _assert(max(vertex.co.z for vertex in beard.data.vertices
-                        if abs(vertex.co.x) < radius * 0.20) < -radius * 0.60,
-                    "beard hides the mouth or eyes")
+        if person.get("hair") == "beard" or person.get("facialHair") == "moustache":
+            _assert(bpy.data.objects.get(prefix + "beard_mesh") is None, "smiling beard crescent remains")
+            for side, sign in (("l", -1), ("r", 1)):
+                moustache = bpy.data.objects[prefix + f"moustache_{side}_mesh"]
+                _assert(moustache["zooTint"] == "hair" and moustache.parent == head,
+                        "moustache does not follow hair tint and head")
+                low, high = _bounds(moustache)
+                _assert(high.z - low.z > radius * 0.15, "moustache is not plump")
+                _assert(max(vertex.co.z for vertex in moustache.data.vertices) < -radius * 0.49,
+                        "moustache touches the eyes")
+                _assert(max(abs(vertex.co.x) for vertex in moustache.data.vertices) < radius * 0.31,
+                        "moustache forms a wide smile")
+                _assert(sign * sum(vertex.co.x for vertex in moustache.data.vertices) > 0,
+                        "moustache lobes are not on opposite sides")
+        if person.get("hair", "short") != "none":
+            hair = bpy.data.objects[prefix + "hair_mesh"]
+            surface = bmesh.new()
+            surface.from_mesh(hair.data)
+            _assert(all(edge.is_manifold and edge.is_contiguous for edge in surface.edges)
+                    and surface.calc_volume(signed=True) > 0,
+                    "hair surface is open or has inward-facing polygons")
+            surface.free()
+            points = [vertex.co for vertex in hair.data.vertices]
+            front = [point for point in points if point.y < -radius * 0.70]
+            _assert(front and min(point.z for point in front) > radius * 0.10, "fringe covers the eyes")
+            sides = [point for point in points if abs(point.x) > radius * 0.95]
+            back = [point for point in points if point.y > radius * 0.60]
+            _assert(min(point.z for point in sides) < 0 and min(point.z for point in back) < -radius * 0.50,
+                    "hair lacks temples or a descending nape")
+            _test_fringe_edge(hair, radius)
+            _test_fringe_guard(hair, radius)
 
 
 def _test_rest(description, root):

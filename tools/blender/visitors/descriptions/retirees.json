@@ -12,6 +12,7 @@
       "headScale": 1.0,
       "legRatio": 0.18,
       "hair": "sunhat",
+      "facialHair": "moustache",
       "glasses": true,
       "camera": false,
       "tints": {
