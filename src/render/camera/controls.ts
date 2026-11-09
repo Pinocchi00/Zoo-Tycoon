@@ -7,6 +7,7 @@ import {
   wheelZoom,
   type DragMode,
 } from './gestures';
+import { cancelTap, createTapTracker, moveTap, pressTap, releaseTap } from './tap-tracker';
 
 const PRIMARY_BUTTON = 0;
 const SECONDARY_BUTTON = 2;
@@ -50,34 +51,111 @@ function tryCapture(element: HTMLElement, pointerId: number): boolean {
   }
 }
 
+/** Subset of `PointerEvent` used by the control handlers; keeps tests free of DOM types. */
+export interface PointerEventLike {
+  readonly pointerId: number;
+  readonly button: number;
+  readonly pointerType: string;
+  readonly offsetX: number;
+  readonly offsetY: number;
+  preventDefault(): void;
+}
+
+/**
+ * Handles a pointer down: starts the camera gesture and a tap candidate.
+ * Returns whether the event should be cancelled (`preventDefault`).
+ */
+export function applyPointerDown(
+  event: PointerEventLike,
+  tracker: ReturnType<typeof createGestureTracker>,
+  tap: ReturnType<typeof createTapTracker>,
+  tryCapture: () => boolean,
+): boolean {
+  const mode = dragModeFor(event.pointerType, event.button);
+  pressTap(tap, event.pointerId, event.offsetX, event.offsetY, event.button === PRIMARY_BUTTON);
+  if (mode === null || !tryCapture()) {
+    cancelTap(tap, event.pointerId);
+    return false;
+  }
+  if (pressPointer(tracker, event.pointerId, event.offsetX, event.offsetY, mode)) {
+    return true;
+  }
+  cancelTap(tap, event.pointerId);
+  return false;
+}
+
+/** Handles a pointer move: updates the camera gesture and checks the tap threshold. */
+export function applyPointerMove(
+  event: PointerEventLike,
+  tracker: ReturnType<typeof createGestureTracker>,
+  tap: ReturnType<typeof createTapTracker>,
+  rig: CameraRig,
+  viewport: ViewportSize,
+): void {
+  movePointer(tracker, rig, event.pointerId, event.offsetX, event.offsetY, viewport);
+  moveTap(tap, event.pointerId, event.offsetX, event.offsetY);
+}
+
+/** Handles a pointer up: fires a clean tap and releases the gesture. */
+export function applyPointerUp(
+  event: PointerEventLike,
+  tracker: ReturnType<typeof createGestureTracker>,
+  tap: ReturnType<typeof createTapTracker>,
+  onTap?: (x: number, y: number) => void,
+): void {
+  moveTap(tap, event.pointerId, event.offsetX, event.offsetY);
+  if (releaseTap(tap, event.pointerId) && onTap !== undefined) {
+    onTap(event.offsetX, event.offsetY);
+  }
+  releasePointer(tracker, event.pointerId);
+}
+
+/** Handles a cancelled pointer or lost capture: invalidates the tap and forgets the pointer. */
+export function applyPointerCancel(
+  event: PointerEventLike,
+  tracker: ReturnType<typeof createGestureTracker>,
+  tap: ReturnType<typeof createTapTracker>,
+): void {
+  cancelTap(tap, event.pointerId);
+  releasePointer(tracker, event.pointerId);
+}
+
 /**
  * Lets touch and mouse move the camera: drag to pan, pinch or wheel to zoom,
- * two-finger twist or right-button drag to turn. Returns a function that removes the listeners.
+ * two-finger twist or right-button drag to turn. A clean primary-pointer tap
+ * on the canvas is reported through `onTap`. Returns a function that removes the listeners.
  */
 export function attachCameraControls(
   element: HTMLElement,
   rig: CameraRig,
   viewport: ViewportSize,
+  onTap?: (x: number, y: number) => void,
 ): () => void {
   const tracker = createGestureTracker();
+  const tap = createTapTracker();
 
   const onPointerDown = (event: PointerEvent): void => {
-    const mode = dragModeFor(event.pointerType, event.button);
-    if (mode === null || !tryCapture(element, event.pointerId)) {
-      return;
-    }
-    if (pressPointer(tracker, event.pointerId, event.offsetX, event.offsetY, mode)) {
+    const accepted = applyPointerDown(event, tracker, tap, () => {
+      return tryCapture(element, event.pointerId);
+    });
+    if (accepted) {
       event.preventDefault();
-    } else {
+    } else if (element.hasPointerCapture(event.pointerId)) {
       element.releasePointerCapture(event.pointerId);
     }
   };
   const onPointerMove = (event: PointerEvent): void => {
-    movePointer(tracker, rig, event.pointerId, event.offsetX, event.offsetY, viewport);
+    applyPointerMove(event, tracker, tap, rig, viewport);
   };
-  // Without capture the canvas no longer hears this pointer's release: forget it now.
-  const onPointerEnd = (event: PointerEvent): void => {
-    releasePointer(tracker, event.pointerId);
+  const onPointerUp = (event: PointerEvent): void => {
+    applyPointerUp(event, tracker, tap, onTap);
+  };
+  const onPointerCancel = (event: PointerEvent): void => {
+    applyPointerCancel(event, tracker, tap);
+  };
+  // If capture is lost after a natural pointerup, the tap tracker is already idle: no double callback.
+  const onLostPointerCapture = (event: PointerEvent): void => {
+    applyPointerCancel(event, tracker, tap);
   };
   const onWheel = (event: WheelEvent): void => {
     event.preventDefault();
@@ -90,18 +168,18 @@ export function attachCameraControls(
 
   element.addEventListener('pointerdown', onPointerDown);
   element.addEventListener('pointermove', onPointerMove);
-  element.addEventListener('pointerup', onPointerEnd);
-  element.addEventListener('pointercancel', onPointerEnd);
-  element.addEventListener('lostpointercapture', onPointerEnd);
+  element.addEventListener('pointerup', onPointerUp);
+  element.addEventListener('pointercancel', onPointerCancel);
+  element.addEventListener('lostpointercapture', onLostPointerCapture);
   element.addEventListener('wheel', onWheel, { passive: false });
   element.addEventListener('contextmenu', onContextMenu);
 
   return () => {
     element.removeEventListener('pointerdown', onPointerDown);
     element.removeEventListener('pointermove', onPointerMove);
-    element.removeEventListener('pointerup', onPointerEnd);
-    element.removeEventListener('pointercancel', onPointerEnd);
-    element.removeEventListener('lostpointercapture', onPointerEnd);
+    element.removeEventListener('pointerup', onPointerUp);
+    element.removeEventListener('pointercancel', onPointerCancel);
+    element.removeEventListener('lostpointercapture', onLostPointerCapture);
     element.removeEventListener('wheel', onWheel);
     element.removeEventListener('contextmenu', onContextMenu);
   };

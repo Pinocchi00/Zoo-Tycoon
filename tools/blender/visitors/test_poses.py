@@ -1,0 +1,456 @@
+"""Geometry/contact regressions, executed by headless Blender.
+
+blender -b --factory-startup --python-exit-code 1 -P tools/blender/visitors/test_poses.py
+"""
+
+import json
+import math
+import sys
+from pathlib import Path
+
+import bpy
+import bmesh
+from mathutils import Vector
+
+VISITORS_DIR = Path(__file__).parent
+sys.path.insert(0, str(VISITORS_DIR))
+from build import EXPECTED_CLIP_NAMES, build_group, _count_triangles_per_person  # noqa: E402
+from human import game_to_blender, HAIR_SEGMENTS, SUNHAT_BRIM_HALF_THICKNESS_RATIO, SUNHAT_BRIM_SLOPE_DEG, SUNHAT_CROWN_ABOVE_BRIM_RATIO  # noqa: E402
+from palette import build_material, load_palette  # noqa: E402
+from verify import (  # noqa: E402
+    CHILD_FOOT_MAX_SIDE_OFFSET_RATIO,
+    CHILD_FOOT_MIN_SIDE_OFFSET,
+    SUNHAT_DIAMETER_MAX_TO_HEAD_WIDTH,
+    verify_child_eye_clearance,
+    verify_child_foot_lateral_offset,
+    verify_source_junctions,
+    verify_sunhat_contact,
+    verify_sunhat_fit,
+    maximum_vertical_surface_gap,
+    upper_surface_triangles,
+)
+
+EPSILON = 0.0001
+GUARD_PERTURBATION = 0.01
+SUNHAT_MIN_VISIBLE_BRIM_DIAMETER_TO_HEAD_WIDTH = 1.05
+SUNHAT_FLOATING_CROWN_OFFSET_RATIO = 0.10
+
+
+def _assert(condition, message):
+    if not condition:
+        raise AssertionError(message)
+
+
+def _vertices(obj):
+    return [obj.matrix_world @ vertex.co for vertex in obj.data.vertices]
+
+
+def _bounds(obj):
+    vertices = _vertices(obj)
+    return (
+        Vector(tuple(min(point[axis] for point in vertices) for axis in range(3))),
+        Vector(tuple(max(point[axis] for point in vertices) for axis in range(3))),
+    )
+
+
+def _test_fringe_edge(hair, radius):
+    edge = [vertex.co for vertex in list(hair.data.vertices)[-HAIR_SEGMENTS:]
+            if vertex.co.y < -radius * 0.70]
+    _assert(len(edge) >= 3 and max(point.z for point in edge) - min(point.z for point in edge) > radius * 0.03,
+            "fringe has a horizontal bowl edge")
+
+
+def _test_fringe_guard(hair, radius):
+    edge = [vertex for vertex in list(hair.data.vertices)[-HAIR_SEGMENTS:]
+            if vertex.co.y < -radius * 0.70]
+    heights = [vertex.co.z for vertex in edge]
+    for vertex in edge:
+        vertex.co.z = sum(heights) / len(heights)
+    try:
+        _test_fringe_edge(hair, radius)
+    except AssertionError as error:
+        _assert("horizontal bowl edge" in str(error), str(error))
+    else:
+        raise AssertionError("fringe guard accepts a horizontal bowl edge")
+    finally:
+        for vertex, height in zip(edge, heights):
+            vertex.co.z = height
+
+
+def _test_faces(description):
+    for person in description["persons"]:
+        prefix = f"p{person['index']}_"
+        head = bpy.data.objects[prefix + "head"]
+        radius = head["zooHeadRadius"]
+        for side in ("l", "r"):
+            eye = bpy.data.objects[prefix + f"eye_{side}_mesh"]
+            vertices = [vertex.co for vertex in eye.data.vertices]
+            width = max(v.x for v in vertices) - min(v.x for v in vertices)
+            height = max(v.z for v in vertices) - min(v.z for v in vertices)
+            _assert(height > width, "eye is not a tall oval")
+            _assert(max(v.z for v in vertices) < radius * 0.02, "eye sits too high")
+            # The old skin-bucket assertion contradicted untinted white catchlights.
+            _assert(eye["zooTint"] == "none" and eye.parent == head, "eye must stay untinted on the head pivot")
+            shine = bpy.data.objects[prefix + f"eye_shine_{side}_mesh"]
+            _assert(shine["zooTint"] == "none" and shine.parent == head, "catchlight must stay untinted")
+            for obj in (eye, shine):
+                _assert(all(polygon.use_smooth for polygon in obj.data.polygons), "facial sphere is flat shaded")
+            _assert(len({round(vertex.co.x, 6) for vertex in eye.data.vertices}) >= 10,
+                    "eye outline has too few segments")
+            if person.get("glasses"):
+                rim = bpy.data.objects[prefix + f"glasses_{side}_mesh_rim"]
+                eye_uv = eye.data.uv_layers.active.data[0].uv
+                _assert(all((loop.uv - eye_uv).length < EPSILON
+                            for loop in rim.data.uv_layers.active.data),
+                        "rim does not use the dark eye texel")
+                _assert(not any("lens" in obj.name for obj in head.children), "glasses contain a solid lens")
+        if person.get("hair") == "beard" or person.get("facialHair") == "moustache":
+            _assert(bpy.data.objects.get(prefix + "beard_mesh") is None, "smiling beard crescent remains")
+            for side, sign in (("l", -1), ("r", 1)):
+                moustache = bpy.data.objects[prefix + f"moustache_{side}_mesh"]
+                _assert(moustache["zooTint"] == "hair" and moustache.parent == head,
+                        "moustache does not follow hair tint and head")
+                low, high = _bounds(moustache)
+                _assert(high.z - low.z > radius * 0.15, "moustache is not plump")
+                _assert(max(vertex.co.z for vertex in moustache.data.vertices) < -radius * 0.49,
+                        "moustache touches the eyes")
+                _assert(max(abs(vertex.co.x) for vertex in moustache.data.vertices) < radius * 0.31,
+                        "moustache forms a wide smile")
+                _assert(sign * sum(vertex.co.x for vertex in moustache.data.vertices) > 0,
+                        "moustache lobes are not on opposite sides")
+        if person.get("hair", "short") not in {"none", "sunhat"}:
+            hair = bpy.data.objects[prefix + "hair_mesh"]
+            surface = bmesh.new()
+            surface.from_mesh(hair.data)
+            _assert(all(edge.is_manifold and edge.is_contiguous for edge in surface.edges)
+                    and surface.calc_volume(signed=True) > 0,
+                    "hair surface is open or has inward-facing polygons")
+            surface.free()
+            points = [vertex.co for vertex in hair.data.vertices]
+            front = [point for point in points if point.y < -radius * 0.70]
+            _assert(front and min(point.z for point in front) > radius * 0.10, "fringe covers the eyes")
+            sides = [point for point in points if abs(point.x) > radius * 0.95]
+            back = [point for point in points if point.y > radius * 0.60]
+            _assert(min(point.z for point in sides) < 0 and min(point.z for point in back) < -radius * 0.50,
+                    "hair lacks temples or a descending nape")
+            _test_fringe_edge(hair, radius)
+            _test_fringe_guard(hair, radius)
+
+
+def _test_rest(description, root):
+    for obj in root.children_recursive:
+        if obj.type == "MESH":
+            _assert(_bounds(obj)[0].z >= -EPSILON, f"{obj.name} penetrates the ground")
+            if not any(part in obj.name for part in ("hair", "camera", "stroller")):
+                _assert(all(polygon.use_smooth for polygon in obj.data.polygons), f"{obj.name} has flat organic surfaces")
+    counts = _count_triangles_per_person(root, description["memberCount"])
+    _assert(all(800 <= count <= 1500 for count in counts.values()), f"triangle budget: {counts}")
+    for person in description["persons"]:
+        idx = person["index"]
+        if person.get("posture", "standing") == "standing":
+            for side in ("l", "r"):
+                shoe = bpy.data.objects[f"p{idx}_shoe_{side}_mesh"]
+                _assert(abs(_bounds(shoe)[0].z) < EPSILON, f"{shoe.name} is not grounded")
+        else:
+            hips = bpy.data.objects[f"p{idx}_hips"]
+            _assert(hips.location.length < EPSILON, f"p{idx} stands above its seat")
+            for side in ("l", "r"):
+                leg = bpy.data.objects[f"p{idx}_leg_{side}"]
+                knee = game_to_blender(leg["zooKnee"])
+                foot = game_to_blender(leg["zooFoot"])
+                bend = knee.angle(foot - knee)
+                _assert(math.radians(50) < bend < math.radians(110), f"{leg.name} is not bent")
+                _assert(foot.z < knee.z and knee.y < -0.10, f"{leg.name} is not seated forward")
+            expected_parent = (
+                f"p{person['sitOn']}_root" if "sitOn" in person else "p0_shoulder_seat"
+            )
+            person_root = bpy.data.objects[f"p{idx}_root"]
+            if "sitOn" in person:
+                _assert(person_root.parent.name == "p2_sit_pivot", "baby is not attached to the seat")
+                _assert(person_root.parent.parent.name == expected_parent, "stroller has wrong owner")
+                seat = bpy.data.objects["p0_stroller_seat_mesh"]
+                _assert(abs(hips.matrix_world.translation.z - _bounds(seat)[1].z) < 0.04,
+                        "baby pelvis does not rest on the seat")
+            else:
+                _assert(person_root.parent.name == expected_parent, "child is not carried on shoulders")
+                head = bpy.data.objects["p0_head"]
+                head_mesh = bpy.data.objects["p0_head_mesh"]
+                head_center = head.matrix_world.translation
+                head_radius = head["zooHeadRadius"]
+                body = bpy.data.objects[f"p{idx}_body_mesh"]
+                hair = bpy.data.objects["p0_hair_mesh"]
+                gap = _bounds(body)[0].z - _bounds(hair)[1].z
+                _assert(-0.02 <= gap <= 0, "child behind must rest slightly inside the hair crown")
+                _assert(_bounds(body)[0].z >= _bounds(head_mesh)[1].z - EPSILON,
+                         "child torso penetrates the carrier's skull")
+                child_head = bpy.data.objects[f"p{idx}_head_mesh"]
+                _assert(_bounds(child_head)[0].z > _bounds(head_mesh)[1].z,
+                        "carrier hides the child's face")
+                _assert(gap >= -0.02, "child sinks into the carrier")
+                for side, sign in (("l", -1), ("r", 1)):
+                    leg = bpy.data.objects[f"p{idx}_leg_{side}"]
+                    foot = leg.matrix_world @ game_to_blender(leg["zooFoot"])
+                    side_offset = sign * (foot.x - head_center.x)
+                    _assert(
+                        CHILD_FOOT_MIN_SIDE_OFFSET < side_offset <
+                        head_radius * CHILD_FOOT_MAX_SIDE_OFFSET_RATIO,
+                        "child's legs are not beside the forehead",
+                    )
+                    _assert(head_center.z + head_radius * 0.02 < foot.z <
+                            head_center.z + head_radius * 1.03,
+                            "child's feet do not hang beside the head without covering its eyes")
+        if person.get("camera", False):
+            camera = bpy.data.objects[f"p{idx}_camera"]
+            _assert(camera.parent.name == f"p{idx}_spine", "camera is attached to a limb")
+            _assert(camera.location.y < 0 and abs(camera.location.x) < EPSILON,
+                    "camera is not centered on the chest")
+            for side in ("l", "r"):
+                strap = bpy.data.objects[f"p{idx}_camera_strap_{side}_mesh"]
+                _assert(strap.parent.parent == camera.parent, "strap does not follow the chest")
+        for side in ("l", "r"):
+            sleeve = bpy.data.objects[f"p{idx}_sleeve_{side}_mesh"]
+            arm = bpy.data.objects[f"p{idx}_arm_{side}_mesh"]
+            hand = bpy.data.objects[f"p{idx}_hand_{side}_mesh"]
+            _assert(sleeve["zooTint"] == "shirt" and sleeve.parent.name == f"p{idx}_spine",
+                    "sleeve has wrong tint or pivot")
+            _assert(arm["zooTint"] == hand["zooTint"] == "skin", "forearm or hand is not skin")
+        if person.get("hair") == "sunhat":
+            radius = bpy.data.objects[f"p{idx}_head"]["zooHeadRadius"]
+            brim = bpy.data.objects[f"p{idx}_hat_brim_mesh"]
+            head = bpy.data.objects[f"p{idx}_head_mesh"]
+            brim_width = _bounds(brim)[1].x - _bounds(brim)[0].x
+            head_width = _bounds(head)[1].x - _bounds(head)[0].x
+            _assert(
+                brim_width > SUNHAT_MIN_VISIBLE_BRIM_DIAMETER_TO_HEAD_WIDTH * head_width,
+                "hat has no visible brim",
+            )
+            _assert(
+                brim_width <= SUNHAT_DIAMETER_MAX_TO_HEAD_WIDTH * head_width,
+                "hat brim is too wide",
+            )
+            crown = bpy.data.objects[f"p{idx}_hair_mesh"]
+            _assert(brim["zooTint"] == crown["zooTint"] == "none", "hat changes colour with the hair")
+            rings = sorted({round(math.hypot(vertex.co.x, vertex.co.y), 6) for vertex in brim.data.vertices})
+            inner = [vertex.co for vertex in brim.data.vertices if abs(math.hypot(vertex.co.x, vertex.co.y) - rings[0]) < EPSILON]
+            outer = [vertex.co for vertex in brim.data.vertices if abs(math.hypot(vertex.co.x, vertex.co.y) - rings[-1]) < EPSILON]
+            _assert(len(inner) == 16 and len(outer) == 64, "hat brim circular outline is too coarse")
+            thickness = max(point.z for point in outer) - min(point.z for point in outer)
+            _assert(abs(thickness - 2 * radius * SUNHAT_BRIM_HALF_THICKNESS_RATIO) < EPSILON,
+                    "hat brim does not have constant thickness")
+            drop = max(point.z for point in inner) - max(point.z for point in outer)
+            _assert(abs(drop - (rings[-1] - rings[0]) * math.tan(math.radians(SUNHAT_BRIM_SLOPE_DEG))) < EPSILON,
+                    "hat brim does not slope downward at its specified angle")
+            _assert(abs(max(vertex.co.z for vertex in crown.data.vertices) - max(point.z for point in inner)
+                        - radius * SUNHAT_CROWN_ABOVE_BRIM_RATIO) < EPSILON, "hat crown relief changed")
+            _assert(brim.data.uv_layers.active.data[0].uv == crown.data.uv_layers.active.data[0].uv,
+                    "hat crown and brim do not share one palette colour")
+            surface = bmesh.new()
+            surface.from_mesh(crown.data)
+            _assert(all(edge.is_manifold and edge.is_contiguous for edge in surface.edges)
+                    and surface.calc_volume(signed=True) > 0, "hat crown is open or inverted")
+            surface.free()
+    print(f"[zoo-refuge] {description['archetypeId']}: rest geometry and budget passed {counts}")
+
+
+def _test_sunhat_shape_guards(description, root):
+    meshes = [obj for obj in root.children_recursive if obj.type == "MESH"]
+    verify_sunhat_fit(description, list(reversed(meshes)))
+    for person in description["persons"]:
+        if person.get("hair") != "sunhat":
+            continue
+        prefix = f"p{person['index']}_"
+        radius = bpy.data.objects[prefix + "head"]["zooHeadRadius"]
+        crown = bpy.data.objects[prefix + "hair_mesh"]
+        brim = bpy.data.objects[prefix + "hat_brim_mesh"]
+        for corruption, message in (("low", "lacks relief"), ("upturn", "rises outward"), ("normals", "normals point downward")):
+            points = [vertex.co.copy() for vertex in crown.data.vertices]
+            brim_points = [vertex.co.copy() for vertex in brim.data.vertices]
+            try:
+                if corruption == "low":
+                    for vertex in crown.data.vertices:
+                        vertex.co.z = min(vertex.co.z, radius * 0.7)
+                elif corruption == "upturn":
+                    for vertex in brim.data.vertices:
+                        if math.hypot(vertex.co.x, vertex.co.y) > radius:
+                            vertex.co.z += radius * 0.2
+                else:
+                    surface = bmesh.new()
+                    surface.from_mesh(crown.data)
+                    bmesh.ops.reverse_faces(surface, faces=list(surface.faces))
+                    surface.to_mesh(crown.data)
+                    surface.free()
+                verify_sunhat_fit(description, meshes)
+            except AssertionError as error:
+                _assert(message in str(error), str(error))
+            else:
+                raise AssertionError(f"sunhat guard accepts {corruption}")
+            finally:
+                if corruption == "normals":
+                    surface = bmesh.new()
+                    surface.from_mesh(crown.data)
+                    bmesh.ops.reverse_faces(surface, faces=list(surface.faces))
+                    surface.to_mesh(crown.data)
+                    surface.free()
+                for vertex, point in zip(crown.data.vertices, points):
+                    vertex.co = point
+                for vertex, point in zip(brim.data.vertices, brim_points):
+                    vertex.co = point
+                crown.data.update()
+                brim.data.update()
+        verify_sunhat_fit(description, meshes)
+
+
+def _test_clips(description, root):
+    objects = [root, *root.children_recursive]
+    rest = {obj.name: (obj.location.copy(), obj.rotation_euler.copy(), obj.scale.copy())
+            for obj in objects}
+    tracks = [(obj, track) for obj in objects if obj.animation_data is not None
+              for track in obj.animation_data.nla_tracks]
+    _assert({track.name for _, track in tracks} == EXPECTED_CLIP_NAMES, "missing clips")
+    for clip in EXPECTED_CLIP_NAMES:
+        for obj in objects:
+            obj.location, obj.rotation_euler, obj.scale = rest[obj.name]
+        for _, track in tracks:
+            track.mute = track.name != clip
+        end = max(strip.frame_end for _, track in tracks if track.name == clip for strip in track.strips)
+        for sample in range(9):
+            frame = end * sample / 8
+            bpy.context.scene.frame_set(int(frame), subframe=frame % 1)
+            bpy.context.view_layer.update()
+            verify_source_junctions(description, clip)
+            meshes = [obj for obj in root.children_recursive if obj.type == "MESH"]
+            verify_sunhat_contact(description, meshes)
+            for person in description["persons"]:
+                if person.get("hair") != "sunhat":
+                    continue
+                prefix = f"p{person['index']}_"
+                crown = bpy.data.objects[prefix + "hair_mesh"]
+                original = crown.location.copy()
+                crown.location.z += bpy.data.objects[prefix + "head"]["zooHeadRadius"] * SUNHAT_FLOATING_CROWN_OFFSET_RATIO
+                bpy.context.view_layer.update()
+                try:
+                    verify_sunhat_contact(description, meshes)
+                except AssertionError as error:
+                    _assert("sunhat crown gap exceeds tolerance" in str(error), str(error))
+                else:
+                    raise AssertionError(f"sunhat guard accepts a floating crown during {clip}")
+                finally:
+                    crown.location = original
+                    bpy.context.view_layer.update()
+            verify_child_eye_clearance(
+                description,
+                [obj for obj in root.children_recursive if obj.type == "MESH"],
+                clip,
+            )
+            for person in description["persons"]:
+                idx = person["index"]
+                if person.get("posture") in {"stroller", "shoulders"}:
+                    for joint in ("hips", "leg_l", "leg_r"):
+                        obj = bpy.data.objects[f"p{idx}_{joint}"]
+                        location, rotation, _ = rest[obj.name]
+                        _assert((obj.location - location).length < EPSILON and
+                                (Vector(obj.rotation_euler) - Vector(rotation)).length < EPSILON,
+                                f"{clip} makes carried {obj.name} walk or leave its seat")
+                if person.get("stroller", False):
+                    low, high = _bounds(bpy.data.objects["p0_stroller_handle_mesh"])
+                    for side in ("l", "r"):
+                        arm = bpy.data.objects[f"p{idx}_arm_{side}"]
+                        hand = arm.matrix_world @ game_to_blender(arm["zooHand"])
+                        _assert(all(low[axis] - EPSILON <= hand[axis] <= high[axis] + EPSILON
+                                    for axis in range(3)), f"{clip} releases stroller handle")
+                    for obj in objects:
+                        if "stroller_wheel" in obj.name:
+                            _assert(abs(_bounds(obj)[0].z) < EPSILON, f"{clip} lifts a stroller wheel")
+    print(f"[zoo-refuge] {description['archetypeId']}: six clips, nine samples each passed")
+
+
+def _test_shoulder_clearance_guards(description, root):
+    parent = next((person for person in description["persons"]
+                   if person.get("shoulderChild") is not None), None)
+    if parent is None:
+        return
+    meshes = [obj for obj in root.children_recursive if obj.type == "MESH"]
+    child_index = parent["shoulderChild"]
+    parent_spine = bpy.data.objects[f"p{parent['index']}_spine"]
+    parent_head = bpy.data.objects[f"p{parent['index']}_head"]
+
+    try:
+        verify_child_foot_lateral_offset(
+            Vector((
+                parent_head["zooHeadRadius"] * CHILD_FOOT_MAX_SIDE_OFFSET_RATIO
+                + GUARD_PERTURBATION,
+                0,
+                0,
+            )),
+            1,
+            CHILD_FOOT_MIN_SIDE_OFFSET,
+            parent_head["zooHeadRadius"],
+            "stop",
+        )
+    except AssertionError as error:
+        _assert("child feet spread beyond forehead" in str(error), str(error))
+    else:
+        raise AssertionError("shoulder guard accepts feet spread beyond the parent head")
+
+    eye_objects = [bpy.data.objects[f"p{parent['index']}_eye_{side}_mesh"] for side in ("l", "r")]
+    eye = eye_objects[0]
+    eye_points = [parent_spine.matrix_world.inverted() @ eye.matrix_world @ vertex.co
+                  for vertex in eye.data.vertices]
+    target = Vector((
+        (min(point.x for point in eye_points) + max(point.x for point in eye_points)) * 0.5,
+        min(point.y for point in eye_points) - GUARD_PERTURBATION,
+        (min(point.z for point in eye_points) + max(point.z for point in eye_points)) * 0.5,
+    ))
+    leg_mesh = bpy.data.objects[f"p{child_index}_leg_l_mesh"]
+    vertex = leg_mesh.data.vertices[0]
+    original_vertex = vertex.co.copy()
+    original_names = [obj.name for obj in eye_objects]
+    try:
+        for obj in eye_objects:
+            obj.name = f"{obj.name}_fallback_test"
+        vertex.co = leg_mesh.matrix_world.inverted() @ parent_spine.matrix_world @ target
+        verify_child_eye_clearance(description, meshes, "stop")
+    except AssertionError as error:
+        _assert("child covers parent eyes" in str(error), str(error))
+    else:
+        raise AssertionError("shoulder fallback accepts a child leg point in front of the parent's eye")
+    finally:
+        vertex.co = original_vertex
+        for obj, name in zip(eye_objects, original_names):
+            obj.name = name
+
+
+def main():
+    # A local dip between the former vertex/midpoint/centroid samples must count.
+    crown = [Vector((0, 0, 0)), Vector((1, 0, 0)), Vector((0, 1, 0))]
+    skull = [*crown, Vector((0.22, 0.17, -0.10))]
+    gap = maximum_vertical_surface_gap(
+        upper_surface_triangles(crown, [(0, 1, 2)]),
+        upper_surface_triangles(skull, [(0, 1, 3), (1, 2, 3), (2, 0, 3)]),
+    )
+    _assert(abs(gap - 0.10) < EPSILON, "sunhat gap guard misses a local skull dip")
+    try:
+        maximum_vertical_surface_gap(
+            upper_surface_triangles(crown, [(0, 1, 2)]),
+            upper_surface_triangles([point * 0.1 for point in crown], [(0, 1, 2)]),
+        )
+    except AssertionError as error:
+        _assert("sunhat crown extends beyond skull" in str(error), str(error))
+    else:
+        raise AssertionError("sunhat guard accepts a crown overhanging empty space")
+    for path in sorted((VISITORS_DIR / "descriptions").glob("*.json")):
+        bpy.ops.wm.read_factory_settings(use_empty=True)
+        description = json.loads(path.read_text(encoding="utf-8"))
+        palette = load_palette()
+        root = build_group(description, palette, build_material(palette))
+        bpy.context.view_layer.update()
+        _test_rest(description, root)
+        _test_sunhat_shape_guards(description, root)
+        _test_shoulder_clearance_guards(description, root)
+        _test_faces(description)
+        _test_clips(description, root)
+    print("[zoo-refuge] visitor pose regression checks passed")
+
+
+if __name__ == "__main__":
+    main()

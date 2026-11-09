@@ -1,0 +1,33 @@
+{
+  "id": "teen-photographer",
+  "archetypeId": "teen-photographer",
+  "version": 1,
+  "memberCount": 1,
+  "persons": [
+    {
+      "index": 0,
+      "position": [0, 0, 0],
+      "height": 1.1,
+      "width": 0.95,
+      "headScale": 1.0,
+      "legRatio": 0.2,
+      "hair": "cap_backwards",
+      "glasses": true,
+      "camera": true,
+      "tints": {
+        "skin": "fur_capybara_light",
+        "hair": "fur_capybara_dark",
+        "shirt": "otter_throat",
+        "pants": "fur_tapir_dark"
+      },
+      "animations": {
+        "walkDurationS": 1.0,
+        "stopDurationS": 2.0,
+        "lookDurationS": 2.0,
+        "pointDurationS": 1.5,
+        "photoDurationS": 2.0,
+        "sitDurationS": 1.0
+      }
+    }
+  ]
+}

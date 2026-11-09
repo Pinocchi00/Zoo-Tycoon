@@ -1,0 +1,370 @@
+"""Build a visitor group GLB from its description.
+
+Run headless:
+    blender -b --factory-startup -P tools/blender/visitors/build.py -- \
+        --desc tools/blender/visitors/descriptions/teen-photographer.json \
+        --out assets/models/visitors/teen-photographer.glb
+"""
+
+import argparse
+import json
+import struct
+import sys
+from pathlib import Path
+
+import bpy
+
+BLENDER_DIR = Path(__file__).parent.parent
+sys.path.insert(0, str(BLENDER_DIR))
+from palette import build_material, load_palette  # noqa: E402
+
+VISITORS_DIR = Path(__file__).parent
+sys.path.insert(0, str(VISITORS_DIR))
+from animations import build_person_animations  # noqa: E402
+from human import add_stroller, build_person, shoulder_leg_points, shoulder_seat_height, _derive_proportions, SEATED_LEG_FORWARD_RATIO  # noqa: E402
+
+EXPECTED_CLIP_NAMES = {"walk", "stop", "look", "point", "photo", "sit"}
+ALLOWED_TINTS = {"skin", "hair", "shirt", "pants", "none"}
+TRIANGLE_BUDGET_MIN = 800
+TRIANGLE_BUDGET_MAX = 1500
+MIN_SMOOTH_TRIANGLE_SHARE = 0.8
+
+
+def parse_args():
+    argv = sys.argv[sys.argv.index("--") + 1 :] if "--" in sys.argv else []
+    parser = argparse.ArgumentParser(description="Build a visitor group model.")
+    parser.add_argument("--desc", required=True, type=Path)
+    parser.add_argument("--out", required=True, type=Path)
+    return parser.parse_args(argv)
+
+
+def _count_triangles_per_person(group_root, member_count):
+    counts = {i: 0 for i in range(member_count)}
+    for obj in group_root.children_recursive:
+        if obj.type != "MESH":
+            continue
+        person = obj.get("zooPerson")
+        if person is None or person not in counts:
+            continue
+        counts[person] += sum(len(p.vertices) - 2 for p in obj.data.polygons)
+    return counts
+
+
+def build_group(description, palette, material):
+    archetype_id = description["archetypeId"]
+    member_count = description["memberCount"]
+
+    group_root = bpy.data.objects.new(archetype_id, None)
+    group_root.empty_display_type = "PLAIN_AXES"
+    group_root.empty_display_size = 0.1
+    group_root["zooVisitor"] = {
+        "version": description.get("version", 1),
+        "archetypeId": archetype_id,
+        "memberCount": member_count,
+    }
+    bpy.context.collection.objects.link(group_root)
+
+    persons = [dict(person) for person in description["persons"]]
+    for parent in persons:
+        child_index = parent.get("shoulderChild")
+        if child_index is None:
+            continue
+        child = next(person for person in persons if person["index"] == child_index)
+        child["shoulderLegs"] = {side: shoulder_leg_points(parent, child, sign)
+                                 for side, sign in (("l", -1), ("r", 1))}
+        adult, small = _derive_proportions(parent), _derive_proportions(child)
+        parent["shoulderSeatHeight"] = shoulder_seat_height(parent, child)
+        parent["shoulderGrips"] = {}
+        for side, sign in (("l", -1), ("r", 1)):
+            _, foot = child["shoulderLegs"][side]
+            parent["shoulderGrips"][side] = [
+                sign * (small["hip_w"] + adult["limb_r"]) + foot[0] - sign * adult["shoulder_w"],
+                adult["torso"] * 0.35 + adult["neck"] + parent["shoulderSeatHeight"] + foot[1],
+                foot[2] + small["leg_len"] * SEATED_LEG_FORWARD_RATIO,
+            ]
+    pivots_by_index = {}
+
+    for person in persons:
+        idx = person["index"]
+        pivots = build_person(idx, person, palette, material, group_root)
+        pivots_by_index[idx] = pivots
+
+    # Optional parent-child relationships and props.
+    for person in persons:
+        idx = person["index"]
+        if person.get("stroller", False):
+            seat_pivot = add_stroller(pivots_by_index[idx], person, palette, material)
+            pivots_by_index[idx]["stroller_seat"] = seat_pivot
+        shoulder_child = person.get("shoulderChild")
+        if shoulder_child is not None and shoulder_child in pivots_by_index:
+            child_root = pivots_by_index[shoulder_child]["root"]
+            shoulder_seat = pivots_by_index[idx]["shoulder_seat"]
+            child_root.parent = shoulder_seat
+            child_root.location = (0.0, 0.0, 0.0)
+
+    # Move stroller baby onto the seat pivot.
+    for person in persons:
+        idx = person["index"]
+        sit_target = person.get("sitOn")
+        if sit_target is not None and sit_target in pivots_by_index:
+            baby_root = pivots_by_index[idx]["root"]
+            baby_root.parent = pivots_by_index[sit_target]["stroller_seat"]
+            baby_root.location = (0.0, 0.0, 0.0)
+
+    # Freeze the support hierarchy before snapshotting animation rest poses.
+    for person in persons:
+        idx = person["index"]
+        build_person_animations(
+            pivots_by_index[idx], idx, person.get("animations", {}),
+            posture=person.get("posture", "standing"),
+            stroller=person.get("stroller", False),
+            shoulder_carrier=person.get("shoulderChild") is not None,
+        )
+
+    # Frame zero is the shared neutral pose; Blender defaults to frame one,
+    # which already evaluates the sit transition and lowers the bind pose.
+    bpy.context.scene.frame_set(0)
+    return group_root
+
+
+def merge_compatible_parts(group_root):
+    """Keep independent articulation and tinting while sharing one draw per bucket."""
+    buckets = {}
+    for obj in group_root.children_recursive:
+        if obj.type == "MESH":
+            key = (obj.parent, obj["zooPerson"], obj["zooTint"])
+            buckets.setdefault(key, []).append(obj)
+    for objects in buckets.values():
+        if len(objects) < 2:
+            continue
+        person = objects[0]["zooPerson"]
+        protected_names = (f"p{person}_head_mesh", f"p{person}_body_mesh")
+        anchors = [obj for obj in objects if obj.name in protected_names]
+        if len(anchors) > 1:
+            raise ValueError("head and body must have distinct pivots")
+        anchor = anchors[0] if anchors else min(objects, key=lambda obj: obj.name)
+        merged_name = anchor.name
+        bpy.ops.object.select_all(action="DESELECT")
+        for obj in objects:
+            obj.select_set(True)
+        bpy.context.view_layer.objects.active = anchor
+        bpy.ops.object.join()
+        anchor.name = merged_name
+        anchor.data.name = merged_name
+        anchor.select_set(False)
+
+
+def export(path):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    bpy.ops.export_scene.gltf(
+        filepath=str(path),
+        export_format="GLB",
+        export_yup=True,
+        export_texcoords=True,
+        export_normals=True,
+        export_materials="EXPORT",
+        export_image_format="AUTO",
+        export_skins=False,
+        export_animations=True,
+        export_animation_mode="NLA_TRACKS",
+        export_force_sampling=True,
+        export_cameras=False,
+        export_lights=False,
+        export_extras=True,
+    )
+
+
+def _read_glb_json(path):
+    """Return the JSON chunk of a GLB file as a Python dict."""
+    data = path.read_bytes()
+    if len(data) < 12:
+        raise ValueError("GLB too small")
+    magic, version, length = struct.unpack("<4sII", data[:12])
+    if magic != b"glTF":
+        raise ValueError("not a GLB file")
+    chunk_len, chunk_type = struct.unpack("<II", data[12:20])
+    if chunk_type != 0x4E4F534A:
+        raise ValueError("first GLB chunk is not JSON")
+    json_bytes = data[20 : 20 + chunk_len]
+    return json.loads(json_bytes.decode("utf-8"))
+
+
+def _node_name_to_person_index(name):
+    """Extract the person index from a pivot/mesh name like p3_head_mesh."""
+    if not name.startswith("p") or len(name) < 2 or not name[1].isdigit():
+        return None
+    end = 2
+    while end < len(name) and name[end].isdigit():
+        end += 1
+    try:
+        return int(name[1:end])
+    except ValueError:
+        return None
+
+
+def _count_accessor_triangles(gltf, accessor_index):
+    accessor = gltf["accessors"][accessor_index]
+    count = accessor["count"]
+    if accessor.get("type") != "SCALAR":
+        # Assume triangles from a non-indexed primitive.
+        return count // 3
+    return count // 3
+
+
+def _accessor_values(gltf, binary, index):
+    accessor = gltf["accessors"][index]
+    view = gltf["bufferViews"][accessor["bufferView"]]
+    components = {"SCALAR": 1, "VEC3": 3}[accessor["type"]]
+    code = {5121: "B", 5123: "H", 5125: "I", 5126: "f"}[accessor["componentType"]]
+    format_string = "<" + code * components
+    size = struct.calcsize(format_string)
+    offset = view.get("byteOffset", 0) + accessor.get("byteOffset", 0)
+    return [struct.unpack_from(format_string, binary, offset + row * view.get("byteStride", size))
+            for row in range(accessor["count"])]
+
+
+def validate_smooth_normals(path):
+    """Inspect the exported NORMAL streams, not just Blender's shading flags."""
+    data = path.read_bytes()
+    gltf = _read_glb_json(path)
+    json_length = struct.unpack_from("<I", data, 12)[0]
+    binary = data[28 + json_length:]
+    for node in gltf["nodes"]:
+        if "mesh" not in node:
+            continue
+        for primitive in gltf["meshes"][node["mesh"]]["primitives"]:
+            attributes = primitive["attributes"]
+            if "NORMAL" not in attributes:
+                raise ValueError(f"{node['name']}: missing exported normals")
+            normals = _accessor_values(gltf, binary, attributes["NORMAL"])
+            if len(normals) != gltf["accessors"][attributes["POSITION"]]["count"]:
+                raise ValueError(f"{node['name']}: normal/position count mismatch")
+            if any(abs(sum(value * value for value in normal) - 1) > 0.002 for normal in normals):
+                raise ValueError(f"{node['name']}: non-unit normals")
+            indices = [value[0] for value in _accessor_values(gltf, binary, primitive["indices"])]
+            flat_count = sum(len({normals[index] for index in indices[start:start + 3]}) == 1
+                             for start in range(0, len(indices), 3))
+            # Closed hat undersides and the tiny glasses bridge can have crisp caps.
+            if not any(hardware in node["name"] for hardware in ("camera", "stroller")):
+                if flat_count > len(indices) / 3 * (1 - MIN_SMOOTH_TRIANGLE_SHARE):
+                    raise ValueError(f"{node['name']}: mostly flat organic normals survived export")
+            if node["name"].endswith(("_head_mesh", "_body_mesh", "_arm_l_mesh", "_arm_r_mesh", "_leg_l_mesh", "_leg_r_mesh")) and flat_count:
+                raise ValueError(f"{node['name']}: flat triangle normals survived export")
+
+
+def validate_glb(path, description):
+    """Fail loudly if the exported GLB does not match the visitor contract."""
+    archetype_id = description["archetypeId"]
+    member_count = description["memberCount"]
+    gltf = _read_glb_json(path)
+    validate_smooth_normals(path)
+
+    # Single shared material and texture.
+    materials = gltf.get("materials", [])
+    if len(materials) != 1:
+        raise ValueError(f"expected exactly one material, got {len(materials)}")
+    if materials[0].get("name") != "palette":
+        raise ValueError(f"material name must be 'palette', got {materials[0].get('name')}")
+    images = gltf.get("images", [])
+    if len(images) != 1:
+        raise ValueError(f"expected exactly one image, got {len(images)}")
+
+    # Root node with zooVisitor extras.
+    root_node = None
+    for node in gltf.get("nodes", []):
+        extras = node.get("extras", {})
+        visitor = extras.get("zooVisitor")
+        if visitor is not None and visitor.get("archetypeId") == archetype_id:
+            root_node = node
+            break
+    if root_node is None:
+        raise ValueError(f"missing root node with zooVisitor archetypeId {archetype_id}")
+    visitor = root_node.get("extras", {}).get("zooVisitor", {})
+    if visitor.get("memberCount") != member_count:
+        raise ValueError(
+            f"zooVisitor memberCount mismatch: {visitor.get('memberCount')} != {member_count}"
+        )
+
+    # Exactly the six expected animation clips.
+    animation_names = {anim.get("name") for anim in gltf.get("animations", [])}
+    if animation_names != EXPECTED_CLIP_NAMES:
+        raise ValueError(f"animation names mismatch: {animation_names}")
+    for anim in gltf.get("animations", []):
+        for channel in anim.get("channels", []):
+            target_node = channel.get("target", {}).get("node")
+            if target_node is None:
+                raise ValueError("animation channel missing target node")
+            node_name = gltf["nodes"][target_node].get("name", "")
+            if _node_name_to_person_index(node_name) is None:
+                raise ValueError(f"animation targets non-visitor node {node_name}")
+
+    # Mesh nodes have zooPerson/zooTint and unique names starting with p<index>_.
+    node_names = set()
+    triangle_counts = {i: 0 for i in range(member_count)}
+    mesh_by_index = {i: mesh for i, mesh in enumerate(gltf.get("meshes", []))}
+    for node in gltf.get("nodes", []):
+        node_name = node.get("name", "")
+        if node_name in node_names:
+            raise ValueError(f"duplicate node name {node_name}")
+        node_names.add(node_name)
+        mesh_index = node.get("mesh")
+        if mesh_index is None:
+            continue
+        person = _node_name_to_person_index(node_name)
+        if person is None:
+            continue
+        extras = node.get("extras", {})
+        zoo_person = extras.get("zooPerson")
+        zoo_tint = extras.get("zooTint")
+        if zoo_person is None or not isinstance(zoo_person, int):
+            raise ValueError(f"mesh node {node_name} missing integer zooPerson")
+        if zoo_tint not in ALLOWED_TINTS:
+            raise ValueError(f"mesh node {node_name} has invalid zooTint {zoo_tint}")
+        if zoo_person != person:
+            raise ValueError(
+                f"mesh node {node_name} person index {person} != zooPerson {zoo_person}"
+            )
+        mesh = mesh_by_index.get(mesh_index)
+        if mesh is None:
+            raise ValueError(f"mesh node {node_name} references missing mesh {mesh_index}")
+        for primitive in mesh.get("primitives", []):
+            indices = primitive.get("indices")
+            if indices is not None:
+                triangle_counts[person] += _count_accessor_triangles(gltf, indices)
+            else:
+                position_accessor = primitive.get("attributes", {}).get("POSITION")
+                if position_accessor is not None:
+                    triangle_counts[person] += _count_accessor_triangles(gltf, position_accessor)
+
+    for idx in range(member_count):
+        count = triangle_counts[idx]
+        if not (TRIANGLE_BUDGET_MIN <= count <= TRIANGLE_BUDGET_MAX):
+            raise ValueError(
+                f"person {idx} triangle count {count} outside budget "
+                f"[{TRIANGLE_BUDGET_MIN}, {TRIANGLE_BUDGET_MAX}]"
+            )
+
+
+def main():
+    args = parse_args()
+    description = json.loads(args.desc.read_text(encoding="utf-8"))
+    bpy.ops.wm.read_factory_settings(use_empty=True)
+
+    palette = load_palette()
+    material = build_material(palette)
+    group_root = build_group(description, palette, material)
+    merge_compatible_parts(group_root)
+    export(args.out)
+
+    counts = _count_triangles_per_person(group_root, description["memberCount"])
+    for idx, tris in counts.items():
+        print(f"[zoo-refuge] {description['archetypeId']} person {idx}: {tris} triangles")
+    total = sum(counts.values())
+    print(f"[zoo-refuge] {description['archetypeId']}: {total} triangles -> {args.out}")
+
+    validate_glb(args.out, description)
+    print(f"[zoo-refuge] {description['archetypeId']}: GLB validation passed")
+
+
+if __name__ == "__main__":
+    main()

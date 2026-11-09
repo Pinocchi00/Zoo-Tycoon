@@ -22,6 +22,8 @@ const vec3 = z.tuple([z.number(), z.number(), z.number()]);
 
 const accessorSchema = z.object({
   count: z.number().int().nonnegative(),
+  type: z.string().optional(),
+  componentType: index.optional(),
   min: z.array(z.number()).optional(),
   max: z.array(z.number()).optional(),
 });
@@ -36,6 +38,8 @@ const primitiveSchema = z.object({
 const nodeSchema = z.object({
   name: z.string().optional(),
   mesh: index.optional(),
+  skin: index.optional(),
+  extras: z.record(z.string(), z.unknown()).optional(),
   children: z.array(index).optional(),
   translation: vec3.optional(),
   rotation: z.tuple([z.number(), z.number(), z.number(), z.number()]).optional(),
@@ -64,6 +68,26 @@ const nodeSchema = z.object({
 
 const named = z.object({ name: z.string().optional() });
 
+const animationSchema = named.extend({
+  channels: z
+    .array(
+      z.object({
+        sampler: index,
+        target: z.object({ node: index.optional(), path: z.string() }),
+      }),
+    )
+    .optional(),
+  samplers: z
+    .array(
+      z.object({
+        input: index,
+        output: index,
+        interpolation: z.string().optional(),
+      }),
+    )
+    .optional(),
+});
+
 /** The subset of glTF 2.0 the asset rules look at. Unknown fields are ignored. */
 export const gltfSchema = z.object({
   asset: z.object({ version: z.string() }),
@@ -75,9 +99,9 @@ export const gltfSchema = z.object({
     .default([]),
   accessors: z.array(accessorSchema).default([]),
   materials: z.array(named).default([]),
-  textures: z.array(z.object({})).default([]),
+  textures: z.array(z.object({ source: index.optional() })).default([]),
   images: z.array(named).default([]),
-  animations: z.array(named).default([]),
+  animations: z.array(animationSchema).default([]),
 });
 
 export type Gltf = z.infer<typeof gltfSchema>;
