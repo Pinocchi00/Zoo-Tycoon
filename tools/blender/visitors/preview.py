@@ -22,6 +22,7 @@ TINT_COLORS = {
 FACE_PEOPLE = (3, 1, 0, 0, 0)
 DARKEST_SKIN = 0x8D552A
 LIGHT_SKIN = 0xFFC8A8
+HAT_PREVIEW_ELEVATION_DEG = 55.0
 
 
 def linear_channel(value):
@@ -71,7 +72,7 @@ def main():
     args = parser.parse_args(sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else [])
     verify_game_colors()
     bpy.ops.wm.read_factory_settings(use_empty=True)
-    archetypes = ("shoulder-ride",) * 3 if args.shoulder else ARCHETYPES + (("retirees",) if args.faces else ())
+    archetypes = ("shoulder-ride",) * 3 if args.shoulder else ARCHETYPES + (("retirees", "retirees") if args.faces else ())
     for index, archetype in enumerate(archetypes):
         tint_index = min(index, len(ARCHETYPES) - 1)
         before = set(bpy.data.objects)
@@ -108,6 +109,8 @@ def main():
                 if obj.type == "MESH" and "_leg_" in obj.name:
                     obj.hide_render = True
             group.rotation_euler.z = math.radians(-90) if index == len(ARCHETYPES) else 0.0
+            if index == len(ARCHETYPES) + 1:
+                group.rotation_euler.x = math.radians(HAT_PREVIEW_ELEVATION_DEG)
             group.location = (0.0, 0.0, 0.0)
             scene = bpy.context.scene
             scene.frame_set(15)
@@ -117,7 +120,7 @@ def main():
             group.scale = (factor,) * 3
             bpy.context.view_layer.update()
             center = head.matrix_world.translation.copy()
-            group.location = Vector(((index - 2.5) * 1.30, 0.0, 1.25)) - center
+            group.location = Vector(((index - 3) * 1.30, 0.0, 1.25)) - center
 
     scene = bpy.context.scene
     duration = max(strip.frame_end for obj in bpy.data.objects if obj.animation_data
@@ -135,7 +138,7 @@ def main():
     camera = bpy.context.object
     camera.rotation_euler = (Vector((0.0, 0.0, target_height)) - camera.location).to_track_quat("-Z", "Y").to_euler()
     camera.data.type = "ORTHO"
-    camera.data.ortho_scale = 8.2 if args.faces else 6.5 if args.shoulder else 12.8
+    camera.data.ortho_scale = 9.5 if args.faces else 6.5 if args.shoulder else 12.8
     scene.camera = camera
     for location, energy, size in (((-3, -5, 8), 700, 8), ((6, 1, 6), 400, 7)):
         bpy.ops.object.light_add(type="AREA", location=location)

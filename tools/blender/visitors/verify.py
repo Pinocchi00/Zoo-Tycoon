@@ -15,7 +15,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from build import build_group, merge_compatible_parts, validate_glb
 from palette import build_material, load_palette
 from parts import game_to_blender
-from human import _derive_proportions, shoulder_leg_points, shoulder_seat_height, SEATED_LEG_FORWARD_RATIO, STROLLER_HANDLE_FORWARD, STROLLER_HANDLE_HEIGHT_RATIO, SUNHAT_BRIM_CENTER_HEIGHT_RATIO, SUNHAT_BRIM_DIAMETER_TO_HEAD_WIDTH, SUNHAT_BRIM_HALF_THICKNESS_RATIO, SUNHAT_CROWN_TOP_RATIO
+from human import _derive_proportions, shoulder_leg_points, shoulder_seat_height, SEATED_LEG_FORWARD_RATIO, STROLLER_HANDLE_FORWARD, STROLLER_HANDLE_HEIGHT_RATIO, SUNHAT_BRIM_CENTER_HEIGHT_RATIO, SUNHAT_BRIM_DIAMETER_TO_HEAD_WIDTH, SUNHAT_BRIM_HALF_THICKNESS_RATIO, SUNHAT_CROWN_TOP_RATIO, SUNHAT_BRIM_INNER_RADIUS_RATIO, SUNHAT_BRIM_SLOPE_DEG
 
 FLOOR_TOLERANCE = 0.004
 ARM_TOLERANCE = 0.003
@@ -29,6 +29,10 @@ SUNHAT_DIAMETER_MAX_TO_HEAD_WIDTH = 1.25
 SUNHAT_DIAMETER_TOLERANCE = 0.01
 SUNHAT_SEATING_TOLERANCE = 0.003
 SUNHAT_CROWN_GAP_TOLERANCE_RATIO = 0.02
+SUNHAT_MIN_CROWN_RELIEF_RATIO = 0.30
+SUNHAT_TOP_NORMAL_MIN_UP = 0.5
+SUNHAT_TOP_NORMAL_BAND_RATIO = 0.01
+SUNHAT_COMPONENT_MIN_HEIGHT_RATIO = 0.2
 SURFACE_VERTICAL_NORMAL_TOLERANCE = 0.00001
 SURFACE_COVERAGE_AREA_TOLERANCE_RATIO = 0.0001
 
@@ -99,17 +103,8 @@ def verify_sunhat_contact(description, meshes):
         skull_points, skull_triangles, _ = mesh_surface(skull, inverse)
         skull_indices, _ = max(mesh_components(skull, skull_points), key=lambda component: len(component[0]))
         skull_triangles = [triangle for triangle in skull_triangles if all(index in skull_indices for index in triangle)]
-        crown_parts = []
-        for obj in meshes:
-            if obj.parent != head or obj.get("zooTint") != "none":
-                continue
-            points, triangles, _ = mesh_surface(obj, inverse)
-            for indices, _ in mesh_components(obj, points):
-                if max(points[index].z for index in indices) <= radius * 0.8:
-                    continue
-                crown_parts.append((obj, points, triangles, indices))
-        assert len(crown_parts) == 1, f"missing sunhat crown for {prefix}"
-        obj, points, triangles, indices = crown_parts[0]
+        (obj, points, indices), _ = sunhat_components(head, meshes)
+        _, triangles, _ = mesh_surface(obj, inverse)
         assert obj.parent == skull.parent, f"sunhat does not follow head for {prefix}"
         crown_triangles = [triangle for triangle in triangles if all(index in indices for index in triangle)]
         gap = maximum_vertical_surface_gap(
@@ -422,6 +417,25 @@ def verify_child_eye_clearance(description, meshes, clip):
                     ), f"child covers parent eyes during {clip}: {tuple(point)}"
 
 
+def sunhat_components(head, meshes):
+    """Identify disconnected hat surfaces even after their untinted bucket merges."""
+    radius = head["zooHeadRadius"]
+    inverse = head.matrix_world.inverted()
+    crowns, brims = [], []
+    for obj in meshes:
+        if obj.parent != head or obj.get("zooTint") != "none":
+            continue
+        points = [inverse @ obj.matrix_world @ vertex.co for vertex in obj.data.vertices]
+        for indices, _ in mesh_components(obj, points):
+            component = (obj, points, indices)
+            if max(math.hypot(points[index].x, points[index].y) for index in indices) > radius * 1.04 * 1.1:
+                brims.append(component)
+            elif min(points[index].z for index in indices) > radius * SUNHAT_COMPONENT_MIN_HEIGHT_RATIO:
+                crowns.append(component)
+    assert len(crowns) == len(brims) == 1, "ambiguous or missing sunhat crown/brim"
+    return crowns[0], brims[0]
+
+
 def verify_sunhat_fit(description, meshes):
     for person in description["persons"]:
         if person.get("hair") != "sunhat":
@@ -431,12 +445,10 @@ def verify_sunhat_fit(description, meshes):
         head_radius = head["zooHeadRadius"]
         head_width_radius = head_radius * 1.04
         inverse = head.matrix_world.inverted()
-        face = next(
-            obj for obj in meshes
-            if obj.parent == head and obj["zooPerson"] == person["index"] and obj["zooTint"] == "none"
-        )
-        points = [inverse @ face.matrix_world @ vertex.co for vertex in face.data.vertices]
-        brim_outer = [point for point in points if math.hypot(point.x, point.y) > head_width_radius * 1.1]
+        skull = bpy.data.objects[prefix + "head_mesh"]
+        assert skull in meshes and skull.parent == head and skull["zooTint"] == "skin", "missing explicit sunhat skull"
+        (crown_mesh, crown_points, crown_indices), (_, brim_points, brim_indices) = sunhat_components(head, meshes)
+        brim_outer = [brim_points[index] for index in brim_indices if math.hypot(brim_points[index].x, brim_points[index].y) > head_width_radius * 1.1]
         assert brim_outer, f"missing sunhat brim for {prefix}"
         brim_radius = max(math.hypot(point.x, point.y) for point in brim_outer)
         diameter_ratio = brim_radius / head_width_radius
@@ -448,11 +460,23 @@ def verify_sunhat_fit(description, meshes):
         )
         center_height = head_radius * SUNHAT_BRIM_CENTER_HEIGHT_RATIO
         half_thickness = head_radius * SUNHAT_BRIM_HALF_THICKNESS_RATIO
+        inner_radius = head_radius * SUNHAT_BRIM_INNER_RADIUS_RATIO
+        inner_top = max(brim_points[index].z for index in brim_indices if math.hypot(brim_points[index].x, brim_points[index].y) < inner_radius + SUNHAT_SEATING_TOLERANCE)
+        outer_top = max(point.z for point in brim_outer)
+        assert outer_top <= inner_top + SURFACE_VERTICAL_NORMAL_TOLERANCE, f"sunhat brim rises outward for {prefix}"
+        slope_drop = (brim_radius - inner_radius) * math.tan(math.radians(SUNHAT_BRIM_SLOPE_DEG))
         assert all(
-            abs(point.z - center_height) <= half_thickness + SUNHAT_SEATING_TOLERANCE
+            min(abs(point.z - (center_height + sign * half_thickness - slope_drop)) for sign in (-1, 1)) <= SUNHAT_SEATING_TOLERANCE
             for point in brim_outer
-        ), f"sunhat brim is not flat and regularly thick for {prefix}"
-        crown_top = max(point.z for point in points)
+        ), f"sunhat brim is not regularly thick and downward sloping for {prefix}"
+        crown_top = max(crown_points[index].z for index in crown_indices)
+        assert crown_top - inner_top >= head_radius * SUNHAT_MIN_CROWN_RELIEF_RATIO, f"sunhat crown lacks relief above brim for {prefix}"
+        normal_matrix = (inverse @ crown_mesh.matrix_world).to_3x3().inverted().transposed()
+        crown_mesh.data.update()
+        top_indices = [index for index in crown_indices if crown_points[index].z >= crown_top - head_radius * SUNHAT_TOP_NORMAL_BAND_RATIO]
+        assert all((normal_matrix @ crown_mesh.data.vertices[index].normal).normalized().z > SUNHAT_TOP_NORMAL_MIN_UP for index in top_indices), f"sunhat crown top normals point downward for {prefix}"
+        assert all((normal_matrix @ polygon.normal).normalized().z > 0
+                   for polygon in crown_mesh.data.polygons if any(index in top_indices for index in polygon.vertices)), f"sunhat crown top face normals point downward for {prefix}"
         assert abs(crown_top - head_radius * SUNHAT_CROWN_TOP_RATIO) <= SUNHAT_SEATING_TOLERANCE, (
             f"sunhat crown does not stay seated on its head for {prefix}"
         )

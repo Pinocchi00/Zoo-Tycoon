@@ -15,7 +15,7 @@ from mathutils import Vector
 VISITORS_DIR = Path(__file__).parent
 sys.path.insert(0, str(VISITORS_DIR))
 from build import EXPECTED_CLIP_NAMES, build_group, _count_triangles_per_person  # noqa: E402
-from human import game_to_blender, HAIR_SEGMENTS  # noqa: E402
+from human import game_to_blender, HAIR_SEGMENTS, SUNHAT_BRIM_HALF_THICKNESS_RATIO, SUNHAT_BRIM_SLOPE_DEG, SUNHAT_CROWN_ABOVE_BRIM_RATIO  # noqa: E402
 from palette import build_material, load_palette  # noqa: E402
 from verify import (  # noqa: E402
     CHILD_FOOT_MAX_SIDE_OFFSET_RATIO,
@@ -25,6 +25,7 @@ from verify import (  # noqa: E402
     verify_child_foot_lateral_offset,
     verify_source_junctions,
     verify_sunhat_contact,
+    verify_sunhat_fit,
     maximum_vertical_surface_gap,
     upper_surface_triangles,
 )
@@ -214,6 +215,7 @@ def _test_rest(description, root):
                     "sleeve has wrong tint or pivot")
             _assert(arm["zooTint"] == hand["zooTint"] == "skin", "forearm or hand is not skin")
         if person.get("hair") == "sunhat":
+            radius = bpy.data.objects[f"p{idx}_head"]["zooHeadRadius"]
             brim = bpy.data.objects[f"p{idx}_hat_brim_mesh"]
             head = bpy.data.objects[f"p{idx}_head_mesh"]
             brim_width = _bounds(brim)[1].x - _bounds(brim)[0].x
@@ -228,9 +230,18 @@ def _test_rest(description, root):
             )
             crown = bpy.data.objects[f"p{idx}_hair_mesh"]
             _assert(brim["zooTint"] == crown["zooTint"] == "none", "hat changes colour with the hair")
-            _assert(len({round(vertex.co.z, 6) for vertex in brim.data.vertices}) == 2,
-                    "hat brim is not flat with constant thickness")
-            _assert(len(brim.data.vertices) == 64, "hat brim circular outline is too coarse")
+            rings = sorted({round(math.hypot(vertex.co.x, vertex.co.y), 6) for vertex in brim.data.vertices})
+            inner = [vertex.co for vertex in brim.data.vertices if abs(math.hypot(vertex.co.x, vertex.co.y) - rings[0]) < EPSILON]
+            outer = [vertex.co for vertex in brim.data.vertices if abs(math.hypot(vertex.co.x, vertex.co.y) - rings[-1]) < EPSILON]
+            _assert(len(inner) == 16 and len(outer) == 64, "hat brim circular outline is too coarse")
+            thickness = max(point.z for point in outer) - min(point.z for point in outer)
+            _assert(abs(thickness - 2 * radius * SUNHAT_BRIM_HALF_THICKNESS_RATIO) < EPSILON,
+                    "hat brim does not have constant thickness")
+            drop = max(point.z for point in inner) - max(point.z for point in outer)
+            _assert(abs(drop - (rings[-1] - rings[0]) * math.tan(math.radians(SUNHAT_BRIM_SLOPE_DEG))) < EPSILON,
+                    "hat brim does not slope downward at its specified angle")
+            _assert(abs(max(vertex.co.z for vertex in crown.data.vertices) - max(point.z for point in inner)
+                        - radius * SUNHAT_CROWN_ABOVE_BRIM_RATIO) < EPSILON, "hat crown relief changed")
             _assert(brim.data.uv_layers.active.data[0].uv == crown.data.uv_layers.active.data[0].uv,
                     "hat crown and brim do not share one palette colour")
             surface = bmesh.new()
@@ -239,6 +250,54 @@ def _test_rest(description, root):
                     and surface.calc_volume(signed=True) > 0, "hat crown is open or inverted")
             surface.free()
     print(f"[zoo-refuge] {description['archetypeId']}: rest geometry and budget passed {counts}")
+
+
+def _test_sunhat_shape_guards(description, root):
+    meshes = [obj for obj in root.children_recursive if obj.type == "MESH"]
+    verify_sunhat_fit(description, list(reversed(meshes)))
+    for person in description["persons"]:
+        if person.get("hair") != "sunhat":
+            continue
+        prefix = f"p{person['index']}_"
+        radius = bpy.data.objects[prefix + "head"]["zooHeadRadius"]
+        crown = bpy.data.objects[prefix + "hair_mesh"]
+        brim = bpy.data.objects[prefix + "hat_brim_mesh"]
+        for corruption, message in (("low", "lacks relief"), ("upturn", "rises outward"), ("normals", "normals point downward")):
+            points = [vertex.co.copy() for vertex in crown.data.vertices]
+            brim_points = [vertex.co.copy() for vertex in brim.data.vertices]
+            try:
+                if corruption == "low":
+                    for vertex in crown.data.vertices:
+                        vertex.co.z = min(vertex.co.z, radius * 0.7)
+                elif corruption == "upturn":
+                    for vertex in brim.data.vertices:
+                        if math.hypot(vertex.co.x, vertex.co.y) > radius:
+                            vertex.co.z += radius * 0.2
+                else:
+                    surface = bmesh.new()
+                    surface.from_mesh(crown.data)
+                    bmesh.ops.reverse_faces(surface, faces=list(surface.faces))
+                    surface.to_mesh(crown.data)
+                    surface.free()
+                verify_sunhat_fit(description, meshes)
+            except AssertionError as error:
+                _assert(message in str(error), str(error))
+            else:
+                raise AssertionError(f"sunhat guard accepts {corruption}")
+            finally:
+                if corruption == "normals":
+                    surface = bmesh.new()
+                    surface.from_mesh(crown.data)
+                    bmesh.ops.reverse_faces(surface, faces=list(surface.faces))
+                    surface.to_mesh(crown.data)
+                    surface.free()
+                for vertex, point in zip(crown.data.vertices, points):
+                    vertex.co = point
+                for vertex, point in zip(brim.data.vertices, brim_points):
+                    vertex.co = point
+                crown.data.update()
+                brim.data.update()
+        verify_sunhat_fit(description, meshes)
 
 
 def _test_clips(description, root):
@@ -386,6 +445,7 @@ def main():
         root = build_group(description, palette, build_material(palette))
         bpy.context.view_layer.update()
         _test_rest(description, root)
+        _test_sunhat_shape_guards(description, root)
         _test_shoulder_clearance_guards(description, root)
         _test_faces(description)
         _test_clips(description, root)

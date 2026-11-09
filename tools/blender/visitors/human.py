@@ -30,9 +30,13 @@ HAIR_RINGS = 5
 SEAT_HAIR_OVERLAP = 0.012
 SEATED_LEG_FORWARD_RATIO = 0.4
 SUNHAT_BRIM_DIAMETER_TO_HEAD_WIDTH = 1.15
-SUNHAT_BRIM_CENTER_HEIGHT_RATIO = 0.55
 SUNHAT_BRIM_HALF_THICKNESS_RATIO = 0.055
 SUNHAT_CROWN_TOP_RATIO = 0.945
+SUNHAT_CROWN_ABOVE_BRIM_RATIO = 0.40
+SUNHAT_BRIM_CENTER_HEIGHT_RATIO = SUNHAT_CROWN_TOP_RATIO - SUNHAT_CROWN_ABOVE_BRIM_RATIO - SUNHAT_BRIM_HALF_THICKNESS_RATIO
+SUNHAT_BRIM_SLOPE_DEG = 5.0
+SUNHAT_BRIM_INNER_RADIUS_RATIO = 0.75
+SUNHAT_BRIM_SEGMENTS = 32
 SUNHAT_CROWN_SURFACE_OFFSET_RATIO = 0.005
 SUNHAT_CROWN_MIN_SKULL_HEIGHT_RATIO = 0.30
 
@@ -440,12 +444,22 @@ def build_person(index, params, palette, material, parent_object):
             )
             uv = brim.data.uv_layers.active.data[0].uv.copy()
             vertices, faces = [], []
-            for height in (-SUNHAT_BRIM_HALF_THICKNESS_RATIO, SUNHAT_BRIM_HALF_THICKNESS_RATIO):
-                vertices.extend(game_to_blender([brim_radius * math.cos(2 * math.pi * i / 32),
-                                                p["head_r"] * (SUNHAT_BRIM_CENTER_HEIGHT_RATIO + height),
-                                                brim_radius * math.sin(2 * math.pi * i / 32)]) for i in range(32))
-            _join_rings(faces, 0, 32, 32, 32)
-            faces.extend((tuple(reversed(range(32))), tuple(range(32, 64))))
+            inner_radius = p["head_r"] * SUNHAT_BRIM_INNER_RADIUS_RATIO
+            top_height = p["head_r"] * (SUNHAT_BRIM_CENTER_HEIGHT_RATIO + SUNHAT_BRIM_HALF_THICKNESS_RATIO)
+            outer_height = top_height - (brim_radius - inner_radius) * math.tan(math.radians(SUNHAT_BRIM_SLOPE_DEG))
+            # The inner outline is hidden under the crown. Leave the invisible
+            # underside open to spend the budget on a smooth, full-size outer rim.
+            rings = ((inner_radius, top_height, SUNHAT_BRIM_SEGMENTS // 2),
+                     (brim_radius, outer_height, SUNHAT_BRIM_SEGMENTS),
+                     (brim_radius, outer_height - 2 * p["head_r"] * SUNHAT_BRIM_HALF_THICKNESS_RATIO, SUNHAT_BRIM_SEGMENTS))
+            for ring_radius, height, count in rings:
+                start = len(vertices)
+                vertices.extend(Vector((ring_radius * math.cos(2 * math.pi * i / count),
+                                        ring_radius * math.sin(2 * math.pi * i / count), height)) for i in range(count))
+                if start:
+                    _join_rings(faces, previous_start, previous_count, start, count)
+                previous_start, previous_count = start, count
+            faces = [tuple(reversed(face)) for face in faces]
             _replace_surface(brim, vertices, faces, uv)
             brim.parent = head
         elif hair_style in {"cap", "cap_backwards"}:
