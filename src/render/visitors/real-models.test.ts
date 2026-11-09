@@ -44,9 +44,9 @@ async function loadModels(): Promise<VisitorSource[]> {
 }
 
 for (const [quality, expectedDrawCalls] of [
-  ['low', 88],
-  ['medium', 110],
-  ['high', 176],
+  ['low', 95],
+  ['medium', 117],
+  ['high', 190],
 ] as const) {
   const models = await loadModels();
   const parent = new Group();

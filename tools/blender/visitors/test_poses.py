@@ -49,7 +49,14 @@ def _test_faces(description):
             height = max(v.z for v in vertices) - min(v.z for v in vertices)
             _assert(height > width, "eye is not a tall oval")
             _assert(max(v.z for v in vertices) < radius * 0.02, "eye sits too high")
-            _assert(eye["zooTint"] == "skin", "eye does not share the head tint bucket")
+            # The old skin-bucket assertion contradicted untinted white catchlights.
+            _assert(eye["zooTint"] == "none" and eye.parent == head, "eye must stay untinted on the head pivot")
+            shine = bpy.data.objects[prefix + f"eye_shine_{side}_mesh"]
+            _assert(shine["zooTint"] == "none" and shine.parent == head, "catchlight must stay untinted")
+            for obj in (eye, shine):
+                _assert(all(polygon.use_smooth for polygon in obj.data.polygons), "facial sphere is flat shaded")
+            _assert(len({round(vertex.co.x, 6) for vertex in eye.data.vertices}) >= 10,
+                    "eye outline has too few segments")
             if person.get("glasses"):
                 rim = bpy.data.objects[prefix + f"glasses_{side}_mesh_rim"]
                 eye_uv = eye.data.uv_layers.active.data[0].uv
@@ -69,6 +76,8 @@ def _test_rest(description, root):
     for obj in root.children_recursive:
         if obj.type == "MESH":
             _assert(_bounds(obj)[0].z >= -EPSILON, f"{obj.name} penetrates the ground")
+            if not any(part in obj.name for part in ("hair", "camera", "stroller")):
+                _assert(all(polygon.use_smooth for polygon in obj.data.polygons), f"{obj.name} has flat organic surfaces")
     counts = _count_triangles_per_person(root, description["memberCount"])
     _assert(all(800 <= count <= 1500 for count in counts.values()), f"triangle budget: {counts}")
     for person in description["persons"]:

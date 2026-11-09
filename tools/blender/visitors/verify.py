@@ -10,11 +10,15 @@ import bpy
 from mathutils import Vector
 
 sys.path.insert(0, str(Path(__file__).parent))
-from build import build_group, merge_compatible_parts
+from build import build_group, merge_compatible_parts, validate_glb
 from palette import build_material, load_palette
 from parts import game_to_blender
+from human import _derive_proportions, STROLLER_HANDLE_FORWARD, STROLLER_HANDLE_HEIGHT_RATIO
 
 FLOOR_TOLERANCE = 0.004
+ARM_TOLERANCE = 0.003
+ARM_SLEEVE_RATIO = 0.34
+ARM_SURFACE_MARGIN = 1.25
 
 
 def select_clip(group, name, rest):
@@ -34,11 +38,84 @@ def minimum_height(obj):
     return min((obj.matrix_world @ vertex.co).z for vertex in obj.data.vertices)
 
 
+def verify_arm_lengths(description, meshes, clip):
+    """Bound both joint reach and actual skin geometry in the person's spine frame."""
+    for person in description["persons"]:
+        prefix = f"p{person['index']}_"
+        p = _derive_proportions(person)
+        spine = bpy.data.objects[prefix + "spine"]
+        inverse = spine.matrix_world.inverted()
+        reach = p["arm_len"]
+        if person.get("stroller"):
+            vertical = person["height"] * STROLLER_HANDLE_HEIGHT_RATIO - p["hip_height"] - p["torso"] * 0.65
+            reach = math.hypot(vertical, STROLLER_HANDLE_FORWARD)
+        elif person.get("shoulderChild") is not None:
+            reach = Vector((p["head_r"] * 0.65, p["head_r"] * 2, 0.10)).length
+        elif person.get("camera") and clip == "photo":
+            # The camera pose has a deliberately longer reach, derived from the
+            # face and grip proportions, never from animated scale or mesh bounds.
+            grip = p["limb_r"] * 1.4
+            target = Vector((p["shoulder_w"] - grip,
+                             p["head_r"] * 1.3 + 0.03,
+                             p["torso"] + p["neck"] - (p["torso"] * 0.65 - p["arm_len"] * ARM_SLEEVE_RATIO)))
+            reach = p["arm_len"] * ARM_SLEEVE_RATIO + target.length
+        shoulders = [game_to_blender([sign * p["shoulder_w"], p["torso"] * 0.65, 0]) for sign in (-1, 1)]
+        for side, shoulder in zip(("l", "r"), shoulders):
+            arm = bpy.data.objects[prefix + f"arm_{side}"]
+            hand = inverse @ arm.matrix_world @ game_to_blender(arm["zooHand"])
+            assert (hand - shoulder).length <= reach + ARM_TOLERANCE, f"{prefix}{side} arm reach exceeds proportions during {clip}"
+            if not arm.children:
+                # Supported arms share the spine frame, so the unused individual
+                # contact pivots must remain rigid relative to it in every clip.
+                assert (Vector(arm.rotation_euler)).length < ARM_TOLERANCE, f"supported arm rotates during {clip}"
+                assert all(abs(value - 1) < ARM_TOLERANCE for value in arm.scale), f"supported arm scales during {clip}"
+        limit = reach + p["limb_r"] * ARM_SURFACE_MARGIN + ARM_TOLERANCE
+        for obj in meshes:
+            if obj["zooPerson"] != person["index"] or obj["zooTint"] != "skin" or obj.parent.name == prefix + "head":
+                continue
+            for vertex in obj.data.vertices:
+                point = inverse @ obj.matrix_world @ vertex.co
+                assert min((point - shoulder).length for shoulder in shoulders) <= limit, f"{obj.name} arm geometry exceeds proportions during {clip}"
+
+
+def test_arm_guard(description, meshes, clip):
+    child = next((person for person in description["persons"] if person.get("posture") == "shoulders"), None)
+    if child is None:
+        return
+    prefix = f"p{child['index']}_"
+    p = _derive_proportions(child)
+    arm = bpy.data.objects[prefix + "arm_l"]
+    original = list(arm["zooHand"])
+    old_endpoint = [-p["head_r"] * 0.65, -p["torso"] * 0.65 - p["head_r"] * 0.65, p["head_r"] * 0.65]
+    arm["zooHand"] = [value * (1 - ARM_SLEEVE_RATIO) for value in old_endpoint]
+    try:
+        verify_arm_lengths(description, meshes, clip)
+    except AssertionError as error:
+        assert "arm reach exceeds" in str(error), str(error)
+    else:
+        raise AssertionError(f"arm guard accepted the old shoulder-child reach during {clip}")
+    finally:
+        arm["zooHand"] = original
+    mesh = next(obj for obj in meshes if obj["zooPerson"] == child["index"] and obj["zooTint"] == "skin" and obj.parent.name == prefix + "spine")
+    vertex = mesh.data.vertices[0]
+    original_vertex = vertex.co.copy()
+    vertex.co.z -= child["height"]
+    try:
+        verify_arm_lengths(description, meshes, clip)
+    except AssertionError as error:
+        assert "arm geometry exceeds" in str(error), str(error)
+    else:
+        raise AssertionError(f"arm guard accepted elongated geometry during {clip}")
+    finally:
+        vertex.co = original_vertex
+
+
 def verify(description, exported=False):
     bpy.ops.wm.read_factory_settings(use_empty=True)
     if exported:
         root = Path(__file__).resolve().parents[3]
         path = root / "assets/models/visitors" / f"{description['archetypeId']}.glb"
+        validate_glb(path, description)
         bpy.ops.import_scene.gltf(filepath=str(path))
         group = next(obj for obj in bpy.data.objects if obj.get("zooVisitor") is not None)
         bpy.context.scene.frame_set(0)
@@ -57,6 +134,15 @@ def verify(description, exported=False):
             obj = bpy.data.objects.get(name)
             assert obj is not None and obj in meshes, f"missing shadow caster {name}"
             assert obj["zooTint"] == tint and obj.parent.name == f"p{person['index']}_{pivot}", f"incorrect merge anchor {name}"
+        head = bpy.data.objects[f"p{person['index']}_head"]
+        faces = [obj for obj in meshes if obj.parent == head and obj["zooTint"] == "none"]
+        assert len(faces) == 1, "facial details must share exactly one untinted head bucket"
+        palette = load_palette()
+        face_uvs = {tuple(round(value, 5) for value in loop.uv) for loop in faces[0].data.uv_layers.active.data}
+        expected = {tuple(round(value, 5) for value in palette.uv(color)) for color in ("eye_black", "eye_shine", "nose_dark")}
+        assert face_uvs == expected, "facial bucket lost the eyes, white catchlights or mouth"
+        skin = bpy.data.objects[f"p{person['index']}_head_mesh"]
+        assert all((loop.uv - Vector(palette.uv("eye_shine"))).length < 0.0001 for loop in skin.data.uv_layers.active.data), "facial details remain in the skin bucket"
     standing = [person for person in description["persons"] if person.get("posture", "standing") == "standing"]
     for clip in ("walk", "stop", "look", "point", "photo", "sit"):
         end = select_clip(group, clip, rest)
@@ -66,6 +152,9 @@ def verify(description, exported=False):
             bpy.context.scene.frame_set(int(time), subframe=time % 1)
             for obj in meshes:
                 assert all(math.isfinite(value) for row in obj.matrix_world for value in row), f"invalid pose: {clip}"
+            verify_arm_lengths(description, meshes, clip)
+            if step == 0:
+                test_arm_guard(description, meshes, clip)
             for person in description["persons"]:
                 if person.get("posture") == "shoulders":
                     head = bpy.data.objects["p0_head"]
@@ -143,7 +232,7 @@ def verify(description, exported=False):
                     assert camera.parent.name == f"p{person['index']}_spine", "camera remains on an arm"
                     assert (camera.location - rest[camera.name].translation).length < 0.0001, f"camera leaves chest during {clip}"
     source = "GLB" if exported else "source"
-    print(f"[zoo-refuge] {description['archetypeId']} ({source}): six clips, merge, walk, sit, photo verified; floor minimum {lowest:.4f} m")
+    print(f"[zoo-refuge] {description['archetypeId']} ({source}): six clips, arm proportions, merge, walk, sit, photo verified; floor minimum {lowest:.4f} m")
 
 
 def main():

@@ -27,6 +27,7 @@ EXPECTED_CLIP_NAMES = {"walk", "stop", "look", "point", "photo", "sit"}
 ALLOWED_TINTS = {"skin", "hair", "shirt", "pants", "none"}
 TRIANGLE_BUDGET_MIN = 800
 TRIANGLE_BUDGET_MAX = 1500
+MIN_SMOOTH_TRIANGLE_SHARE = 0.8
 
 
 def parse_args():
@@ -193,11 +194,53 @@ def _count_accessor_triangles(gltf, accessor_index):
     return count // 3
 
 
+def _accessor_values(gltf, binary, index):
+    accessor = gltf["accessors"][index]
+    view = gltf["bufferViews"][accessor["bufferView"]]
+    components = {"SCALAR": 1, "VEC3": 3}[accessor["type"]]
+    code = {5121: "B", 5123: "H", 5125: "I", 5126: "f"}[accessor["componentType"]]
+    format_string = "<" + code * components
+    size = struct.calcsize(format_string)
+    offset = view.get("byteOffset", 0) + accessor.get("byteOffset", 0)
+    return [struct.unpack_from(format_string, binary, offset + row * view.get("byteStride", size))
+            for row in range(accessor["count"])]
+
+
+def validate_smooth_normals(path):
+    """Inspect the exported NORMAL streams, not just Blender's shading flags."""
+    data = path.read_bytes()
+    gltf = _read_glb_json(path)
+    json_length = struct.unpack_from("<I", data, 12)[0]
+    binary = data[28 + json_length:]
+    for node in gltf["nodes"]:
+        if "mesh" not in node:
+            continue
+        for primitive in gltf["meshes"][node["mesh"]]["primitives"]:
+            attributes = primitive["attributes"]
+            if "NORMAL" not in attributes:
+                raise ValueError(f"{node['name']}: missing exported normals")
+            normals = _accessor_values(gltf, binary, attributes["NORMAL"])
+            if len(normals) != gltf["accessors"][attributes["POSITION"]]["count"]:
+                raise ValueError(f"{node['name']}: normal/position count mismatch")
+            if any(abs(sum(value * value for value in normal) - 1) > 0.002 for normal in normals):
+                raise ValueError(f"{node['name']}: non-unit normals")
+            indices = [value[0] for value in _accessor_values(gltf, binary, primitive["indices"])]
+            flat_count = sum(len({normals[index] for index in indices[start:start + 3]}) == 1
+                             for start in range(0, len(indices), 3))
+            # Closed hat undersides and the tiny glasses bridge can have crisp caps.
+            if not any(hardware in node["name"] for hardware in ("camera", "stroller")):
+                if flat_count > len(indices) / 3 * (1 - MIN_SMOOTH_TRIANGLE_SHARE):
+                    raise ValueError(f"{node['name']}: mostly flat organic normals survived export")
+            if node["name"].endswith(("_head_mesh", "_body_mesh", "_arm_l_mesh", "_arm_r_mesh", "_leg_l_mesh", "_leg_r_mesh")) and flat_count:
+                raise ValueError(f"{node['name']}: flat triangle normals survived export")
+
+
 def validate_glb(path, description):
     """Fail loudly if the exported GLB does not match the visitor contract."""
     archetype_id = description["archetypeId"]
     member_count = description["memberCount"]
     gltf = _read_glb_json(path)
+    validate_smooth_normals(path)
 
     # Single shared material and texture.
     materials = gltf.get("materials", [])

@@ -2,6 +2,7 @@
 
 import argparse
 import math
+import re
 import sys
 from pathlib import Path
 
@@ -18,6 +19,9 @@ TINT_COLORS = {
     "shirt": (0xFF5555, 0x55AAFF, 0xFFDD44, 0x88CC88, 0xFF9900, 0xEEEEEE),
     "pants": (0x334455, 0x556677, 0x887766, 0x444444, 0x998877),
 }
+FACE_PEOPLE = (3, 1, 0, 0, 1)
+DARKEST_SKIN = 0x8D552A
+LIGHT_SKIN = 0xFFC8A8
 
 
 def linear_channel(value):
@@ -42,12 +46,28 @@ def tint_material(obj, color):
     links.new(multiply.outputs[0], base)
 
 
+def verify_game_colors():
+    source = (ROOT / "src/render/visitors/visual-seed.ts").read_text(encoding="utf-8")
+    for tint, colors in TINT_COLORS.items():
+        case = source.split(f"case '{tint}':", 1)[1].split("[", 1)[1].split("]", 1)[0]
+        game_colors = tuple(int(value.replace("_", ""), 16) for value in re.findall(r"0x[0-9a-f_]+", case))
+        assert colors == game_colors, f"preview {tint} palette differs from visual-seed.ts"
+
+
+def person_tint(archetype_index, person, tint):
+    # Explicit light/dark swatches make catchlight regressions visible in both previews.
+    if tint == "skin" and person == FACE_PEOPLE[archetype_index]:
+        return DARKEST_SKIN if archetype_index == 1 else LIGHT_SKIN
+    choices = TINT_COLORS[tint]
+    return choices[(archetype_index * 2 + person) % len(choices)]
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--faces", action="store_true")
     args = parser.parse_args(sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else [])
+    verify_game_colors()
     bpy.ops.wm.read_factory_settings(use_empty=True)
-    face_people = (3, 1, 0, 0, 1)
     for index, archetype in enumerate(ARCHETYPES):
         before = set(bpy.data.objects)
         bpy.ops.import_scene.gltf(filepath=str(ROOT / "assets/models/visitors" / f"{archetype}.glb"))
@@ -61,9 +81,7 @@ def main():
                 obj.animation_data.action = None
             if obj.type == "MESH" and obj.get("zooTint", "none") != "none":
                 tint = obj["zooTint"]
-                choices = TINT_COLORS[tint]
-                person = index * 2 + obj["zooPerson"]
-                tint_material(obj, choices[person % len(choices)])
+                tint_material(obj, person_tint(index, obj["zooPerson"], tint))
         # Imported glTF actions are assigned directly by Blender; evaluate only stop.
         for obj in objects:
             if obj.animation_data:
@@ -71,7 +89,7 @@ def main():
                 for track in obj.animation_data.nla_tracks:
                     track.mute = track != stop
         if args.faces:
-            person = face_people[index]
+            person = FACE_PEOPLE[index]
             for obj in objects:
                 if obj.type == "MESH" and obj["zooPerson"] != person:
                     obj.hide_render = True
