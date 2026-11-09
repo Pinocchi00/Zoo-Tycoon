@@ -185,34 +185,51 @@ def build_photo(pivots, person_index, rest, duration_s=2.0):
     head = _new_action(pivots["head"], base)
     camera = pivots["camera"]
     camera_action = _new_action(camera, base) if camera is not None else None
+    strap = pivots["camera_strap"]
+    strap_action = _new_action(strap, base) if strap is not None else None
+    hand_actions = {side: _new_action(pivots[f"hand_{side}"], base)
+                    for side in ("l", "r") if pivots[f"hand_{side}"] is not None}
 
-    for t, reach in (
-        (0.0, 0.0), (0.25, 0.85), (0.4, 1.0),
-        (0.6, 1.0), (0.75, 0.85), (1.0, 0.0),
-    ):
-        frame = round(end * t)
+    # Dense keys keep the rotating strap in contact with the translating camera.
+    for frame in range(end + 1):
+        t = frame / end
+        lift = min(t / 0.4, (1.0 - t) / 0.4, 1.0)
+        reach = (1.0 - math.cos(math.pi * lift)) * 0.5
         for side, sign in (("r", 1), ("l", -1)):
             arm = pivots[f"arm_{side}"]
             hand = arm["zooHand"]
             source = Vector((hand[0], -hand[2], hand[1]))
-            target = Vector((-arm.location.x + sign * 0.05,
-                             -pivots["head"]["zooHeadRadius"] * 1.3 - 0.03,
-                             (pivots["head"].location.z - arm.location.z) * 0.9))
+            grip = camera["zooGripWidth"] if camera is not None else 0.055
+            target = Vector((-arm.location.x + sign * grip,
+                              -pivots["head"]["zooHeadRadius"] * 1.3 - 0.03,
+                              pivots["head"].location.z - arm.location.z))
             rotation = source.rotation_difference(target).to_euler()
             _rot(arm, frame, tuple(value * reach for value in rotation))
-            stretch = 1.0 + (target.length / source.length - 1.0) * reach
-            _scale(arm, frame, (stretch, stretch, stretch))
-            if side == "r" and camera is not None:
-                rotation = arm.rotation_euler.to_quaternion().inverted().to_euler()
-                _rot(camera, frame, rotation)
-                _scale(camera, frame, (1.0 / stretch,) * 3)
-        _rot(pivots["head"], frame, (math.radians(10.0) * reach, 0.0, 0.0))
+            stretch = 1.0 + (target.length / source.length - 1.0) * reach if camera is not None else 1.0
+            _scale(arm, frame, (1.0, 1.0, stretch))
+            if side in hand_actions:
+                # The forearm extends longitudinally; the hand remains a rigid ball.
+                _scale(pivots[f"hand_{side}"], frame, (1.0, 1.0, 1.0 / stretch))
+        if camera is not None:
+            target = Vector((0.0, -pivots["head"]["zooHeadRadius"] * 1.3 - 0.03,
+                             pivots["head"].location.z))
+            origin = rest[camera.name]["location"]
+            _loc_offset(camera, frame, (target - origin) * reach, rest)
+            _rot(camera, frame, (0.0, 0.0, 0.0))
+            direction = camera.location - strap.location
+            rotation = Vector((0, 0, -1)).rotation_difference(direction).to_euler()
+            _rot(strap, frame, rotation)
+            _scale(strap, frame, (1.0, 1.0, direction.length / strap["zooStrapLength"]))
+        _rot(pivots["head"], frame, (0.0, 0.0, 0.0))
 
     _stash(pivots["arm_r"], arm_r, base)
     _stash(pivots["arm_l"], arm_l, base)
     _stash(pivots["head"], head, base)
     if camera is not None:
         _stash(camera, camera_action, base)
+        _stash(strap, strap_action, base)
+    for side, action in hand_actions.items():
+        _stash(pivots[f"hand_{side}"], action, base)
 
 
 def build_sit(pivots, person_index, rest, duration_s=1.0):

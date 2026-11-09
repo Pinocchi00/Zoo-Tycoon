@@ -119,12 +119,20 @@ def merge_compatible_parts(group_root):
     for objects in buckets.values():
         if len(objects) < 2:
             continue
-        anchor = next((obj for obj in objects if obj.name.endswith(("_head_mesh", "_body_mesh"))), objects[0])
+        person = objects[0]["zooPerson"]
+        protected_names = (f"p{person}_head_mesh", f"p{person}_body_mesh")
+        anchors = [obj for obj in objects if obj.name in protected_names]
+        if len(anchors) > 1:
+            raise ValueError("head and body must have distinct pivots")
+        anchor = anchors[0] if anchors else min(objects, key=lambda obj: obj.name)
+        merged_name = anchor.name
         bpy.ops.object.select_all(action="DESELECT")
         for obj in objects:
             obj.select_set(True)
         bpy.context.view_layer.objects.active = anchor
         bpy.ops.object.join()
+        anchor.name = merged_name
+        anchor.data.name = merged_name
         anchor.select_set(False)
 
 

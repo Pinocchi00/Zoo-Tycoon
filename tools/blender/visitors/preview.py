@@ -1,6 +1,8 @@
 """Render the exported visitor models in stop pose for the owner's review."""
 
+import argparse
 import math
+import sys
 from pathlib import Path
 
 import bpy
@@ -41,7 +43,11 @@ def tint_material(obj, color):
 
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--faces", action="store_true")
+    args = parser.parse_args(sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else [])
     bpy.ops.wm.read_factory_settings(use_empty=True)
+    face_people = (3, 1, 0, 0, 1)
     for index, archetype in enumerate(ARCHETYPES):
         before = set(bpy.data.objects)
         bpy.ops.import_scene.gltf(filepath=str(ROOT / "assets/models/visitors" / f"{archetype}.glb"))
@@ -64,6 +70,24 @@ def main():
                 stop = next((track for track in obj.animation_data.nla_tracks if "stop" in track.name), None)
                 for track in obj.animation_data.nla_tracks:
                     track.mute = track != stop
+        if args.faces:
+            person = face_people[index]
+            for obj in objects:
+                if obj.type == "MESH" and obj["zooPerson"] != person:
+                    obj.hide_render = True
+                if obj.type == "MESH" and "_leg_" in obj.name:
+                    obj.hide_render = True
+            group.rotation_euler.z = 0.0
+            group.location = (0.0, 0.0, 0.0)
+            scene = bpy.context.scene
+            scene.frame_set(15)
+            bpy.context.view_layer.update()
+            head = next(obj for obj in objects if obj.name.split(".")[0] == f"p{person}_head")
+            factor = 0.48 / head["zooHeadRadius"]
+            group.scale = (factor,) * 3
+            bpy.context.view_layer.update()
+            center = head.matrix_world.translation.copy()
+            group.location = Vector(((index - 2) * 1.10, 0.0, 1.25)) - center
 
     scene = bpy.context.scene
     scene.frame_set(15)
@@ -73,11 +97,11 @@ def main():
     material = bpy.data.materials.new("preview_neutral")
     material.diffuse_color = (0.85, 0.85, 0.83, 1.0)
     floor.data.materials.append(material)
-    bpy.ops.object.camera_add(location=(0.0, -12.0, 5.5))
+    bpy.ops.object.camera_add(location=(0.0, -12.0, 1.2 if args.faces else 5.5))
     camera = bpy.context.object
-    camera.rotation_euler = (Vector((0.0, 0.0, 0.8)) - camera.location).to_track_quat("-Z", "Y").to_euler()
+    camera.rotation_euler = (Vector((0.0, 0.0, 1.2 if args.faces else 0.8)) - camera.location).to_track_quat("-Z", "Y").to_euler()
     camera.data.type = "ORTHO"
-    camera.data.ortho_scale = 12.8
+    camera.data.ortho_scale = 5.7 if args.faces else 12.8
     scene.camera = camera
     for location, energy, size in (((-3, -5, 8), 700, 8), ((6, 1, 6), 400, 7)):
         bpy.ops.object.light_add(type="AREA", location=location)
@@ -96,7 +120,7 @@ def main():
     scene.render.resolution_y = 900
     scene.render.resolution_percentage = 100
     scene.view_settings.view_transform = "Standard"
-    scene.render.filepath = str(ROOT / "docs/visitors-preview.png")
+    scene.render.filepath = str(ROOT / "docs" / ("visitors-preview-faces.png" if args.faces else "visitors-preview.png"))
     bpy.ops.render.render(write_still=True)
 
 

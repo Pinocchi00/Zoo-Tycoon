@@ -5,6 +5,7 @@ unchanged; the visitor pipeline only sets custom properties and parents afterwar
 """
 
 from pathlib import Path
+import math
 
 import bpy
 from mathutils import Vector
@@ -117,7 +118,7 @@ def _limb(
 def _derive_proportions(params):
     h = params["height"]
     w = params.get("width", 1.0)
-    head_r = h / (2.0 * params.get("heads", 2.05)) * params.get("headScale", 1.0)
+    head_r = h / (2.0 * params.get("heads", 2.0)) * params.get("headScale", 1.0)
     leg = h * params.get("legRatio", 0.20)
     hip = leg + h * 0.10
     head_center = h - head_r * 0.94
@@ -141,11 +142,42 @@ def _round_limb(name, start, end, radius, color, person, tint, palette, material
     center = [(a + b) * 0.5 for a, b in zip(start, end)]
     direction = game_to_blender(end) - game_to_blender(start)
     obj = _blob(name, center, [radius, max(direction.length * 0.65, radius), radius],
-                color, person, tint, palette, material, segments=8, rings=6)
+                color, person, tint, palette, material, segments=6, rings=4)
     rotation = Vector((0.0, 0.0, -1.0)).rotation_difference(direction.normalized())
     origin = game_to_blender(center)
     for vertex in obj.data.vertices:
         vertex.co = origin + rotation @ (vertex.co - origin)
+    return obj
+
+
+def _chin_crescent(prefix, radius, hair, index, palette, material):
+    obj = _blob(f"{prefix}beard", [0, 0, 0], [1, 1, 1], hair, index, "hair", palette, material)
+    uv = obj.data.uv_layers.active.data[0].uv.copy()
+    vertices = []
+    faces = []
+    arc_steps, tube_steps = 12, 4
+    for step in range(arc_steps + 1):
+        angle = math.pi * (1.18 + step / arc_steps * 0.64)
+        taper = 0.025 + 0.065 * math.sin(math.pi * step / arc_steps)
+        for tube in range(tube_steps):
+            cross = 2 * math.pi * tube / tube_steps
+            vertices.append(game_to_blender([
+                radius * (0.65 + taper * math.cos(cross)) * math.cos(angle),
+                radius * (0.78 + taper * math.cos(cross)) * math.sin(angle),
+                radius * (0.64 + taper * math.sin(cross)),
+            ]))
+    for step in range(arc_steps):
+        for tube in range(tube_steps):
+            a = step * tube_steps + tube
+            b = step * tube_steps + (tube + 1) % tube_steps
+            faces.append((a, b, b + tube_steps, a + tube_steps))
+    obj.data.clear_geometry()
+    obj.data.from_pydata(vertices, [], faces)
+    layer = obj.data.uv_layers.new()
+    for loop in layer.data:
+        loop.uv = uv
+    for polygon in obj.data.polygons:
+        polygon.use_smooth = True
     return obj
 
 
@@ -169,7 +201,7 @@ def build_person(index, params, palette, material, parent_object):
     spine = _empty(f"{prefix}spine", [0.0, 0.0, 0.0], hips)
     head = _empty(f"{prefix}head", [0.0, p["torso"] + p["neck"], 0.0], spine)
     head["zooHeadRadius"] = p["head_r"]
-    shoulder_seat = _empty(f"{prefix}shoulder_seat", [0.0, p["torso"] + p["neck"] - p["head_r"] * 0.15, -p["head_r"] * 1.5], spine)
+    shoulder_seat = _empty(f"{prefix}shoulder_seat", [0.0, p["torso"] + p["neck"] + p["head_r"] * 1.5, 0.0], spine)
     arm_l = _empty(f"{prefix}arm_l", [-p["shoulder_w"], p["torso"] * 0.65, 0.0], spine)
     arm_r = _empty(f"{prefix}arm_r", [p["shoulder_w"], p["torso"] * 0.65, 0.0], spine)
     leg_l = _empty(f"{prefix}leg_l", [-p["hip_w"], 0.0, 0.0], hips)
@@ -185,8 +217,8 @@ def build_person(index, params, palette, material, parent_object):
         "shirt",
         palette,
         material,
-        segments=12,
-        rings=8,
+        segments=8,
+        rings=6,
         exponent=1.0,
     )
     body.parent = spine
@@ -205,12 +237,14 @@ def build_person(index, params, palette, material, parent_object):
         "skin",
         palette,
         material,
-        segments=12,
+        segments=24,
         rings=10,
     )
     head_mesh.parent = head
     for vertex in head_mesh.data.vertices:
         vertex.co.x *= 1.0 - 0.09 * vertex.co.z / p["head_r"]
+        # Flatten only the front, preserving the round back and cheek silhouette.
+        vertex.co.y = max(vertex.co.y, -p["head_r"] * 0.77)
 
     hair_style = params.get("hair", "short")
     if hair_style != "none":
@@ -226,7 +260,7 @@ def build_person(index, params, palette, material, parent_object):
                 palette,
                 material,
                 segments=8,
-                rings=6,
+                rings=5,
                 exponent=0.5,
             )
         else:
@@ -240,7 +274,7 @@ def build_person(index, params, palette, material, parent_object):
                 palette,
                 material,
                 segments=8,
-                rings=6,
+                rings=5,
                 exponent=1.0,
             )
         hair_mesh.parent = head
@@ -250,7 +284,7 @@ def build_person(index, params, palette, material, parent_object):
                 "bun": [(0.0, 0.90, -0.65, 0.45)],
                 "ponytail": [(0.0, 0.20, -1.05, 0.48)],
                 "curls": [(-0.7, 0.65, 0.05, 0.42), (0.0, 0.90, 0.05, 0.42), (0.7, 0.65, 0.05, 0.42)],
-                "beard": [(0.0, -0.55, 0.70, 0.55)],
+                "beard": [],
             }
             for n, (x, y, z, radius) in enumerate(styles[hair_style]):
                 detail = _blob(f"{prefix}hair_detail_{n}",
@@ -266,86 +300,123 @@ def build_person(index, params, palette, material, parent_object):
             )
             brim.parent = head
 
-    eye_y = -p["head_r"] * 0.20
-    eye_z = p["head_r"] * (1.02 if params.get("glasses") else 0.88)
-    eye_r = p["head_r"] * 0.19
+        if hair_style == "beard":
+            detail = _chin_crescent(prefix, p["head_r"], hair, index, palette, material)
+            detail.parent = head
+
+    eye_y = -p["head_r"] * 0.24
+    eye_z = p["head_r"] * 0.785
+    eye_r = p["head_r"] * 0.205
     for side, sx in (("l", -1), ("r", 1)):
         eye = _blob(
             f"{prefix}eye_{side}",
-            [sx * p["head_r"] * 0.40, eye_y, eye_z],
-            [eye_r, eye_r, eye_r * 0.55],
+            [sx * p["head_r"] * 0.43, eye_y, eye_z],
+            [eye_r, eye_r * 1.22, eye_r * 0.24],
             "eye_black",
             index,
             "none",
             palette,
             material,
-            segments=6,
-            rings=4,
+            segments=12,
+            rings=5,
         )
         eye.parent = head
         shine = _blob(
             f"{prefix}eye_shine_{side}",
-            [sx * p["head_r"] * 0.40 - eye_r * 0.25,
-             eye_y + eye_r * 0.35, eye_z + eye_r * 0.50],
-            [eye_r * 0.28] * 3, "eye_shine", index, "none",
-            palette, material, segments=6, rings=4,
+            [sx * p["head_r"] * 0.43 - eye_r * 0.30,
+             eye_y + eye_r * 0.43, eye_z + eye_r * 0.23],
+            [eye_r * 0.23, eye_r * 0.23, eye_r * 0.07], "eye_shine", index, "none",
+            palette, material, segments=6, rings=3,
         )
         shine.parent = head
 
     nose = _blob(
         f"{prefix}mouth",
-        [0.0, -p["head_r"] * 0.49, p["head_r"] * 0.86],
-        [p["head_r"] * 0.065, p["head_r"] * 0.035, p["head_r"] * 0.035],
+        [0.0, -p["head_r"] * 0.53, p["head_r"] * 0.78],
+        [p["head_r"] * 0.045, p["head_r"] * 0.022, p["head_r"] * 0.018],
         "nose_dark",
         index,
         "none",
         palette,
         material,
-        segments=6,
-        rings=4,
+        segments=4,
+        rings=3,
     )
     nose.parent = head
 
     if params.get("glasses", False):
         for side, sign in (("l", -1), ("r", 1)):
-            for layer, color, size, forward in (
-                ("rim", "eye_black", 1.0, -0.10),
-                ("lens", "otter_throat", 0.82, -0.03),
-            ):
-                glasses = _blob(
-                    f"{prefix}glasses_{side}_{layer}",
-                    [sign * p["head_r"] * 0.40, eye_y, eye_z + p["head_r"] * forward],
-                    [p["head_r"] * 0.30 * size, p["head_r"] * 0.28 * size, p["head_r"] * 0.025],
-                    color, index, "none", palette, material, segments=6, rings=4,
-                )
-                glasses.parent = head
+            bpy.ops.mesh.primitive_torus_add(
+                major_segments=12, minor_segments=3,
+                major_radius=p["head_r"] * 0.30, minor_radius=p["head_r"] * 0.018,
+            )
+            glasses = bpy.context.object
+            # Reuse a palette-mapped primitive's metadata and UVs for the open rim.
+            template = _blob(f"{prefix}glasses_{side}", [0, 0, 0], [1, 1, 1],
+                             "eye_black", index, "none", palette, material)
+            uv = template.data.uv_layers.active.data[0].uv.copy()
+            glasses.name = template.name + "_rim"
+            glasses.data.materials.append(material)
+            for layer in list(glasses.data.uv_layers):
+                glasses.data.uv_layers.remove(layer)
+            layer = glasses.data.uv_layers.new()
+            for loop in layer.data:
+                loop.uv = uv
+            for polygon in glasses.data.polygons:
+                polygon.use_smooth = True
+            bpy.data.objects.remove(template, do_unlink=True)
+            glasses["zooPerson"] = index
+            glasses["zooTint"] = "none"
+            glasses.rotation_euler.x = math.pi / 2
+            glasses.location = game_to_blender([sign * p["head_r"] * 0.43, eye_y, eye_z + p["head_r"] * 0.06])
+            glasses.parent = head
+        bridge = _limb(f"{prefix}glasses_bridge",
+                       [-p["head_r"] * 0.13, eye_y, eye_z + p["head_r"] * 0.06],
+                       [p["head_r"] * 0.13, eye_y, eye_z + p["head_r"] * 0.06],
+                       p["head_r"] * 0.018, p["head_r"] * 0.018,
+                       "eye_black", index, "none", palette, material, segments=4)
+        bridge.parent = head
 
     # Arms and legs.
+    hand_pivots = {}
     for side, sx, pivot in (("l", -1, arm_l), ("r", 1, arm_r)):
         arm_end = [0.0, -p["arm_len"], 0.0]
         if params.get("stroller", False):
             arm_end = [0.0, params["height"] * STROLLER_HANDLE_HEIGHT_RATIO
                        - p["hip_height"] - p["torso"] * 0.65, STROLLER_HANDLE_FORWARD]
         elif params.get("shoulderChild") is not None:
-            arm_end = [sx * 0.04, p["head_r"] * 0.7, -p["head_r"] * 1.05]
+            arm_end = [sx * p["head_r"] * 0.65, p["head_r"] * 2.0, 0.10]
+        elif posture == "shoulders":
+            arm_end = [sx * p["head_r"] * 0.65, -p["torso"] * 0.65 - p["head_r"] * 0.65, p["head_r"] * 0.65]
         elif seated:
             arm_end = [0.0, -p["arm_len"] * 0.65, p["arm_len"] * 0.35]
+        sleeve_end = [value * 0.34 for value in arm_end]
+        sleeve_start = [pivot.location.x, pivot.location.z, -pivot.location.y]
+        sleeve = _round_limb(f"{prefix}sleeve_{side}", sleeve_start,
+                            [a + b for a, b in zip(sleeve_start, sleeve_end)],
+                            p["limb_r"] * 1.08, shirt, index, "shirt", palette, material)
+        sleeve.parent = spine
+        pivot.location += game_to_blender(sleeve_end)
+        arm_end = [a - b for a, b in zip(arm_end, sleeve_end)]
         arm = _round_limb(f"{prefix}arm_{side}", [0.0, 0.0, 0.0], arm_end,
                           p["limb_r"], skin, index, "skin", palette, material)
         arm.parent = pivot
-        hand = _blob(f"{prefix}hand_{side}", arm_end, [p["limb_r"]] * 3,
+        hand_pivot = _empty(f"{prefix}hand_{side}", arm_end, pivot) if params.get("camera") else None
+        hand_pivots[f"hand_{side}"] = hand_pivot
+        hand = _blob(f"{prefix}hand_{side}", [0, 0, 0] if hand_pivot else arm_end, [p["limb_r"]] * 3,
                      skin, index, "skin", palette, material, segments=6, rings=4)
-        hand.parent = pivot
+        hand.parent = hand_pivot if hand_pivot else pivot
         pivot["zooHand"] = arm_end
 
     for side, sx, pivot in (("l", -1, leg_l), ("r", 1, leg_r)):
         foot = [0.0, -p["leg_len"], 0.0]
         knee = None
         if seated:
-            splay = p["head_r"] * 1.1 if posture == "shoulders" else p["leg_len"] * 0.18
+            splay = p["head_r"] * 1.6 if posture == "shoulders" else p["leg_len"] * 0.18
             forward = max(p["leg_len"] * 0.5, 0.11)
             knee = [sx * splay, -p["leg_len"] * 0.08, forward]
-            foot = [sx * splay, -p["leg_len"] * 0.46, forward + p["leg_len"] * 0.05]
+            drop = 1.4 if posture == "shoulders" else 0.46
+            foot = [sx * splay, -p["leg_len"] * drop, forward + p["leg_len"] * 0.05]
             pivot["zooKnee"] = knee
         pivot["zooFoot"] = foot
         leg_end = knee if knee is not None else foot
@@ -374,29 +445,47 @@ def build_person(index, params, palette, material, parent_object):
         )
         shoe.parent = pivot
 
+    # Dark facial texels stay dark when multiplied by skin; the bright texel
+    # becomes a warm catchlight. Sharing the head bucket pays for rigid hands.
+    for obj in head.children:
+        if obj.type == "MESH" and obj.get("zooTint") == "none":
+            obj["zooTint"] = "skin"
+
     camera = None
+    strap_pivot = None
     if params.get("camera", False):
-        hand = arm_r["zooHand"]
-        camera = _empty(f"{prefix}camera", hand, arm_r)
+        camera = _empty(f"{prefix}camera", [0.0, p["torso"] * 0.32, p["body_d"] * 1.15], spine)
+        camera["zooGripWidth"] = p["limb_r"] * 1.4
         camera_body = _blob(
             f"{prefix}camera",
-            [0.0, 0.0, p["limb_r"] * 0.45],
-            [p["limb_r"], p["limb_r"] * 0.65, p["limb_r"] * 0.55],
+            [0.0, 0.0, 0.0],
+            [p["limb_r"] * 1.15, p["limb_r"] * 0.75, p["limb_r"] * 0.50],
             "eye_black",
             index,
             "none",
             palette,
             material,
             segments=8,
-            rings=6,
+            rings=4,
             exponent=0.5,
         )
         camera_body.parent = camera
         lens = _blob(f"{prefix}camera_lens",
-                     [0.0, 0.0, p["limb_r"] * 1.1],
+                      [0.0, 0.0, p["limb_r"] * 0.64],
                      [p["limb_r"] * 0.45, p["limb_r"] * 0.45, p["limb_r"] * 0.35],
                      "otter_throat", index, "none", palette, material, segments=6, rings=4)
         lens.parent = camera
+        neck = [0.0, p["torso"] * 0.90, p["body_d"] * 0.70]
+        strap_pivot = _empty(f"{prefix}camera_strap", neck, spine)
+        strap_vector = camera.location - strap_pivot.location
+        strap_pivot["zooStrapLength"] = strap_vector.length
+        strap_pivot.rotation_euler = Vector((0, 0, -1)).rotation_difference(strap_vector).to_euler()
+        for side, sign in (("l", -1), ("r", 1)):
+            strap = _limb(f"{prefix}camera_strap_{side}",
+                          [sign * p["limb_r"] * 0.85, 0.0, 0.0],
+                          [sign * p["limb_r"] * 0.85, -strap_vector.length, 0.0],
+                          0.009, 0.009, "nose_dark", index, "none", palette, material, segments=4)
+            strap.parent = strap_pivot
 
     return {
         "root": root,
@@ -409,6 +498,8 @@ def build_person(index, params, palette, material, parent_object):
         "leg_l": leg_l,
         "leg_r": leg_r,
         "camera": camera,
+        "camera_strap": strap_pivot,
+        **hand_pivots,
     }
 
 

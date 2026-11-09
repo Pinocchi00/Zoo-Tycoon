@@ -37,6 +37,34 @@ def _bounds(obj):
     )
 
 
+def _test_faces(description):
+    for person in description["persons"]:
+        prefix = f"p{person['index']}_"
+        head = bpy.data.objects[prefix + "head"]
+        radius = head["zooHeadRadius"]
+        for side in ("l", "r"):
+            eye = bpy.data.objects[prefix + f"eye_{side}_mesh"]
+            vertices = [vertex.co for vertex in eye.data.vertices]
+            width = max(v.x for v in vertices) - min(v.x for v in vertices)
+            height = max(v.z for v in vertices) - min(v.z for v in vertices)
+            _assert(height > width, "eye is not a tall oval")
+            _assert(max(v.z for v in vertices) < radius * 0.02, "eye sits too high")
+            _assert(eye["zooTint"] == "skin", "eye does not share the head tint bucket")
+            if person.get("glasses"):
+                rim = bpy.data.objects[prefix + f"glasses_{side}_mesh_rim"]
+                eye_uv = eye.data.uv_layers.active.data[0].uv
+                _assert(all((loop.uv - eye_uv).length < EPSILON
+                            for loop in rim.data.uv_layers.active.data),
+                        "rim does not use the dark eye texel")
+                _assert(not any("lens" in obj.name for obj in head.children), "glasses contain a solid lens")
+        if person.get("hair") == "beard":
+            beard = bpy.data.objects[prefix + "beard_mesh"]
+            _assert(beard["zooTint"] == "hair", "beard does not follow hair tint")
+            _assert(max(vertex.co.z for vertex in beard.data.vertices
+                        if abs(vertex.co.x) < radius * 0.20) < -radius * 0.60,
+                    "beard hides the mouth or eyes")
+
+
 def _test_rest(description, root):
     for obj in root.children_recursive:
         if obj.type == "MESH":
@@ -73,14 +101,36 @@ def _test_rest(description, root):
                 _assert(person_root.parent.name == expected_parent, "child is not carried on shoulders")
                 head = bpy.data.objects["p0_head_mesh"]
                 body = bpy.data.objects[f"p{idx}_body_mesh"]
-                _assert(_bounds(body)[0].y > _bounds(head)[1].y,
-                        "child torso intersects the carrier's head")
+                _assert(_bounds(body)[0].z > _bounds(head)[1].z,
+                         "child torso intersects the carrier's head")
+                child_head = bpy.data.objects[f"p{idx}_head_mesh"]
+                _assert(_bounds(child_head)[0].z > _bounds(head)[1].z,
+                        "carrier hides the child's face")
+                gap = _bounds(body)[0].z - _bounds(head)[1].z
+                _assert(gap < 0.12, "child floats above the carrier")
+                head_center = bpy.data.objects["p0_head"].matrix_world.translation
+                for side, sign in (("l", -1), ("r", 1)):
+                    leg = bpy.data.objects[f"p{idx}_leg_{side}"]
+                    foot = leg.matrix_world @ game_to_blender(leg["zooFoot"])
+                    _assert(sign * (foot.x - head_center.x) > 0.35,
+                            "child's legs do not straddle the head")
+                    _assert(foot.z < _bounds(head)[1].z + 0.04,
+                            "child's feet do not hang beside the head")
         if person.get("camera", False):
-            arm = bpy.data.objects[f"p{idx}_arm_r"]
-            hand = arm.matrix_world @ game_to_blender(arm["zooHand"])
-            low, high = _bounds(bpy.data.objects[f"p{idx}_camera_mesh"])
-            _assert(all(low[axis] - EPSILON <= hand[axis] <= high[axis] + EPSILON
-                        for axis in range(3)), "camera floats away from the hand")
+            camera = bpy.data.objects[f"p{idx}_camera"]
+            _assert(camera.parent.name == f"p{idx}_spine", "camera is attached to a limb")
+            _assert(camera.location.y < 0 and abs(camera.location.x) < EPSILON,
+                    "camera is not centered on the chest")
+            for side in ("l", "r"):
+                strap = bpy.data.objects[f"p{idx}_camera_strap_{side}_mesh"]
+                _assert(strap.parent.parent == camera.parent, "strap does not follow the chest")
+        for side in ("l", "r"):
+            sleeve = bpy.data.objects[f"p{idx}_sleeve_{side}_mesh"]
+            arm = bpy.data.objects[f"p{idx}_arm_{side}_mesh"]
+            hand = bpy.data.objects[f"p{idx}_hand_{side}_mesh"]
+            _assert(sleeve["zooTint"] == "shirt" and sleeve.parent.name == f"p{idx}_spine",
+                    "sleeve has wrong tint or pivot")
+            _assert(arm["zooTint"] == hand["zooTint"] == "skin", "forearm or hand is not skin")
         if person.get("hair") == "sunhat":
             brim = bpy.data.objects[f"p{idx}_hat_brim_mesh"]
             head = bpy.data.objects[f"p{idx}_head_mesh"]
@@ -136,6 +186,7 @@ def main():
         root = build_group(description, palette, build_material(palette))
         bpy.context.view_layer.update()
         _test_rest(description, root)
+        _test_faces(description)
         _test_clips(description, root)
     print("[zoo-refuge] visitor pose regression checks passed")
 
